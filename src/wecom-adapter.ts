@@ -163,8 +163,15 @@ export async function startBot() {
         });
 
         for await (const [message, metadata] of stream) {
-          const msg = message as BaseMessage;
+          const msg = message as any;
           lastMessages.push(msg);
+
+          // 核心优化：如果 AI 消息包含工具调用，说明是中间思考过程，不发给用户
+          if (msg._getType() === "ai" && msg.tool_calls && msg.tool_calls.length > 0) {
+            console.log(`[Stream] Detected intermediate tool call for ${body.msgid}, skipping preamble.`);
+            fullContent = ""; // 清空缓冲区，移除之前的思考文本（如 "我来为您查询..."）
+            continue;
+          }
 
           if (msg._getType() === "ai" && msg.content) {
             const delta = msg.content.toString();

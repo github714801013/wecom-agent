@@ -1,0 +1,17 @@
+services:
+  wecom-agent:
+    image: wecom-agent:latest
+    container_name: wecom-agent
+    restart: always
+    environment:
+      - WECOM_BOT_ID=${WECOM_BOT_ID}
+      - WECOM_BOT_SECRET=${WECOM_BOT_SECRET}
+      - WECOM_WS_URL=${WECOM_WS_URL}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - MINIMAX_BASE_URL=${MINIMAX_BASE_URL}
+      - MCP_REMOTE_URL=${MCP_REMOTE_URL}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

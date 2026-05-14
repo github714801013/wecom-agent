@@ -10,5 +10,7 @@ export async function getGitNexusTools() {
     { capabilities: {} }
   );
   await client.connect(transport);
-  return await loadMcpTools("gitnexus", client);
+  const tools = await loadMcpTools("gitnexus", client);
+  console.log(`Successfully loaded ${tools.length} tools from GitNexus MCP.`);
+  return tools;
 }

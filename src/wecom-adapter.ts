@@ -57,59 +57,61 @@ export async function startBot() {
     wsUrl: config.WECOM_WS_URL, 
   });
 
+  // 用于消息去重的简单缓存（在多实例部署时建议改用 Redis）
+  const processedMsgs = new Set<string>();
+  const MAX_CACHE_SIZE = 1000;
+
   // 监听所有消息类型
   bot.on("message", async (frame) => {
     const { body } = frame;
-    if (!body) return;
+    if (!body || !body.msgid) return;
     
+    // 1. 消息去重，防止企业微信重试导致重复处理
+    if (processedMsgs.has(body.msgid)) {
+      console.log(`[Deduplication] Message ${body.msgid} already processed, skipping.`);
+      return;
+    }
+    processedMsgs.add(body.msgid);
+    
+    // 维持缓存大小
+    if (processedMsgs.size > MAX_CACHE_SIZE) {
+      const first = processedMsgs.values().next().value;
+      if (first) processedMsgs.delete(first);
+    }
+
     const parsedContent = parseWeComMessage(body);
     const chatId = body.chatid || body.from?.userid;
 
     if (!chatId) return;
 
     try {
-      const streamId = generateReqId('stream');
-      let firstFrame = true;
-      let lastContent = "";
+      // 2. 使用消息自身的 msgid 作为 streamId 和 task_id，确保并行时的唯一性
+      const streamId = body.msgid;
 
-      const stream = await agent.stream({
-        messages: [new HumanMessage({ content: parsedContent as any })],
+      // 发送初始进度卡片
+      await bot.replyStreamWithCard(frame, streamId, "AI 正在思考中...", false, {
+        templateCard: {
+          card_type: 'text_notice',
+          main_title: { title: '任务处理中', desc: 'AI 助手正在分析您的请求...' },
+          task_id: `task_${body.msgid}`, // 确保卡片任务 ID 唯一
+        }
       });
 
-      for await (const chunk of stream) {
-        // Handle LangChain agent stream chunks
-        // Chunks from createAgent typically contain 'messages' or node updates
-        const anyChunk = chunk as any;
-        const messages = anyChunk.messages || 
-                         (Object.values(anyChunk)[0] as any)?.messages;
-        
-        if (!messages || !Array.isArray(messages) || messages.length === 0) continue;
-        
-        const msg = messages[messages.length - 1];
-        if (!msg || !msg.content) continue;
-        
-        const fullContent = msg.content.toString();
-        if (fullContent === lastContent) continue;
-        lastContent = fullContent;
+      const response: any = await agent.invoke({
+        messages: [new HumanMessage({ content: parsedContent as any })],
+      });
+      
+      const lastMsg = response.messages[response.messages.length - 1];
+      if (!lastMsg) return;
+      
+      const replyContent = lastMsg.content.toString();
 
-        if (firstFrame) {
-          await bot.replyStreamWithCard(frame, streamId, "AI 正在思考中...", false, {
-            templateCard: {
-              card_type: 'text_notice',
-              main_title: { title: '任务处理中', desc: 'AI 助手正在分析您的请求...' },
-              task_id: `task_${Date.now()}`,
-            }
-          });
-          firstFrame = false;
-        } else {
-          await bot.replyStream(frame, streamId, fullContent, false);
-        }
-      }
-
-      // Final frame to close the stream
-      await bot.replyStream(frame, streamId, lastContent || "处理完成", true);
+      // 发送最终结果并结束流
+      await bot.replyStream(frame, streamId, replyContent, true);
     } catch (error) {
-      console.error("Error processing message:", error);
+      console.error(`Error processing message ${body.msgid}:`, error);
+      // 处理失败时，可以考虑从已处理集合中移除，以便重试（根据业务需求决定）
+      // processedMsgs.delete(body.msgid);
     }
   });
 

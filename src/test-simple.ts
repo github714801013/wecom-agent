@@ -8,13 +8,12 @@ async function testSimple() {
   console.log(`Sending query: "${query}"`);
   
   try {
-    const response = await agent.invoke({
+    const response: any = await agent.invoke({
       messages: [new HumanMessage(query)],
     });
     
     console.log("\n--- Agent Response ---");
-    const messages = response.messages as BaseMessage[];
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = response.messages[response.messages.length - 1];
     if (lastMsg) {
       console.log(lastMsg.content);
     } else {

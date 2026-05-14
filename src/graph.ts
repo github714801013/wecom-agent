@@ -1,6 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { createAgent } from "langchain";
-import { getGitNexusTools } from "./mcp-client.js";
+import { getAllMcpTools } from "./mcp-client.js";
 import { config } from "./config.js";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -15,7 +15,7 @@ export async function initializeAgent() {
     temperature: 0,
   });
 
-  const tools = await getGitNexusTools();
+  const tools = await getAllMcpTools();
   
   // Load system prompt from MD file
   let systemPrompt = "";
@@ -28,6 +28,7 @@ export async function initializeAgent() {
   }
   
   // createAgent is the new recommended API in LangChain JS v1
+  // It returns a CompiledStateGraph or Runnable that natively supports .stream(), .invoke(), etc.
   return createAgent({
     model: model,
     tools,

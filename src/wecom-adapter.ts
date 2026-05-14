@@ -21,7 +21,7 @@ export function parseWeComMessage(body: any): string | { type: string; text?: st
     case MessageType.Image:
       // 如果模型支持 Vision，可以传递图片 URL
       mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一张图片]` });
-      mainItems.push({ type: "image_url", image_url: body.image.url });
+      mainItems.push({ type: "image_url", image_url: { url: body.image.url } });
       break;
 
     case MessageType.Voice:
@@ -46,7 +46,7 @@ export function parseWeComMessage(body: any): string | { type: string; text?: st
       const items = body.mixed?.msg_item || [];
       items.forEach((item: any) => {
         if (item.msgtype === "text") mainItems.push({ type: "text", text: item.text?.content });
-        else if (item.msgtype === "image") mainItems.push({ type: "image_url", image_url: item.image?.url });
+        else if (item.msgtype === "image") mainItems.push({ type: "image_url", image_url: { url: item.image?.url } });
       });
       break;
 
@@ -62,12 +62,12 @@ export function parseWeComMessage(body: any): string | { type: string; text?: st
     if (qType === "text") {
       quoteItems.push({ type: "text", text: body.quote.text?.content });
     } else if (qType === "image") {
-      quoteItems.push({ type: "image_url", image_url: body.quote.image?.url });
+      quoteItems.push({ type: "image_url", image_url: { url: body.quote.image?.url } });
     } else if (qType === "mixed") {
       const qMixedItems = body.quote.mixed?.msg_item || [];
       qMixedItems.forEach((item: any) => {
         if (item.msgtype === "text") quoteItems.push({ type: "text", text: item.text?.content });
-        else if (item.msgtype === "image") quoteItems.push({ type: "image_url", image_url: item.image?.url });
+        else if (item.msgtype === "image") quoteItems.push({ type: "image_url", image_url: { url: item.image?.url } });
       });
     } else {
       quoteItems.push({ type: "text", text: `[${qType} 消息]` });

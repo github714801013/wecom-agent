@@ -9,7 +9,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "devDependencies": {
     "@types/dotenv": "^6.1.1",
     "@types/express": "^5.0.6",
@@ -25,9 +25,11 @@
     "@langchain/mcp-adapters": "^1.1.3",
     "@langchain/openai": "^1.4.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@wecom/aibot-node-sdk": "^1.0.7",
     "@wecom/wecom-openclaw-plugin": "^2026.5.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "openclaw-wecom": "^0.1.39",
     "zod": "^4.4.3"
   }
 }

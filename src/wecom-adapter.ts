@@ -3,11 +3,12 @@ import { initializeAgent, getBaseModel, getSystemPrompt, getModelContextWindow }
 import { config } from "./config.js";
 import { HumanMessage, BaseMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { sessionManager } from "./session-manager.js";
+import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 
 /**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
  */
-export function parseWeComMessage(body: any): string | { type: string; text?: string; image_url?: { url: string } | string }[] {
+export async function parseWeComMessage(body: any, bot: WSClient): Promise<string | { type: string; text?: string; image_url?: { url: string } | string }[]> {
   const msgType = body.msgtype;
   const fromUser = body.from?.userid || "unknown";
   
@@ -19,9 +20,9 @@ export function parseWeComMessage(body: any): string | { type: string; text?: st
       break;
 
     case MessageType.Image:
-      // 如果模型支持 Vision，可以传递图片 URL
       mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一张图片]` });
-      mainItems.push({ type: "image_url", image_url: { url: body.image.url } });
+      const b64Image = await fetchImageAsBase64(bot, body.image?.url, body.image?.aeskey);
+      mainItems.push({ type: "image_url", image_url: { url: b64Image } });
       break;
 
     case MessageType.Voice:
@@ -30,11 +31,14 @@ export function parseWeComMessage(body: any): string | { type: string; text?: st
       break;
 
     case MessageType.Video:
-      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一个视频] (链接: ${body.video?.url})` });
+      const videoPath = await downloadMediaFile(bot, body.video?.url, body.video?.aeskey, '.mp4');
+      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一个视频] (链接: ${body.video?.url})，已下载至本地临时路径: ${videoPath}` });
       break;
 
     case MessageType.File:
-      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一个文件] 名称: ${body.file?.filename || "未知"}, 大小: ${body.file?.size || "未知"}` });
+      const fileExt = body.file?.fileext ? `.${body.file.fileext}` : '.bin';
+      const filePath = await downloadMediaFile(bot, body.file?.url, body.file?.aeskey, fileExt);
+      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一个文件] 名称: ${body.file?.filename || "未知"}, 大小: ${body.file?.size || "未知"}，已下载至本地临时路径: ${filePath}` });
       break;
 
     case "location":
@@ -44,10 +48,14 @@ export function parseWeComMessage(body: any): string | { type: string; text?: st
     case "mixed":
       // 图文混排
       const items = body.mixed?.msg_item || [];
-      items.forEach((item: any) => {
-        if (item.msgtype === "text") mainItems.push({ type: "text", text: item.text?.content });
-        else if (item.msgtype === "image") mainItems.push({ type: "image_url", image_url: { url: item.image?.url } });
-      });
+      for (const item of items) {
+        if (item.msgtype === "text") {
+          mainItems.push({ type: "text", text: item.text?.content });
+        } else if (item.msgtype === "image") {
+          const b64 = await fetchImageAsBase64(bot, item.image?.url, item.image?.aeskey);
+          mainItems.push({ type: "image_url", image_url: { url: b64 } });
+        }
+      }
       break;
 
     default:
@@ -62,13 +70,18 @@ export function parseWeComMessage(body: any): string | { type: string; text?: st
     if (qType === "text") {
       quoteItems.push({ type: "text", text: body.quote.text?.content });
     } else if (qType === "image") {
-      quoteItems.push({ type: "image_url", image_url: { url: body.quote.image?.url } });
+      const b64QuoteImg = await fetchImageAsBase64(bot, body.quote.image?.url, body.quote.image?.aeskey);
+      quoteItems.push({ type: "image_url", image_url: { url: b64QuoteImg } });
     } else if (qType === "mixed") {
       const qMixedItems = body.quote.mixed?.msg_item || [];
-      qMixedItems.forEach((item: any) => {
-        if (item.msgtype === "text") quoteItems.push({ type: "text", text: item.text?.content });
-        else if (item.msgtype === "image") quoteItems.push({ type: "image_url", image_url: { url: item.image?.url } });
-      });
+      for (const item of qMixedItems) {
+        if (item.msgtype === "text") {
+          quoteItems.push({ type: "text", text: item.text?.content });
+        } else if (item.msgtype === "image") {
+          const b64QuoteMixedImg = await fetchImageAsBase64(bot, item.image?.url, item.image?.aeskey);
+          quoteItems.push({ type: "image_url", image_url: { url: b64QuoteMixedImg } });
+        }
+      }
     } else {
       quoteItems.push({ type: "text", text: `[${qType} 消息]` });
     }
@@ -131,7 +144,7 @@ export async function startBot() {
       if (first) processedMsgs.delete(first);
     }
 
-    const parsedContent = parseWeComMessage(body);
+    const parsedContent = await parseWeComMessage(body, bot);
     const chatType = body.chattype; // 'single' 或 'group'
     const fromUser = body.from?.userid;
     const chatId = body.chatid;

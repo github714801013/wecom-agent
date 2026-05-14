@@ -15,11 +15,13 @@ const mockBody = {
   }
 };
 
-const result = parseWeComMessage(mockBody);
+const mockBot = { downloadFile: async () => ({ buffer: Buffer.from('') }) } as any;
+
+const result = await parseWeComMessage(mockBody, mockBot);
 console.log("Parsed content:", JSON.stringify(result, null, 2));
 
 const hasText = JSON.stringify(result).includes("美团国补订单");
-const hasImage = JSON.stringify(result).includes("https://ww-aibot-img.example.com/test.jpg");
+const hasImage = JSON.stringify(result).includes("data:image/jpeg;base64,");
 
 if (hasText && hasImage) {
   console.log("Test PASSED");

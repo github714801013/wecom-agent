@@ -11,7 +11,9 @@ const mockBody = {
   }
 };
 
-const result = parseWeComMessage(mockBody);
+const mockBot = { downloadFile: async () => ({ buffer: Buffer.from('') }) } as any;
+
+const result = await parseWeComMessage(mockBody, mockBot);
 console.log("Parsed content:", result);
 
 const expectedQuoteContent = "样机折旧逻辑";

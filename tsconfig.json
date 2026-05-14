@@ -11,10 +11,6 @@
     "moduleResolution": "NodeNext",
     "target": "es2020",
     "types": ["node"],
-    // For nodejs:
-    // "lib": ["esnext"],
-    // "types": ["node"],
-    // and npm install -D @types/node
 
     // Other Outputs
     "sourceMap": true,
@@ -24,14 +20,6 @@
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-
-    // Style Options
-    // "noImplicitReturns": true,
-    // "noImplicitOverride": true,
-    // "noUnusedLocals": true,
-    // "noUnusedParameters": true,
-    // "noFallthroughCasesInSwitch": true,
-    // "noPropertyAccessFromIndexSignature": true,
 
     // Recommended Options
     "strict": true,
@@ -44,5 +32,13 @@
 
     "esModuleInterop": true,
     "allowJs": true,
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test-vision.js",
+    "test-vision.js.map",
+    "test-vision.d.ts",
+    "test-vision.d.ts.map"
+  ]
 }

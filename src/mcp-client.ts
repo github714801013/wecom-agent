@@ -2,8 +2,31 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { loadMcpTools } from "@langchain/mcp-adapters";
 import { config } from "./config.js";
+import { sessionManager } from "./session-manager.js";
+
+/**
+ * 本地工具：清理会话历史
+ */
+const clearHistoryTool = {
+  name: "clear_conversation_history",
+  description: "清理当前的对话历史记录/记忆。当用户明确要求“忘记之前的对话”、“重置聊天”、“清理记忆”或开始全新话题时使用。",
+  input_schema: {
+    type: "object",
+    properties: {}
+  },
+  call: async (args: any, context: any) => {
+    // Note: sessionKey needs to be passed in context or args
+    const sessionKey = args.sessionKey || (context as any)?.sessionKey;
+    if (sessionKey) {
+      sessionManager.clearSession(sessionKey);
+      return "会话记录已成功清理。";
+    }
+    return "错误：未能找到有效的会话标识，清理失败。";
+  }
+};
 
 export async function getAllMcpTools() {
+// ... rest of code unchanged ...
   const allTools = [];
 
   for (const server of config.mcpServers) {
@@ -62,7 +85,7 @@ export async function getAllMcpTools() {
  */
 export async function getClaudeTools(): Promise<any[]> {
   const mcpTools = await getAllMcpTools();
-  return mcpTools.map(t => ({
+  const claudeTools = mcpTools.map(t => ({
     name: t.name,
     description: t.description,
     input_schema: (t as any).schema || (t as any).input_schema,
@@ -76,4 +99,7 @@ export async function getClaudeTools(): Promise<any[]> {
       }
     }
   }));
+
+  // 合并本地工具
+  return [...claudeTools, clearHistoryTool];
 }

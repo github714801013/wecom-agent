@@ -1,29 +1,33 @@
-import { initializeAgent } from "../graph.js";
-import { HumanMessage, BaseMessage } from "@langchain/core/messages";
+import { runClaudeAgent } from "../graph.js";
 
 async function testQuery() {
   console.log("Initializing agent and connecting to remote MCP...");
-  const agent = await initializeAgent();
   
   const query = "售后统计逻辑查询";
   console.log(`Sending query: "${query}"`);
   
   try {
-    const response: any = await agent.invoke({
-      messages: [new HumanMessage(query)],
-    }, {
-      recursionLimit: 50, // 增加递归限制，防止复杂任务中断
-    });
+    let fullResponse = "";
+    const sessionKey = "test-session-query";
+    
+    const stream = runClaudeAgent(query, sessionKey);
     
     console.log("\n--- Agent Response ---");
-    const messages = response.messages as BaseMessage[];
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg) {
-      console.log(lastMsg.content);
-    } else {
-      console.log("No response returned.");
+    for await (const chunk of stream) {
+      if (chunk.type === "text") {
+        fullResponse += chunk.content;
+        process.stdout.write(chunk.content);
+      } else if (chunk.type === "call") {
+        console.log(`\n[Tool Call] ${chunk.call.name}(${JSON.stringify(chunk.call.input)})`);
+      } else if (chunk.type === "result") {
+        console.log(`\n[Tool Result] ${chunk.result.content}`);
+      }
     }
-    console.log("----------------------\n");
+    console.log("\n----------------------\n");
+    
+    if (!fullResponse) {
+      console.log("No text response returned.");
+    }
   } catch (error) {
     console.error("Test failed with error:", error);
   } finally {

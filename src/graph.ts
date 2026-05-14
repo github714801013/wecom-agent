@@ -60,7 +60,7 @@ export async function* runClaudeAgent(prompt: string, sessionKey: string) {
   const baseURL = config.LLM_BASE_URL.replace(/\/v1\/?$/, '');
 
   const options = {
-    model: "claude-sonnet-4-6", // Model supported by proxy
+    model: config.LLM_MODEL_NAME, // Use model from environment
     systemPrompt: systemPrompt,
     tools: tools,
     permissionMode: "acceptEdits" as const,

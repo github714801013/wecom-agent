@@ -22,6 +22,8 @@
 | `WECOM_WS_URL` | 企业微信 WebSocket 服务地址 | `wss://openws.work.weixin.qq.com` |
 | `LLM_API_KEY` | 大模型 API Key | `sk-...` |
 | `LLM_BASE_URL` | 大模型接口 Base URL | `https://api.example.com/v1` |
+| `LLM_MODEL_NAME` | 大模型模型名称 | `MiniMax-M2.5` |
+| `LLM_RECURSION_LIMIT` | 递归限制（控制 ReAct 深度） | `25` |
 | `MCP_SERVERS` | MCP 服务器配置（JSON 数组字符串） | `[{"name":"db","url":"http://ip:1248/sse"}]` |
 
 ## 快速开始

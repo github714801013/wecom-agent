@@ -13,6 +13,8 @@ const envSchema = z.object({
   WECOM_WS_URL: z.string(),
   LLM_API_KEY: z.string(),
   LLM_BASE_URL: z.string(),
+  LLM_MODEL_NAME: z.string().default("MiniMax-M2.5"),
+  LLM_RECURSION_LIMIT: z.coerce.number().default(25),
   MCP_REMOTE_URL: z.string(),
   MCP_SERVERS: z.string().optional(),
 });

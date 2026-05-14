@@ -7,9 +7,12 @@ services:
       - WECOM_BOT_ID=${WECOM_BOT_ID}
       - WECOM_BOT_SECRET=${WECOM_BOT_SECRET}
       - WECOM_WS_URL=${WECOM_WS_URL}
-      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
-      - MINIMAX_BASE_URL=${MINIMAX_BASE_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME}
+      - LLM_RECURSION_LIMIT=${LLM_RECURSION_LIMIT}
       - MCP_REMOTE_URL=${MCP_REMOTE_URL}
+      - MCP_SERVERS=${MCP_SERVERS}
     logging:
       driver: "json-file"
       options:

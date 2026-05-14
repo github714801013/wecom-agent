@@ -97,21 +97,47 @@ export async function startBot() {
         }
       });
 
-      const response: any = await agent.invoke({
-        messages: [new HumanMessage({ content: parsedContent as any })],
-      });
-      
-      const lastMsg = response.messages[response.messages.length - 1];
-      if (!lastMsg) return;
-      
-      const replyContent = lastMsg.content.toString();
+      let fullContent = "";
+      try {
+        // 使用 stream 替代 invoke，以便在异常时（如递归超限）仍能获取中间结果
+        const stream = await agent.stream({
+          messages: [new HumanMessage({ content: parsedContent as any })],
+        }, {
+          recursionLimit: config.LLM_RECURSION_LIMIT
+        });
 
-      // 发送最终结果并结束流
-      await bot.replyStream(frame, streamId, replyContent, true);
+        for await (const chunk of stream) {
+          const anyChunk = chunk as any;
+          const messages = anyChunk.messages || 
+                           (Object.values(anyChunk)[0] as any)?.messages;
+          
+          if (messages && Array.isArray(messages) && messages.length > 0) {
+            const lastMsg = messages[messages.length - 1];
+            if (lastMsg && lastMsg.content) {
+              fullContent = lastMsg.content.toString();
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error(`Agent execution error for ${body.msgid}:`, err);
+        
+        // 特别处理递归超限错误
+        if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
+          const fallbackPrefix = fullContent 
+            ? `[注意：由于问题较为复杂，以下是初步分析结果]\n\n${fullContent}`
+            : "抱歉，由于该问题涉及的逻辑过于复杂，我暂时无法给出完整回答。";
+          
+          fullContent = `${fallbackPrefix}\n\n💡 建议：您可以尝试提供更详细的信息（例如更明确的查询条件、具体的 ID 或减少一次性查询的范围），以便我为您提供更精准的帮助。`;
+        } else {
+          // 其他类型的错误
+          fullContent = fullContent || "抱歉，处理您的请求时遇到了意外错误，请稍后重试。";
+        }
+      }
+
+      // 发送最终结果（可能是完整结果，也可能是带建议的中间结果）并结束流
+      await bot.replyStream(frame, streamId, fullContent || "未获取到有效回复", true);
     } catch (error) {
-      console.error(`Error processing message ${body.msgid}:`, error);
-      // 处理失败时，可以考虑从已处理集合中移除，以便重试（根据业务需求决定）
-      // processedMsgs.delete(body.msgid);
+      console.error(`Outer error processing message ${body.msgid}:`, error);
     }
   });
 

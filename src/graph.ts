@@ -56,14 +56,22 @@ export async function* runClaudeAgent(prompt: string, sessionKey: string) {
   const tools = await getClaudeTools();
   const systemPrompt = await getSystemPrompt();
 
+  // Strip /v1 to let Claude SDK append it
+  const baseURL = config.LLM_BASE_URL.replace(/\/v1\/?$/, '');
+
   const options = {
-    model: config.LLM_MODEL_NAME,
-    apiKey: config.LLM_API_KEY,
-    baseURL: config.LLM_BASE_URL,
+    model: "claude-sonnet-4-6", // Model supported by proxy
     systemPrompt: systemPrompt,
     tools: tools,
     permissionMode: "acceptEdits" as const,
-    settingSources: [process.cwd()], // Auto loads .claude/skills/
+    settingSources: ['project' as const], // Auto loads .claude/skills/
+    env: {
+      "ANTHROPIC_AUTH_TOKEN": config.LLM_API_KEY || "",
+      "ANTHROPIC_API_KEY": "",
+      "ANTHROPIC_BASE_URL": baseURL,
+      "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+      "DISABLE_PROMPT_CACHING": "1",
+    }
   };
 
   yield* query({

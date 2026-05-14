@@ -12,15 +12,27 @@ async function testSimple() {
     
     console.log("\n--- Agent Response ---");
     for await (const chunk of stream) {
-      if (chunk.type === "text") {
-        fullResponse += chunk.content;
-        process.stdout.write(chunk.content);
-      } else if (chunk.type === "call") {
-        console.log(`\n[Tool Call] ${chunk.call.name}(${JSON.stringify(chunk.call.input)})`);
-      } else if (chunk.type === "result") {
-        console.log(`\n[Tool Result] ${chunk.result.content}`);
+      if (chunk.type === "stream_event") {
+        const event = chunk.event;
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          fullResponse += event.delta.text;
+          process.stdout.write(event.delta.text);
+        }
+      } else if (chunk.type === "assistant") {
+        // Final summary or non-streamed content
+        if (chunk.message.content) {
+            const textContent = chunk.message.content.find((c: any) => c.type === 'text');
+            if (textContent && !fullResponse) {
+                fullResponse = (textContent as any).text;
+                console.log("[Assistant Message]:", (textContent as any).text);
+            }
+        }
+      } else {
+          // Log other chunks to debug
+          console.log("[Chunk type]:", chunk.type, (chunk as any).subtype || "");
       }
     }
+
     console.log("\n----------------------\n");
     
     if (!fullResponse) {

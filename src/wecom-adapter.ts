@@ -203,27 +203,46 @@ export async function startBot() {
       const UPDATE_INTERVAL = 2000;
 
       // Construct history string from LangChain messages for Claude SDK context
-      // Note: In a real Claude SDK session, we'd use the SDK's own history management
-      // but here we bridge with existing sessionManager for now.
       const historyStr = session.messages.map(m => {
         const type = (m as any)._getType?.() || m.constructor.name;
-        if (type === 'human') return `User: ${m.content}`;
-        if (type === 'ai') return `Assistant: ${m.content}`;
+        if (type === 'human' || type === 'HumanMessage') return `User: ${m.content}`;
+        if (type === 'ai' || type === 'AIMessage') return `Assistant: ${m.content}`;
         return "";
       }).filter(Boolean).join("\n");
 
-      const prompt = historyStr ? `${historyStr}\nUser: ${parsedContent}` : (typeof parsedContent === 'string' ? parsedContent : JSON.stringify(parsedContent));
+      // Handle multi-modal or text prompt
+      let prompt: any = parsedContent;
+      if (historyStr) {
+        if (typeof parsedContent === 'string') {
+          prompt = `${historyStr}\nUser: ${parsedContent}`;
+        } else if (Array.isArray(parsedContent)) {
+          // If multi-modal, we prepend history as text blocks if possible, 
+          // or just append to the prompt.
+          prompt = [{ type: 'text', text: historyStr }, ...parsedContent];
+        }
+      }
 
       try {
         const stream = runClaudeAgent(prompt, sessionKey);
 
         for await (const chunk of stream) {
-          if (chunk.type === "text") {
-            fullContent += chunk.content;
+          if (chunk.type === "stream_event") {
+            const event = chunk.event;
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              fullContent += event.delta.text;
 
-            if (Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-              await bot.replyStream(frame, streamId, fullContent, false);
-              lastUpdateTime = Date.now();
+              if (Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
+                await bot.replyStream(frame, streamId, fullContent, false);
+                lastUpdateTime = Date.now();
+              }
+            }
+          } else if (chunk.type === "assistant" && !fullContent) {
+            // Fallback for non-streaming models or final message if stream was missed
+            if (chunk.message.content) {
+                const textContent = chunk.message.content.find((c: any) => c.type === 'text');
+                if (textContent) {
+                  fullContent = (textContent as any).text;
+                }
             }
           }
         }

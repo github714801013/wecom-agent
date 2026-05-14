@@ -56,3 +56,24 @@ export async function getAllMcpTools() {
 
   return filteredTools;
 }
+
+/**
+ * 将 LangChain 格式的 MCP 工具转换为 Claude Agent SDK 所需的格式
+ */
+export async function getClaudeTools(): Promise<any[]> {
+  const mcpTools = await getAllMcpTools();
+  return mcpTools.map(t => ({
+    name: t.name,
+    description: t.description,
+    input_schema: (t as any).schema || (t as any).input_schema,
+    call: async (args: any) => {
+      try {
+        const result = await (t as any).invoke(args);
+        // Claude SDK 要求工具返回字符串
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      } catch (error: any) {
+        return `Error executing tool ${t.name}: ${error.message}`;
+      }
+    }
+  }));
+}

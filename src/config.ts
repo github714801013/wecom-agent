@@ -18,6 +18,7 @@ const envSchema = z.object({
   LLM_CONTEXT_WINDOW: z.coerce.number().default(0),
   MCP_REMOTE_URL: z.string(),
   MCP_SERVERS: z.string().optional(),
+  ALLOWED_TOOLS: z.string().optional(),
 });
 
 const parsedEnv = envSchema.parse(process.env);
@@ -38,4 +39,7 @@ try {
 export const config = {
   ...parsedEnv,
   mcpServers: z.array(mcpServerSchema).parse(mcpServers),
+  allowedTools: parsedEnv.ALLOWED_TOOLS
+    ? parsedEnv.ALLOWED_TOOLS.split(",").map((t) => t.trim())
+    : null,
 };

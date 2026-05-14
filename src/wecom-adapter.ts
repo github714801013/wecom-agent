@@ -1,7 +1,16 @@
 import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
 import { initializeAgent, getBaseModel, getSystemPrompt, getModelContextWindow } from "./graph.js";
 import { config } from "./config.js";
-import { HumanMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, BaseMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
+
+interface Session {
+  messages: BaseMessage[];
+  lastActivity: number;
+}
+
+const sessions = new Map<string, Session>();
+const SESSION_EXPIRATION_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_MESSAGES_PER_SESSION = 20;
 
 /**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
@@ -135,6 +144,44 @@ export async function startBot() {
 
     if (!chatId) return;
 
+    // --- Session Handling Start ---
+    const now = Date.now();
+    let session = sessions.get(chatId);
+
+    // Handle /new command
+    const isNewCommand = typeof parsedContent === 'string' && parsedContent.trim().toLowerCase() === '/new';
+    
+    if (isNewCommand) {
+      sessions.delete(chatId);
+      processedMsgs.add(body.msgid); // Mark this message as processed
+      await bot.replyStreamWithCard(frame, body.msgid, "已为您清理所有会话记录，我们可以开始新的对话了。", true, {
+        templateCard: {
+          card_type: 'text_notice',
+          main_title: { title: '会话已重置', desc: '历史记录已清理' },
+          task_id: `task_${body.msgid}`,
+        }
+      });
+      return;
+    }
+
+    if (session) {
+      // Expiration check
+      if (now - session.lastActivity > SESSION_EXPIRATION_MS) {
+        console.log(`[Session] Session for ${chatId} expired, clearing history.`);
+        session.messages = [];
+      }
+      // Count check (keep last 20)
+      if (session.messages.length > MAX_MESSAGES_PER_SESSION) {
+        session.messages = session.messages.slice(-MAX_MESSAGES_PER_SESSION);
+      }
+    } else {
+      session = { messages: [], lastActivity: now };
+      sessions.set(chatId, session);
+    }
+    
+    session.lastActivity = now;
+    // --- Session Handling End ---
+
     try {
       // 2. 使用消息自身的 msgid 作为 streamId 和 task_id，确保并行时的唯一性
       const streamId = body.msgid;
@@ -153,10 +200,12 @@ export async function startBot() {
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 2000; // 每 2 秒更新一次，避免触发企业微信频率限制
 
+      const humanMsg = new HumanMessage({ content: parsedContent as any });
+
       try {
         // 使用 streamMode: "messages" 获取流式更新
         const stream = await agent.stream({
-          messages: [new HumanMessage({ content: parsedContent as any })],
+          messages: [...session!.messages, humanMsg],
         }, {
           recursionLimit: config.LLM_RECURSION_LIMIT,
           streamMode: "messages",
@@ -182,6 +231,16 @@ export async function startBot() {
               await bot.replyStream(frame, streamId, fullContent, false);
               lastUpdateTime = Date.now();
             }
+          }
+        }
+
+        // --- Update Session History ---
+        if (fullContent && session) {
+          session.messages.push(humanMsg);
+          session.messages.push(new AIMessage(fullContent));
+          // Keep only the last MAX_MESSAGES_PER_SESSION messages
+          if (session.messages.length > MAX_MESSAGES_PER_SESSION) {
+            session.messages = session.messages.slice(-MAX_MESSAGES_PER_SESSION);
           }
         }
       } catch (err: any) {

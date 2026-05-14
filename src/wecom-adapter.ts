@@ -1,51 +1,102 @@
 import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
-import { initializeAgent } from "./graph.js";
+import { initializeAgent, getBaseModel, getSystemPrompt } from "./graph.js";
 import { config } from "./config.js";
-import { HumanMessage } from "@langchain/core/messages";
+import { HumanMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 
 /**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
  */
-function parseWeComMessage(body: any): string | { type: string; text?: string; image_url?: string }[] {
+export function parseWeComMessage(body: any): string | { type: string; text?: string; image_url?: { url: string } | string }[] {
   const msgType = body.msgtype;
   const fromUser = body.from?.userid || "unknown";
-
+  
+  // 1. 解析主消息内容
+  let mainItems: any[] = [];
   switch (msgType) {
     case MessageType.Text:
-      return body.text.content;
+      mainItems.push({ type: "text", text: body.text.content });
+      break;
 
     case MessageType.Image:
       // 如果模型支持 Vision，可以传递图片 URL
-      // 注意：WeCom 图片 URL 有效期 5 分钟，且需要带上 aeskey 进行处理（SDK 已封装下载）
-      return [
-        { type: "text", text: `[用户 ${fromUser} 发送了一张图片]` },
-        { type: "image_url", image_url: body.image.url }
-      ];
+      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一张图片]` });
+      mainItems.push({ type: "image_url", image_url: body.image.url });
+      break;
 
     case MessageType.Voice:
       const recognition = body.voice?.recognition || "";
-      return `[用户 ${fromUser} 发送了一段语音] ${recognition ? `(识别结果: ${recognition})` : "(未识别到文字)"}`;
+      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一段语音] ${recognition ? `(识别结果: ${recognition})` : "(未识别到文字)"}` });
+      break;
 
     case MessageType.Video:
-      return `[用户 ${fromUser} 发送了一个视频] (链接: ${body.video?.url})`;
+      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一个视频] (链接: ${body.video?.url})` });
+      break;
 
     case MessageType.File:
-      return `[用户 ${fromUser} 发送了一个文件] 名称: ${body.file?.filename || "未知"}, 大小: ${body.file?.size || "未知"}`;
+      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一个文件] 名称: ${body.file?.filename || "未知"}, 大小: ${body.file?.size || "未知"}` });
+      break;
 
     case "location":
-      return `[用户 ${fromUser} 发送了一个位置] 地址: ${body.location?.address}, 经纬度: ${body.location?.lat},${body.location?.lng}`;
+      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一个位置] 地址: ${body.location?.address}, 经纬度: ${body.location?.lat},${body.location?.lng}` });
+      break;
 
     case "mixed":
       // 图文混排
       const items = body.mixed?.msg_item || [];
-      return items.map((item: any) => {
-        if (item.msgtype === "text") return item.text?.content;
-        if (item.msgtype === "image") return `[图片: ${item.image?.url}]`;
-        return `[${item.msgtype}]`;
-      }).join("\n");
+      items.forEach((item: any) => {
+        if (item.msgtype === "text") mainItems.push({ type: "text", text: item.text?.content });
+        else if (item.msgtype === "image") mainItems.push({ type: "image_url", image_url: item.image?.url });
+      });
+      break;
 
     default:
-      return `[用户 ${fromUser} 发送了未处理的消息类型: ${msgType}]`;
+      mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了未处理的消息类型: ${msgType}]` });
+      break;
+  }
+
+  // 2. 解析引用内容 (Quote)
+  let quoteItems: any[] = [];
+  if (body.quote) {
+    const qType = body.quote.msgtype;
+    if (qType === "text") {
+      quoteItems.push({ type: "text", text: body.quote.text?.content });
+    } else if (qType === "image") {
+      quoteItems.push({ type: "image_url", image_url: body.quote.image?.url });
+    } else if (qType === "mixed") {
+      const qMixedItems = body.quote.mixed?.msg_item || [];
+      qMixedItems.forEach((item: any) => {
+        if (item.msgtype === "text") quoteItems.push({ type: "text", text: item.text?.content });
+        else if (item.msgtype === "image") quoteItems.push({ type: "image_url", image_url: item.image?.url });
+      });
+    } else {
+      quoteItems.push({ type: "text", text: `[${qType} 消息]` });
+    }
+  }
+
+  // 3. 组合与合并
+  const hasImage = mainItems.some(i => i.type === "image_url") || quoteItems.some(i => i.type === "image_url");
+
+  if (!hasImage) {
+    // 纯文本模式：返回字符串
+    const mainText = mainItems.map(i => i.text).filter(Boolean).join("\n");
+    if (quoteItems.length > 0) {
+      const quoteText = quoteItems.map(i => i.text).filter(Boolean).join(" ");
+      return `[引用内容: ${quoteText}]\n\n${mainText}`;
+    }
+    return mainText;
+  } else {
+    // 多模态模式：返回数组
+    const result: any[] = [];
+    if (quoteItems.length > 0) {
+      result.push({ type: "text", text: "[引用内容]:" });
+      quoteItems.forEach(item => {
+        if (item.type === "text") result.push({ type: "text", text: `> ${item.text}` });
+        else result.push(item);
+      });
+      result.push({ type: "text", text: "\n" });
+    }
+    result.push(...mainItems);
+    return result;
   }
 }
 
@@ -98,6 +149,8 @@ export async function startBot() {
       });
 
       let fullContent = "";
+      let lastMessages: BaseMessage[] = [];
+
       try {
         // 使用 stream 替代 invoke，以便在异常时（如递归超限）仍能获取中间结果
         const stream = await agent.stream({
@@ -110,8 +163,9 @@ export async function startBot() {
           const anyChunk = chunk as any;
           const messages = anyChunk.messages || 
                            (Object.values(anyChunk)[0] as any)?.messages;
-          
+
           if (messages && Array.isArray(messages) && messages.length > 0) {
+            lastMessages = messages;
             const lastMsg = messages[messages.length - 1];
             if (lastMsg && lastMsg.content) {
               fullContent = lastMsg.content.toString();
@@ -120,14 +174,29 @@ export async function startBot() {
         }
       } catch (err: any) {
         console.error(`Agent execution error for ${body.msgid}:`, err);
-        
+
         // 特别处理递归超限错误
         if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
-          const fallbackPrefix = fullContent 
-            ? `[注意：由于问题较为复杂，以下是初步分析结果]\n\n${fullContent}`
-            : "抱歉，由于该问题涉及的逻辑过于复杂，我暂时无法给出完整回答。";
-          
-          fullContent = `${fallbackPrefix}\n\n💡 建议：您可以尝试提供更详细的信息（例如更明确的查询条件、具体的 ID 或减少一次性查询的范围），以便我为您提供更精准的帮助。`;
+          try {
+            console.log(`[Recovery] Attempting to synthesize partial results for ${body.msgid}...`);
+            const baseModel = await getBaseModel();
+            const systemPrompt = await getSystemPrompt();
+
+            // 构造恢复提示词：将之前的中间历史发给不带 tools 的大模型进行总结和指引
+            const recoveryMessages = [
+              new SystemMessage(`${systemPrompt}\n\n注意：当前任务由于逻辑过于复杂已达到执行上限。请根据下述已有的中间查询结果，尽可能为用户提供一个阶段性的总结回答。如果信息不足，请明确告知已查到的部分，并指引用户提供哪些更详细的信息（如特定 ID、时间范围或明确的查询条件）以继续。`),
+              ...lastMessages
+            ];
+
+            const recoveryResponse = await baseModel.invoke(recoveryMessages);
+            fullContent = recoveryResponse.content.toString();
+          } catch (recoveryErr) {
+            console.error(`Recovery invocation failed for ${body.msgid}:`, recoveryErr);
+            const fallbackPrefix = fullContent 
+              ? `[注意：由于问题较为复杂，以下是初步分析结果]\n\n${fullContent}`
+              : "抱歉，由于该问题涉及的逻辑过于复杂，我暂时无法给出完整回答。";
+            fullContent = `${fallbackPrefix}\n\n💡 建议：您可以尝试提供更详细的信息（例如更明确的查询条件、具体的 ID 或减少一次性查询的范围），以便我为您提供更精准的帮助。`;
+          }
         } else {
           // 其他类型的错误
           fullContent = fullContent || "抱歉，处理您的请求时遇到了意外错误，请稍后重试。";

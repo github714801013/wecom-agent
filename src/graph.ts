@@ -8,9 +8,9 @@ import { join } from "path";
 export async function initializeAgent() {
   const model = new ChatOpenAI({
     modelName: "MiniMax-M2.5",
-    apiKey: config.MINIMAX_API_KEY,
+    apiKey: config.LLM_API_KEY,
     configuration: {
-      baseURL: config.MINIMAX_BASE_URL,
+      baseURL: config.LLM_BASE_URL,
     },
     temperature: 0,
   });

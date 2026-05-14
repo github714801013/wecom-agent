@@ -11,8 +11,8 @@ const envSchema = z.object({
   WECOM_BOT_ID: z.string(),
   WECOM_BOT_SECRET: z.string(),
   WECOM_WS_URL: z.string(),
-  MINIMAX_API_KEY: z.string(),
-  MINIMAX_BASE_URL: z.string(),
+  LLM_API_KEY: z.string(),
+  LLM_BASE_URL: z.string(),
   MCP_REMOTE_URL: z.string(),
   MCP_SERVERS: z.string().optional(),
 });

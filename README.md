@@ -19,9 +19,9 @@
 | :--- | :--- | :--- |
 | `WECOM_BOT_ID` | 企业微信机器人 ID | `wa...` |
 | `WECOM_BOT_SECRET` | 企业微信机器人 Secret | `...` |
-| `WECOM_WS_URL` | 企业微信 WebSocket 服务地址 | `wss://...` |
-| `MINIMAX_API_KEY` | MiniMax API Key | `...` |
-| `MINIMAX_BASE_URL` | MiniMax 接口 Base URL | `https://api.minimax.chat/v1` |
+| `WECOM_WS_URL` | 企业微信 WebSocket 服务地址 | `wss://openws.work.weixin.qq.com` |
+| `LLM_API_KEY` | 大模型 API Key | `sk-...` |
+| `LLM_BASE_URL` | 大模型接口 Base URL | `https://api.example.com/v1` |
 | `MCP_SERVERS` | MCP 服务器配置（JSON 数组字符串） | `[{"name":"db","url":"http://ip:1248/sse"}]` |
 
 ## 快速开始

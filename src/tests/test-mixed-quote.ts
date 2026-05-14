@@ -1,4 +1,4 @@
-import { parseWeComMessage } from "./wecom-adapter.js";
+import { parseWeComMessage } from "../wecom-adapter.js";
 
 const mockBody = {
   msgid: "ca1dcb56cca103e520ca48ced3ba2440",

@@ -1,5 +1,5 @@
 import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
-import { initializeAgent, getBaseModel, getSystemPrompt } from "./graph.js";
+import { initializeAgent, getBaseModel, getSystemPrompt, getModelContextWindow } from "./graph.js";
 import { config } from "./config.js";
 import { HumanMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 
@@ -150,25 +150,30 @@ export async function startBot() {
 
       let fullContent = "";
       let lastMessages: BaseMessage[] = [];
+      let lastUpdateTime = 0;
+      const UPDATE_INTERVAL = 2000; // 每 2 秒更新一次，避免触发企业微信频率限制
 
       try {
-        // 使用 stream 替代 invoke，以便在异常时（如递归超限）仍能获取中间结果
+        // 使用 streamMode: "messages" 获取流式更新
         const stream = await agent.stream({
           messages: [new HumanMessage({ content: parsedContent as any })],
         }, {
-          recursionLimit: config.LLM_RECURSION_LIMIT
+          recursionLimit: config.LLM_RECURSION_LIMIT,
+          streamMode: "messages",
         });
 
-        for await (const chunk of stream) {
-          const anyChunk = chunk as any;
-          const messages = anyChunk.messages || 
-                           (Object.values(anyChunk)[0] as any)?.messages;
+        for await (const [message, metadata] of stream) {
+          const msg = message as BaseMessage;
+          lastMessages.push(msg);
 
-          if (messages && Array.isArray(messages) && messages.length > 0) {
-            lastMessages = messages;
-            const lastMsg = messages[messages.length - 1];
-            if (lastMsg && lastMsg.content) {
-              fullContent = lastMsg.content.toString();
+          if (msg._getType() === "ai" && msg.content) {
+            const delta = msg.content.toString();
+            fullContent += delta;
+            
+            // 只有当有实质性内容更新且超过间隔时间时才发送更新
+            if (delta.length > 0 && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
+              await bot.replyStream(frame, streamId, fullContent, false);
+              lastUpdateTime = Date.now();
             }
           }
         }
@@ -215,5 +220,6 @@ export async function startBot() {
   bot.on("error", (err) => console.error("WeCom WebSocket error:", err));
 
   bot.connect();
-  console.log("WeCom Bot starting...");
+  const contextWindow = getModelContextWindow();
+  console.log(`WeCom Bot starting... Model: ${config.LLM_MODEL_NAME}, Context Window: ${contextWindow} tokens`);
 }

@@ -1,4 +1,4 @@
-import { initializeAgent } from "./graph.js";
+import { initializeAgent } from "../graph.js";
 import { HumanMessage, BaseMessage } from "@langchain/core/messages";
 
 async function testSimple() {

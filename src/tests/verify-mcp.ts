@@ -1,4 +1,4 @@
-import { getAllMcpTools } from "./mcp-client.js";
+import { getAllMcpTools } from "../mcp-client.js";
 
 async function verify() {
   try {

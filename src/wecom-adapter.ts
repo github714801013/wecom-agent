@@ -2,15 +2,7 @@ import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
 import { initializeAgent, getBaseModel, getSystemPrompt, getModelContextWindow } from "./graph.js";
 import { config } from "./config.js";
 import { HumanMessage, BaseMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
-
-interface Session {
-  messages: BaseMessage[];
-  lastActivity: number;
-}
-
-const sessions = new Map<string, Session>();
-const SESSION_EXPIRATION_MS = 30 * 60 * 1000; // 30 minutes
-const MAX_MESSAGES_PER_SESSION = 20;
+import { sessionManager } from "./session-manager.js";
 
 /**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
@@ -140,46 +132,48 @@ export async function startBot() {
     }
 
     const parsedContent = parseWeComMessage(body);
-    const chatId = body.chatid || body.from?.userid;
+    const chatType = body.chattype; // 'single' 或 'group'
+    const fromUser = body.from?.userid;
+    const chatId = body.chatid;
 
-    if (!chatId) return;
+    // 生成唯一的会话 Key
+    // 如果是群聊，根据 (群ID + 用户ID) 隔离会话，确保群内不同人对话不干扰
+    // 如果是单聊，直接根据用户ID隔离
+    let sessionKey = "";
+    if (chatType === "group" && chatId && fromUser) {
+      sessionKey = `group:${chatId}:${fromUser}`;
+    } else if (fromUser) {
+      sessionKey = `single:${fromUser}`;
+    } else {
+      sessionKey = chatId || fromUser || "unknown";
+    }
 
     // --- Session Handling Start ---
-    const now = Date.now();
-    let session = sessions.get(chatId);
+    const session = sessionManager.getOrCreateSession(sessionKey);
 
     // Handle /new command
-    const isNewCommand = typeof parsedContent === 'string' && parsedContent.trim().toLowerCase() === '/new';
-    
+    const isNewCommand =
+      typeof parsedContent === "string" &&
+      parsedContent.trim().toLowerCase() === "/new";
+
     if (isNewCommand) {
-      sessions.delete(chatId);
+      sessionManager.clearSession(sessionKey);
       processedMsgs.add(body.msgid); // Mark this message as processed
-      await bot.replyStreamWithCard(frame, body.msgid, "已为您清理所有会话记录，我们可以开始新的对话了。", true, {
-        templateCard: {
-          card_type: 'text_notice',
-          main_title: { title: '会话已重置', desc: '历史记录已清理' },
-          task_id: `task_${body.msgid}`,
+      await bot.replyStreamWithCard(
+        frame,
+        body.msgid,
+        "已为您清理所有会话记录，我们可以开始新的对话了。",
+        true,
+        {
+          templateCard: {
+            card_type: "text_notice",
+            main_title: { title: "会话已重置", desc: "历史记录已清理" },
+            task_id: `task_${body.msgid}`,
+          },
         }
-      });
+      );
       return;
     }
-
-    if (session) {
-      // Expiration check
-      if (now - session.lastActivity > SESSION_EXPIRATION_MS) {
-        console.log(`[Session] Session for ${chatId} expired, clearing history.`);
-        session.messages = [];
-      }
-      // Count check (keep last 20)
-      if (session.messages.length > MAX_MESSAGES_PER_SESSION) {
-        session.messages = session.messages.slice(-MAX_MESSAGES_PER_SESSION);
-      }
-    } else {
-      session = { messages: [], lastActivity: now };
-      sessions.set(chatId, session);
-    }
-    
-    session.lastActivity = now;
     // --- Session Handling End ---
 
     try {
@@ -205,8 +199,9 @@ export async function startBot() {
       try {
         // 使用 streamMode: "messages" 获取流式更新
         const stream = await agent.stream({
-          messages: [...session!.messages, humanMsg],
+          messages: [...session.messages, humanMsg],
         }, {
+          configurable: { sessionKey },
           recursionLimit: config.LLM_RECURSION_LIMIT,
           streamMode: "messages",
         });
@@ -216,8 +211,14 @@ export async function startBot() {
           lastMessages.push(msg);
 
           // 核心优化：如果 AI 消息包含工具调用，说明是中间思考过程，不发给用户
-          if (msg._getType() === "ai" && msg.tool_calls && msg.tool_calls.length > 0) {
-            console.log(`[Stream] Detected intermediate tool call for ${body.msgid}, skipping preamble.`);
+          if (
+            msg._getType() === "ai" &&
+            msg.tool_calls &&
+            msg.tool_calls.length > 0
+          ) {
+            console.log(
+              `[Stream] Detected intermediate tool call for ${body.msgid}, skipping preamble.`
+            );
             fullContent = ""; // 清空缓冲区，移除之前的思考文本（如 "我来为您查询..."）
             continue;
           }
@@ -225,57 +226,75 @@ export async function startBot() {
           if (msg._getType() === "ai" && msg.content) {
             const delta = msg.content.toString();
             fullContent += delta;
-            
+
             // 只有当有实质性内容更新且超过间隔时间时才发送更新
-            if (delta.length > 0 && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
+            if (
+              delta.length > 0 &&
+              Date.now() - lastUpdateTime > UPDATE_INTERVAL
+            ) {
               await bot.replyStream(frame, streamId, fullContent, false);
               lastUpdateTime = Date.now();
             }
-          }
-        }
-
-        // --- Update Session History ---
-        if (fullContent && session) {
-          session.messages.push(humanMsg);
-          session.messages.push(new AIMessage(fullContent));
-          // Keep only the last MAX_MESSAGES_PER_SESSION messages
-          if (session.messages.length > MAX_MESSAGES_PER_SESSION) {
-            session.messages = session.messages.slice(-MAX_MESSAGES_PER_SESSION);
           }
         }
       } catch (err: any) {
         console.error(`Agent execution error for ${body.msgid}:`, err);
 
         // 特别处理递归超限错误
-        if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
+        if (
+          err.lc_error_code === "GRAPH_RECURSION_LIMIT" ||
+          err.message?.includes("Recursion limit")
+        ) {
           try {
-            console.log(`[Recovery] Attempting to synthesize partial results for ${body.msgid}...`);
+            console.log(
+              `[Recovery] Attempting to synthesize partial results for ${body.msgid}...`
+            );
             const baseModel = await getBaseModel();
             const systemPrompt = await getSystemPrompt();
 
             // 构造恢复提示词：将之前的中间历史发给不带 tools 的大模型进行总结和指引
             const recoveryMessages = [
-              new SystemMessage(`${systemPrompt}\n\n注意：当前任务由于逻辑过于复杂已达到执行上限。请根据下述已有的中间查询结果，尽可能为用户提供一个阶段性的总结回答。如果信息不足，请明确告知已查到的部分，并指引用户提供哪些更详细的信息（如特定 ID、时间范围或明确的查询条件）以继续。`),
-              ...lastMessages
+              new SystemMessage(
+                `${systemPrompt}\n\n注意：当前任务由于逻辑过于复杂已达到执行上限。请根据下述已有的中间查询结果，尽可能为用户提供一个阶段性的总结回答。如果信息不足，请明确告知已查到的部分，并指引用户提供哪些更详细的信息（如特定 ID、时间范围或明确的查询条件）以继续。`
+              ),
+              ...lastMessages,
             ];
 
             const recoveryResponse = await baseModel.invoke(recoveryMessages);
             fullContent = recoveryResponse.content.toString();
           } catch (recoveryErr) {
-            console.error(`Recovery invocation failed for ${body.msgid}:`, recoveryErr);
-            const fallbackPrefix = fullContent 
+            console.error(
+              `Recovery invocation failed for ${body.msgid}:`,
+              recoveryErr
+            );
+            const fallbackPrefix = fullContent
               ? `[注意：由于问题较为复杂，以下是初步分析结果]\n\n${fullContent}`
               : "抱歉，由于该问题涉及的逻辑过于复杂，我暂时无法给出完整回答。";
             fullContent = `${fallbackPrefix}\n\n💡 建议：您可以尝试提供更详细的信息（例如更明确的查询条件、具体的 ID 或减少一次性查询的范围），以便我为您提供更精准的帮助。`;
           }
         } else {
           // 其他类型的错误
-          fullContent = fullContent || "抱歉，处理您的请求时遇到了意外错误，请稍后重试。";
+          fullContent =
+            fullContent || "抱歉，处理您的请求时遇到了意外错误，请稍后重试。";
         }
       }
 
+      // --- Update Session History ---
+      // 无论是在正常流中还是在 Recovery 中产生的 fullContent，都在此时记录
+      if (fullContent) {
+        sessionManager.addMessages(sessionKey, [
+          humanMsg,
+          new AIMessage(fullContent),
+        ]);
+      }
+
       // 发送最终结果（可能是完整结果，也可能是带建议的中间结果）并结束流
-      await bot.replyStream(frame, streamId, fullContent || "未获取到有效回复", true);
+      await bot.replyStream(
+        frame,
+        streamId,
+        fullContent || "未获取到有效回复",
+        true
+      );
     } catch (error) {
       console.error(`Outer error processing message ${body.msgid}:`, error);
     }

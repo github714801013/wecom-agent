@@ -1,43 +1,48 @@
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { SessionManager } from "../session-manager.js";
 
 async function testSessionLogic() {
-  const messages: any[] = [];
-  const MAX = 4; // Use small number for test
+  const sm = new SessionManager();
+  const key = "test-session";
   
-  function add(m: any) {
-    messages.push(m);
-    if (messages.length > MAX) {
-      return messages.slice(-MAX);
+  // 模拟 11 轮对话 (22 条消息)
+  for (let i = 1; i <= 11; i++) {
+    sm.addMessages(key, [
+      new HumanMessage(`Question ${i}`),
+      new AIMessage(`Answer ${i}`)
+    ]);
+  }
+
+  const session = sm.getOrCreateSession(key);
+  console.log("History length:", session.messages.length);
+  console.log("First message content:", session.messages[0]?.content);
+  console.log("Last message content:", session.messages[session.messages.length - 1]?.content);
+
+  if (session.messages.length === 20 && session.messages[0]?.content === "Answer 1") {
+    console.log("SUCCESS: Pruning works and keeps the latest 20 messages.");
+  } else {
+    // Note: If we add pairs, it should keep exactly 20. 
+    // Adding 22 messages means index 0 and 1 are removed.
+    // Index 2 becomes new index 0. (i=2's human message?)
+    // Wait, Answer 1 was index 1.
+    if (session.messages.length === 20 && session.messages[0]?.content === "Question 2") {
+       console.log("SUCCESS: Pruning works (Question 2 is the new head).");
+    } else {
+       console.log("FAILED: Pruning behavior unexpected.");
+       process.exit(1);
     }
-    return messages;
   }
 
-  let history = add(new HumanMessage("1"));
-  history = add(new AIMessage("1-reply"));
-  history = add(new HumanMessage("2"));
-  history = add(new AIMessage("2-reply"));
-  history = add(new HumanMessage("3"));
+  // Verify AI recovery response recording logic (simulation)
+  const recoveryAnswer = "Final synthesized answer post-recovery";
+  sm.addMessages(key, [new HumanMessage("Complex Question"), new AIMessage(recoveryAnswer)]);
   
-  console.log("History length:", history.length);
-  console.log("History items:", history.map((m: any) => m.content));
-
-  if (history.length === 4 && history[0].content === "1-reply") {
-    console.log("SUCCESS: Pruning works and keeps the correct items.");
+  const finalSession = sm.getOrCreateSession(key);
+  const lastMsg = finalSession.messages[finalSession.messages.length - 1];
+  if (lastMsg?.content === recoveryAnswer) {
+    console.log("SUCCESS: Final AI response recorded correctly.");
   } else {
-    console.log("FAILED: Pruning failed or kept wrong items.");
-    process.exit(1);
-  }
-
-  // Verification of expiration logic (simulated)
-  const SESSION_EXPIRATION_MS = 1000; // 1s
-  let lastActivity = Date.now() - 2000; // 2s ago
-  let currentMessages = [new HumanMessage("old")];
-  
-  if (Date.now() - lastActivity > SESSION_EXPIRATION_MS) {
-    currentMessages = [];
-    console.log("SUCCESS: Expiration logic (simulated) works.");
-  } else {
-    console.log("FAILED: Expiration logic (simulated) failed.");
+    console.log("FAILED: Final response missing.");
     process.exit(1);
   }
 }

@@ -34,5 +34,25 @@ export async function getAllMcpTools() {
     }
   }
 
-  return allTools;
+  // Filter tools
+  let filteredTools = allTools;
+  const originalCount = allTools.length;
+
+  // Apply whitelist (ALLOWED_TOOLS)
+  if (config.allowedTools && config.allowedTools.length > 0) {
+    const whitelist = new Set(config.allowedTools);
+    filteredTools = filteredTools.filter(tool => whitelist.has(tool.name));
+  }
+
+  // Apply blacklist (EXCLUDED_TOOLS)
+  if (config.excludedTools && config.excludedTools.length > 0) {
+    const blacklist = new Set(config.excludedTools);
+    filteredTools = filteredTools.filter(tool => !blacklist.has(tool.name));
+  }
+
+  if (filteredTools.length !== originalCount) {
+    console.log(`Tool filtering applied: ${filteredTools.length} tools available out of ${originalCount} total.`);
+  }
+
+  return filteredTools;
 }

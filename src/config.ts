@@ -19,6 +19,7 @@ const envSchema = z.object({
   MCP_REMOTE_URL: z.string(),
   MCP_SERVERS: z.string().optional(),
   ALLOWED_TOOLS: z.string().optional(),
+  EXCLUDED_TOOLS: z.string().optional(),
 });
 
 const parsedEnv = envSchema.parse(process.env);
@@ -41,5 +42,8 @@ export const config = {
   mcpServers: z.array(mcpServerSchema).parse(mcpServers),
   allowedTools: parsedEnv.ALLOWED_TOOLS
     ? parsedEnv.ALLOWED_TOOLS.split(",").map((t) => t.trim())
+    : null,
+  excludedTools: parsedEnv.EXCLUDED_TOOLS
+    ? parsedEnv.EXCLUDED_TOOLS.split(",").map((t) => t.trim())
     : null,
 };

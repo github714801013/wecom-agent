@@ -1,4 +1,4 @@
-import { WSClient, MessageType } from "@wecom/aibot-node-sdk";
+import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
 import { initializeAgent } from "./graph.js";
 import { config } from "./config.js";
 import { HumanMessage } from "@langchain/core/messages";
@@ -68,19 +68,46 @@ export async function startBot() {
     if (!chatId) return;
 
     try {
-      const response: any = await agent.invoke({
+      const streamId = generateReqId('stream');
+      let firstFrame = true;
+      let lastContent = "";
+
+      const stream = await agent.stream({
         messages: [new HumanMessage({ content: parsedContent as any })],
       });
-      
-      const lastMsg = response.messages[response.messages.length - 1];
-      if (!lastMsg) return;
-      
-      const replyContent = lastMsg.content.toString();
 
-      await bot.sendMessage(chatId, {
-        msgtype: "markdown",
-        markdown: { content: replyContent },
-      });
+      for await (const chunk of stream) {
+        // Handle LangChain agent stream chunks
+        // Chunks from createAgent typically contain 'messages' or node updates
+        const anyChunk = chunk as any;
+        const messages = anyChunk.messages || 
+                         (Object.values(anyChunk)[0] as any)?.messages;
+        
+        if (!messages || !Array.isArray(messages) || messages.length === 0) continue;
+        
+        const msg = messages[messages.length - 1];
+        if (!msg || !msg.content) continue;
+        
+        const fullContent = msg.content.toString();
+        if (fullContent === lastContent) continue;
+        lastContent = fullContent;
+
+        if (firstFrame) {
+          await bot.replyStreamWithCard(frame, streamId, "AI 正在思考中...", false, {
+            templateCard: {
+              card_type: 'text_notice',
+              main_title: { title: '任务处理中', desc: 'AI 助手正在分析您的请求...' },
+              task_id: `task_${Date.now()}`,
+            }
+          });
+          firstFrame = false;
+        } else {
+          await bot.replyStream(frame, streamId, fullContent, false);
+        }
+      }
+
+      // Final frame to close the stream
+      await bot.replyStream(frame, streamId, lastContent || "处理完成", true);
     } catch (error) {
       console.error("Error processing message:", error);
     }

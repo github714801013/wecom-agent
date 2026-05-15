@@ -65,13 +65,16 @@ export async function getBusinessPrompt() {
 
 export interface PlannerResult {
   intent: string;
+  secondary_intents: string[];
   confidence: number;
   normalized_question: string;
   business_terms: string[];
   code_terms: {
+    chinese: string[];
     english: string[];
     pinyin: string[];
     abbr: string[];
+    mixed: string[];
   };
   queries: Array<{
     query: string;
@@ -89,6 +92,43 @@ export interface PlannerResult {
     exclude: string[];
   };
   missing_info: string[];
+}
+
+export interface CompressorResult {
+  status: string;
+  intent: string;
+  partial: boolean;
+  compressed_sections: Array<{
+    section_id: string;
+    file_path: string;
+    symbol: string;
+    kind: string;
+    lines: string;
+    score: number;
+    reason: string;
+    anchors: string[];
+    content: string;
+    merged_from: string[];
+  }>;
+  call_chain: Array<{
+    from: string;
+    to: string;
+    relation: string;
+  }>;
+  key_evidence: string[];
+  dropped: Array<{
+    id: string;
+    reason: string;
+  }>;
+  missing_info: string[];
+  warnings: string[];
+  errors: string[];
+  budget: {
+    input_est: number;
+    output_est: number;
+    target: number;
+    mode: string;
+  };
 }
 
 /**
@@ -117,6 +157,52 @@ export async function runPlanner(userQuestion: string): Promise<PlannerResult | 
     return null;
   } catch (err) {
     console.error("Failed to parse planner response:", err);
+    console.error("Raw response content:", response.content.toString());
+    return null;
+  }
+}
+
+export async function getCompressorPrompt() {
+  try {
+    const promptPath = join(process.cwd(), "src/prompts/compress-prompt.md");
+    return await readFile(promptPath, "utf-8");
+  } catch (err) {
+    console.error("Failed to load compressor prompt:", err);
+    return "You are a context compressor. Filter and compress code context.";
+  }
+}
+
+/**
+ * 运行 Compressor 节点，压缩检索结果或历史上下文
+ */
+export async function runCompressor(input: {
+  user_question: string;
+  rewrite_result?: PlannerResult;
+  search_results: any[];
+  project_context?: string;
+  token_budget?: { target: number; max_per_section: number; mode: string };
+}): Promise<CompressorResult | null> {
+  const model = await getBaseModel();
+  const compressorPrompt = await getCompressorPrompt();
+
+  const response = await model.invoke([
+    new SystemMessage(compressorPrompt),
+    new HumanMessage(JSON.stringify(input)),
+  ]);
+
+  try {
+    const content = response.content.toString();
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const jsonStr = jsonMatch[0]
+        .replace(/\\n/g, " ")
+        .replace(/\n/g, " ")
+        .trim();
+      return JSON.parse(jsonStr);
+    }
+    return null;
+  } catch (err) {
+    console.error("Failed to parse compressor response:", err);
     console.error("Raw response content:", response.content.toString());
     return null;
   }

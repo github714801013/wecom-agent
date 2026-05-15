@@ -241,11 +241,20 @@ export async function startBot() {
           if (plannerResult) {
             const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
-            const codeTerms = plannerResult.code_terms?.english?.join(' ') || '';
+            
+            // 聚合所有检索词
+            const allTerms = [
+              ...(plannerResult.code_terms?.english || []),
+              ...(plannerResult.code_terms?.chinese || []),
+              ...(plannerResult.code_terms?.mixed || [])
+            ].filter(t => t && t.length > 0);
+            const codeTerms = Array.from(new Set(allTerms)).join(' ');
+            
+            const intents = [plannerResult.intent, ...(plannerResult.secondary_intents || [])].filter(Boolean).join(', ');
 
             // 提供结构化的搜索建议，引导大模型按 MCP 要求进行高效率查询
             const searchPlanHint = `系统提示：【检索与分析规划建议】
-意图识别: ${plannerResult.intent} (置信度: ${plannerResult.confidence})
+意图识别: ${intents} (置信度: ${plannerResult.confidence})
 标准问题: ${plannerResult.normalized_question}
 
 【高优代码检索词】
@@ -406,8 +415,9 @@ ${hypotheses}
 
       // --- Update Session History ---
       if (fullContent) {
-        sessionManager.addMessages(sessionKey, [
+        await sessionManager.addMessages(sessionKey, [
           new HumanMessage({ content: parsedContent as any }),
+          ...intermediateMessages,
           new AIMessage(fullContent),
         ]);
       }

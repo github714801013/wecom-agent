@@ -208,8 +208,13 @@ export async function startBot() {
         try {
           const queries = await runPlanner(parsedContent);
           if (queries && queries.length > 0) {
-            // 这里只作为系统提示，不展示给用户
-            finalContentForPrompt = `系统提示：根据您的提问，可以从以下关键词进行检索：${queries.join(", ")}\n\n${parsedContent}`;
+            // 提供结构化的搜索建议，引导大模型按 MCP 要求拼接查询
+            const searchPlanHint = `系统提示：【搜索规划建议】
+为了提高效率，请优先按 MCP 要求将以下关键词拼接后进行单次查询（例如使用空格分隔），严禁对每个词进行循环搜索：
+关键词列表：${queries.join(", ")}
+推荐拼接 Query：${queries.join(" ")}`;
+            
+            finalContentForPrompt = `${searchPlanHint}\n\n${parsedContent}`;
           }
         } catch (err) {
           console.error("Planner execution failed:", err);

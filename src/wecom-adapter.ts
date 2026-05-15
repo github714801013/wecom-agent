@@ -192,10 +192,14 @@ export async function startBot() {
     // --- Session Handling Start ---
     const session = sessionManager.getOrCreateSession(sessionKey);
 
-    // Handle /new command
-    const isNewCommand =
-      typeof parsedContent === "string" &&
-      parsedContent.trim().toLowerCase() === "/new";
+    // Handle /new and "清理会话" commands
+    const textContent = typeof parsedContent === "string" ? parsedContent.trim().toLowerCase() : "";
+    const isNewCommand = 
+      textContent === "/new" || 
+      textContent === "清理会话" || 
+      textContent === "重置会话" ||
+      textContent.includes("清理会话") || // 处理 "@机器人 清理会话"
+      textContent.includes("重置会话");
 
     if (isNewCommand) {
       sessionManager.clearSession(sessionKey);

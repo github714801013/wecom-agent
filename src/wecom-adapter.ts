@@ -249,13 +249,15 @@ export async function startBot() {
             // 提供结构化的搜索建议，引导大模型按 MCP 要求进行高效率查询
             const searchPlanHint = `系统提示：【搜索规划建议】
 请根据以下优化后的 Query 进行搜索。
-1. 关键词合并 (文本搜索 Zoekt): ${plannerResult.combined}
-2. 逻辑或 (文本搜索 Zoekt): ${plannerResult.regex}
-3. 语义向量 (语义搜索 Vector): ${plannerResult.semantic}
+1. 纯净逻辑词 (优先用于代码检索): ${plannerResult.stripped_combined}
+2. 关键词合并: ${plannerResult.combined}
+3. 逻辑或: ${plannerResult.regex}
+4. 语义向量: ${plannerResult.semantic}
 
 【核心红线】
-* 优先使用“关键词合并”进行单次一站式检索。
-* 如果意图模糊或关键词检索不到，必须配合使用 \`query\` 工具进行“语义向量”检索。
+* **必须**优先使用“纯净逻辑词”进行单次一站式检索。
+* **严禁**在代码检索中包含人名、商品名、租户名、订单号等实例数据。
+* 如果意图模糊或纯净关键词检索不到，必须配合使用 \`query\` 工具进行“语义向量”检索。
 * 严禁拆分关键词进行多次循环搜索。`;
             
             finalContentForPrompt = `${searchPlanHint}\n\n${parsedContent}`;

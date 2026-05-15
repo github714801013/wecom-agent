@@ -1,25 +1,75 @@
 # Dev-Spec-Gen 本地工程规范达成看板
 
 ## Phase 1: Research & Setup (初始化)
-- [x] 涉及技能识别：增加 Planner 节点并重构提示词（LangChain 版）
-- [x] 核心规范检索：检索 WeCom 流式与工具调用规范
+- [ ] 运行环境与版本确认 (Runtime/Environment Check)
+- [ ] 租户隔离/路径前缀确认 (Tenant/Path Context)
+- [ ] 核心规范检索 (qmd Discovery)
+- [ ] 涉及技能识别：列出本次需求触达的技能及引用规范
 
 ## Phase 2: Design (文档先行)
-- [x] 节点流转设计：使用 LangChain 实现 Planner + Agent 工作流
-- [x] 容错设计：实现递归超限后的自动总结恢复逻辑
-- [x] 交互设计：设计工具调用在 WeCom 端的展示样式
-- [x] 搜索优化设计：设计“一站式搜索”拼接逻辑，防止模型自行拆分
+- [ ] API-First: 接口文档定义 (API Spec)
+- [ ] DB-First: 数据库变更脚本编写 (SQL/Schema Migration)
+- [ ] 性能优化要点：批量/IN/循环查库/缓存/SQL/前端性能覆盖或不适用说明
+- [ ] 编码规范要点：Java/SQL/DTO/Mapper/热部署/引用规范覆盖或不适用说明
+- [ ] 测试要点：RED-GREEN、编译、单入口、业务断言、异常和回归范围
 
 ## Phase 3: Implementation (开发)
-- [x] 核心功能实现：移除 Claude SDK，完成 Planner 与恢复逻辑
-- [x] 体验优化实现：在 `wecom-adapter.ts` 中实现工具调用日志记录与企微推送
-- [x] 搜索优化实现：重构 Planner 输出格式，强化 Business Prompt “单次查询”红线
-- [x] 体验增强实现：实现工具参数聚合日志记录，并向企微推送带参数的状态（如：正在搜索“售后”...）
+- [ ] 业务逻辑实现 (Surgical Change)
+- [ ] 规范合规注释注入 (Spec Compliance Comments)
 
 ## Phase 4: Verification (验证)
-- [x] 编译/类型核对：通过 `npx tsc` 验证
-- [x] 部署验证：镜像构建成功并完成部署
-- [x] 逻辑验证：通过日志确认参数已完整显示，微信端展示带参数的状态
+- [ ] Bug Reproduction (针对 Bug 修复)
+- [ ] 项目构建/编译通过 (Build/Compilation Passed)
+- [ ] 单入口/集成测试验证 (Single-Entry/Integration Test)
+- [ ] 接口一致性比对 (Response Schema Check)
 
 ## Phase 5: Audit & Finish (审计与完结)
-- [x] 完结审计拦截：确认系统提示词已分离，所有增强功能均已通过物理验证并上线
+- [ ] 本地工程合规审计表输出 (Compliance Audit Report)
+- [ ] 完结审计拦截 (Final Phase Check)
+
+## Dynamic Tasks (Sync at 2026-05-15 12:49:21)
+
+## Phase 1: Research & Setup (初始化)
+- [x] 运行环境与版本确认 (Runtime/Environment Check)
+- [x] 租户隔离/路径前缀确认 (Tenant/Path Context)
+- [x] 核心规范检索 (qmd Discovery)
+- [x] 涉及技能识别：提示词增强 (Prompt Engineering)
+
+## Phase 2: Design (文档先行)
+- [x] 性能优化要点：不适用
+- [x] 编码规范要点：不适用
+- [x] 测试要点：编写 SQL 完整性测试用例
+
+## Phase 3: Implementation (开发)
+- [/] 业务逻辑实现 (Surgical Change): 更新 business-prompt.md 增强 SQL 规则
+- [ ] 规范合规注释注入 (Spec Compliance Comments)
+
+## Phase 4: Verification (验证)
+- [ ] 单入口/集成测试验证 (Single-Entry/Integration Test): 验证 SQL 输出完整性
+
+
+## Dynamic Tasks (Sync at 2026-05-15 12:52:55)
+
+## Phase 1: Research & Setup (初始化)
+- [x] 运行环境与版本确认 (Runtime/Environment Check)
+- [x] 租户隔离/路径前缀确认 (Tenant/Path Context)
+- [x] 核心规范检索 (qmd Discovery)
+- [x] 涉及技能识别：提示词增强 (Prompt Engineering)
+
+## Phase 2: Design (文档先行)
+- [x] 性能优化要点：不适用
+- [x] 编码规范要点：不适用
+- [x] 测试要点：编写 SQL 完整性测试用例
+
+## Phase 3: Implementation (开发)
+- [x] 业务逻辑实现 (Surgical Change): 更新 business-prompt.md 增强 SQL 规则
+- [x] 规范合规注释注入 (Spec Compliance Comments)
+
+## Phase 4: Verification (验证)
+- [x] 单入口/集成测试验证 (Single-Entry/Integration Test): 验证 SQL 输出完整性 (Pass)
+- [x] 物理构建/编译通过 (Build Passed)
+
+## Phase 5: Audit & Finish (审计与完结)
+- [x] 本地工程合规审计表输出 (Compliance Audit Report)
+- [x] 完结审计拦截 (Final Phase Check)
+

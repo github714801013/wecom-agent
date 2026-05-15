@@ -238,8 +238,18 @@ export async function startBot() {
           if (type === "ai" || type === "AIMessage") {
             const aiMsg = msg as AIMessage;
             
-            // 排除掉包含工具调用的消息，避免展示中间过程
+            // 处理工具调用：记录日志并发送状态反馈给企微
             if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
+              for (const tool of aiMsg.tool_calls) {
+                console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
+                
+                // 给企微发送一个友好的状态提示
+                const statusMsg = fullContent 
+                  ? `${fullContent}\n\n> 🔍 正在调用: ${tool.name}...` 
+                  : `> 🔍 正在调用: ${tool.name}...`;
+                
+                await bot.replyStream(frame, streamId, statusMsg, false);
+              }
               continue;
             }
 

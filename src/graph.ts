@@ -66,7 +66,7 @@ export async function getBusinessPrompt() {
 /**
  * 运行 Planner 节点，将用户问题转化为高质量搜索 Query
  */
-export async function runPlanner(userQuestion: string): Promise<{ combined: string; regex: string; semantic: string; status?: string } | null> {
+export async function runPlanner(userQuestion: string): Promise<{ combined: string; regex: string; semantic: string; stripped_combined: string; status?: string } | null> {
   const model = await getBaseModel();
   const plannerPrompt = await getPlannerPrompt();
   
@@ -78,13 +78,18 @@ export async function runPlanner(userQuestion: string): Promise<{ combined: stri
   try {
     const content = response.content.toString();
     // 简单提取 JSON 部分，防止 LLM 输出多余文字
-    const jsonMatch = content.match(/\{.*\}/s);
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      const jsonStr = jsonMatch[0]
+        .replace(/\\n/g, " ") // 处理 JSON 字符串中的换行
+        .replace(/\n/g, " ")  // 处理 JSON 外部的换行
+        .trim();
+      return JSON.parse(jsonStr);
     }
     return null;
   } catch (err) {
     console.error("Failed to parse planner response:", err);
+    console.error("Raw response content:", response.content.toString());
     return null;
   }
 }

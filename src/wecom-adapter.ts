@@ -202,25 +202,22 @@ export async function startBot() {
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 2000;
 
-      // Construct history string from LangChain messages for Claude SDK context
-      const historyStr = session.messages.map(m => {
+      // Construct history text for Claude SDK context
+      const historyText = session.messages.map(m => {
         const type = (m as any)._getType?.() || m.constructor.name;
-        if (type === 'human' || type === 'HumanMessage') return `User: ${m.content}`;
-        if (type === 'ai' || type === 'AIMessage') return `Assistant: ${m.content}`;
-        return "";
-      }).filter(Boolean).join("\n");
-
-      // Handle multi-modal or text prompt
-      let prompt: any = parsedContent;
-      if (historyStr) {
-        if (typeof parsedContent === 'string') {
-          prompt = `${historyStr}\nUser: ${parsedContent}`;
-        } else if (Array.isArray(parsedContent)) {
-          // If multi-modal, we prepend history as text blocks if possible, 
-          // or just append to the prompt.
-          prompt = [{ type: 'text', text: historyStr }, ...parsedContent];
+        if (type === 'human' || type === 'HumanMessage') {
+          return `用户：${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`;
         }
-      }
+        if (type === 'ai' || type === 'AIMessage') {
+          return `助手：${m.content as string}`;
+        }
+        return null;
+      }).filter((m): m is string => m !== null).join("\n\n");
+
+      const currentText = typeof parsedContent === 'string' ? parsedContent : JSON.stringify(parsedContent);
+      const prompt = historyText
+        ? `以下是本会话历史，请结合上下文回答最后一个用户问题。\n\n${historyText}\n\n用户：${currentText}`
+        : currentText;
 
       try {
         const stream = runClaudeAgent(prompt, sessionKey);
@@ -229,7 +226,14 @@ export async function startBot() {
           if (chunk.type === "stream_event") {
             const event = chunk.event;
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-              fullContent += event.delta.text;
+              const text = event.delta.text;
+              
+              // 忽略可能的工具调用标签
+              if (text.includes('<tool_code>') || text.includes('</tool_code>')) {
+                continue;
+              }
+              
+              fullContent += text;
 
               if (Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
                 await bot.replyStream(frame, streamId, fullContent, false);

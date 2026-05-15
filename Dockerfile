@@ -1,36 +1,46 @@
-# 使用 Node.js 20 官方镜像
-FROM node:20-alpine AS builder
+# 使用 node:20-slim (Debian) 确保二进制兼容性 (glibc)，这是 Claude SDK 的运行要求
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# 复制依赖配置
+# 安装构建依赖
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-lock.yaml* package-lock.json* ./
 
-# 安装依赖
 RUN npm install --legacy-peer-deps
 
-# 复制源码
 COPY . .
 
-# 编译 TypeScript
 RUN npx tsc
 
 # --- 运行阶段 ---
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
-# 仅复制生产依赖
+# 安装运行时依赖
+# Claude Agent SDK (Claude Code) 强依赖 git 进行代码分析和工具执行
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    git \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-lock.yaml* package-lock.json* ./
 RUN npm install --production --legacy-peer-deps
 
-# 复制编译后的代码
 COPY --from=builder /app/dist ./dist
-# 复制必要的静态资源（提示词文件）
 COPY src/prompts ./src/prompts
+# 必须包含 .claude 目录，里面存放了我们的 Skill SOP
+COPY .claude ./.claude
 
-# 暴露端口（如果有 Web 服务的话，虽然目前主要是 WebSocket）
-# EXPOSE 8080
+RUN chown -R node:node /app
+USER node
 
-# 启动命令
 CMD ["node", "dist/index.js"]

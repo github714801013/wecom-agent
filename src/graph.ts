@@ -1,10 +1,9 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { getClaudeTools } from "./mcp-client.js";
+import { getClaudeMcpConfig } from "./mcp-client.js";
 import { getModelContextSize } from "@langchain/core/language_models/base";
 import { ChatOpenAI } from "@langchain/openai";
 import { config } from "./config.js";
-import { readFile } from "fs/promises";
-import { join } from "path";
+import { spawn } from "child_process";
 
 const MODEL_CONTEXT_MAP: Record<string, number> = {
   "MiniMax-M2.5": 200000,
@@ -43,39 +42,77 @@ export async function getBaseModel() {
 }
 
 export async function getSystemPrompt() {
-  try {
-    const promptPath = join(process.cwd(), "src/prompts/system-prompt.md");
-    return await readFile(promptPath, "utf-8");
-  } catch (err) {
-    console.error("Failed to load system prompt:", err);
-    return "You are a professional assistant.";
-  }
+  return "You are a professional assistant. Follow the SOPs defined in your skills library to handle business operations and technical support.";
 }
 
-export async function* runClaudeAgent(prompt: string, sessionKey: string) {
-  const tools = await getClaudeTools();
+export async function* runClaudeAgent(prompt: string | AsyncIterable<any>, sessionKey: string) {
+  const mcpServers = getClaudeMcpConfig();
   const systemPrompt = await getSystemPrompt();
 
-  // Strip /v1 to let Claude SDK append it
-  const baseURL = config.LLM_BASE_URL.replace(/\/v1\/?$/, '');
+  // Robustly handle baseURL
+  const rawBaseURL = config.LLM_BASE_URL || "https://api.anthropic.com";
+  const baseURL = rawBaseURL.replace(/\/v1\/?$/, '');
+  
+  const modelName = config.LLM_MODEL_NAME;
+  const cwd = process.cwd();
+
+  console.log(`Agent starting with model: ${modelName}, baseURL: ${baseURL}, cwd: ${cwd}`);
 
   const options = {
-    model: config.LLM_MODEL_NAME, // Use model from environment
+    model: modelName, 
     systemPrompt: systemPrompt,
-    tools: tools,
-    permissionMode: "acceptEdits" as const,
-    settingSources: ['project' as const], // Auto loads .claude/skills/
+    mcpServers: mcpServers,
+    spawnClaudeCodeProcess: (spawnOptions: any) => {
+      console.log(`Custom Spawning Claude Code: ${spawnOptions.command} ${spawnOptions.args.join(' ')}`);
+      
+      // If command is 'node' or 'bun' and first arg is the binary, run the binary directly
+      const command = spawnOptions.command;
+      if ((command === 'node' || command === 'node.exe' || command === 'bun') && spawnOptions.args[0]?.includes('claude')) {
+        const binaryPath = spawnOptions.args[0];
+        const binaryArgs = spawnOptions.args.slice(1);
+        console.log(`Bypassing ${command}, running binary directly: ${binaryPath}`);
+        return spawn(binaryPath, binaryArgs, {
+          cwd: spawnOptions.cwd,
+          env: spawnOptions.env,
+        }) as any;
+      }
+      
+      // Default fallback
+      return spawn(command, spawnOptions.args, {
+        cwd: spawnOptions.cwd,
+        env: spawnOptions.env,
+      }) as any;
+    },
+    debug: true,
+    stderr: (data: string) => {
+      console.error(`[ClaudeCode stderr] ${data}`);
+    },
+    pathToClaudeCodeExecutable: "/app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude",
+    permissionMode: "bypassPermissions" as const,
+    settingSources: ['project' as const],
+    cwd: cwd,
     env: {
-      "ANTHROPIC_AUTH_TOKEN": config.LLM_API_KEY || "",
-      "ANTHROPIC_API_KEY": "",
-      "ANTHROPIC_BASE_URL": baseURL,
+      ...process.env,
+      "TERM": "xterm-256color",
+      "COLORTERM": "truecolor",
+      "HOME": process.env.HOME || "/home/node",
+      "USER": process.env.USER || "node",
       "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
       "DISABLE_PROMPT_CACHING": "1",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+      "CLAUDE_CODE_DISABLE_TTY_PROMPTS": "1",
+      "CLAUDE_CODE_SKIP_UPDATE_CHECK": "1",
+      "DEBUG": "claude-code:*",
+      "ANTHROPIC_AUTH_TOKEN": config.LLM_API_KEY || "",
+      "ANTHROPIC_API_KEY": config.LLM_API_KEY || "", 
+      "ANTHROPIC_BASE_URL": baseURL,
+      "ANTHROPIC_MODEL": modelName,
+      "ANTHROPIC_SMALL_FAST_MODEL": modelName,
     }
   };
 
   yield* query({
-    prompt,
+    prompt: prompt as any,
     options
   });
 }

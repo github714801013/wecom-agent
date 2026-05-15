@@ -63,11 +63,14 @@
 
 ## Phase 3: Implementation (开发)
 - [x] 业务逻辑实现 (Surgical Change): 更新 business-prompt.md 增强 SQL 规则
-- [x] 规范合规注释注入 (Spec Compliance Comments)
+- [ ] 语义去噪实现 (Semantic De-noising): 升级 Planner 支持 stripped_combined 字段
+- [ ] 规范合规注释注入 (Spec Compliance Comments)
 
 ## Phase 4: Verification (验证)
 - [x] 单入口/集成测试验证 (Single-Entry/Integration Test): 验证 SQL 输出完整性 (Pass)
+- [ ] 逻辑验证：验证 stripped_combined 成功剔除人名/商品等实例数据
 - [x] 物理构建/编译通过 (Build Passed)
+
 
 ## Phase 5: Audit & Finish (审计与完结)
 - [x] 本地工程合规审计表输出 (Compliance Audit Report)

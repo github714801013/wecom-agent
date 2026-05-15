@@ -1,7 +1,8 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import { getClaudeTools } from "./mcp-client.js";
-import { getModelContextSize } from "@langchain/core/language_models/base";
 import { ChatOpenAI } from "@langchain/openai";
+import { createAgent } from "langchain";
+import { getModelContextSize } from "@langchain/core/language_models/base";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { getAllMcpTools } from "./mcp-client.js";
 import { config } from "./config.js";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -42,40 +43,60 @@ export async function getBaseModel() {
   });
 }
 
-export async function getSystemPrompt() {
+export async function getPlannerPrompt() {
   try {
-    const promptPath = join(process.cwd(), "src/prompts/system-prompt.md");
+    const promptPath = join(process.cwd(), "src/prompts/planner-prompt.md");
     return await readFile(promptPath, "utf-8");
   } catch (err) {
-    console.error("Failed to load system prompt:", err);
+    console.error("Failed to load planner prompt:", err);
+    return "You are a code search planner. Convert user questions to search queries.";
+  }
+}
+
+export async function getBusinessPrompt() {
+  try {
+    const promptPath = join(process.cwd(), "src/prompts/business-prompt.md");
+    return await readFile(promptPath, "utf-8");
+  } catch (err) {
+    console.error("Failed to load business prompt:", err);
     return "You are a professional assistant.";
   }
 }
 
-export async function* runClaudeAgent(prompt: string, sessionKey: string) {
-  const tools = await getClaudeTools();
-  const systemPrompt = await getSystemPrompt();
+/**
+ * 运行 Planner 节点，将用户问题转化为高质量搜索 Query
+ */
+export async function runPlanner(userQuestion: string): Promise<string[]> {
+  const model = await getBaseModel();
+  const plannerPrompt = await getPlannerPrompt();
+  
+  const response = await model.invoke([
+    new SystemMessage(plannerPrompt),
+    new HumanMessage(userQuestion),
+  ]);
 
-  // Strip /v1 to let Claude SDK append it
-  const baseURL = config.LLM_BASE_URL.replace(/\/v1\/?$/, '');
-
-  const options = {
-    model: config.LLM_MODEL_NAME, // Use model from environment
-    systemPrompt: systemPrompt,
-    tools: tools,
-    permissionMode: "acceptEdits" as const,
-    settingSources: ['project' as const], // Auto loads .claude/skills/
-    env: {
-      "ANTHROPIC_AUTH_TOKEN": config.LLM_API_KEY || "",
-      "ANTHROPIC_API_KEY": "",
-      "ANTHROPIC_BASE_URL": baseURL,
-      "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
-      "DISABLE_PROMPT_CACHING": "1",
+  try {
+    const content = response.content.toString();
+    // 简单提取 JSON 部分，防止 LLM 输出多余文字
+    const jsonMatch = content.match(/\[.*\]/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
     }
-  };
+    return [userQuestion];
+  } catch (err) {
+    console.error("Failed to parse planner response:", err);
+    return [userQuestion];
+  }
+}
 
-  yield* query({
-    prompt,
-    options
+export async function initializeAgent() {
+  const model = await getBaseModel();
+  const tools = await getAllMcpTools();
+  const systemPrompt = await getBusinessPrompt();
+
+  return createAgent({
+    model: model,
+    tools,
+    systemPrompt: systemPrompt,
   });
 }

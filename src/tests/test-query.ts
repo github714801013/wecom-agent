@@ -1,4 +1,5 @@
-import { runClaudeAgent } from "../graph.js";
+import { initializeAgent } from "../graph.js";
+import { HumanMessage } from "@langchain/core/messages";
 
 async function testQuery() {
   console.log("Initializing agent and connecting to remote MCP...");
@@ -8,25 +9,21 @@ async function testQuery() {
   
   try {
     let fullResponse = "";
-    const sessionKey = "test-session-query";
     
-    const stream = runClaudeAgent(query, sessionKey);
+    const agent = await initializeAgent();
+    const stream = await agent.stream({
+      messages: [new HumanMessage(query)],
+    }, {
+      recursionLimit: 25,
+      streamMode: "messages",
+    });
     
     console.log("\n--- Agent Response ---");
-    for await (const chunk of stream) {
-      if (chunk.type === "stream_event") {
-        const event = chunk.event;
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-          fullResponse += event.delta.text;
-          process.stdout.write(event.delta.text);
-        }
-      } else if (chunk.type === "assistant") {
-        if (chunk.message.content) {
-            const textContent = chunk.message.content.find((c: any) => c.type === 'text');
-            if (textContent && !fullResponse) {
-                fullResponse = (textContent as any).text;
-            }
-        }
+    for await (const [message, metadata] of stream) {
+      if (message.content) {
+        const content = message.content.toString();
+        fullResponse = content;
+        process.stdout.write(content);
       }
     }
     console.log("\n----------------------\n");

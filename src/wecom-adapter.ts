@@ -1,7 +1,7 @@
 import { WSClient, MessageType } from "@wecom/aibot-node-sdk";
-import { runClaudeAgent, getBaseModel, getSystemPrompt, getModelContextWindow } from "./graph.js";
+import { initializeAgent, runPlanner, getModelContextWindow, getBaseModel, getBusinessPrompt } from "./graph.js";
 import { config } from "./config.js";
-import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 import { sessionManager } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 
@@ -202,53 +202,91 @@ export async function startBot() {
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 2000;
 
-      // Construct history string from LangChain messages for Claude SDK context
-      const historyStr = session.messages.map(m => {
-        const type = (m as any)._getType?.() || m.constructor.name;
-        if (type === 'human' || type === 'HumanMessage') return `User: ${m.content}`;
-        if (type === 'ai' || type === 'AIMessage') return `Assistant: ${m.content}`;
-        return "";
-      }).filter(Boolean).join("\n");
-
-      // Handle multi-modal or text prompt
-      let prompt: any = parsedContent;
-      if (historyStr) {
-        if (typeof parsedContent === 'string') {
-          prompt = `${historyStr}\nUser: ${parsedContent}`;
-        } else if (Array.isArray(parsedContent)) {
-          // If multi-modal, we prepend history as text blocks if possible, 
-          // or just append to the prompt.
-          prompt = [{ type: 'text', text: historyStr }, ...parsedContent];
+      // --- Planner Logic Start ---
+      let finalContentForPrompt: any = parsedContent;
+      if (typeof parsedContent === 'string' && parsedContent.trim().length > 0) {
+        try {
+          const queries = await runPlanner(parsedContent);
+          if (queries && queries.length > 0) {
+            // 这里只作为系统提示，不展示给用户
+            finalContentForPrompt = `系统提示：根据您的提问，可以从以下关键词进行检索：${queries.join(", ")}\n\n${parsedContent}`;
+          }
+        } catch (err) {
+          console.error("Planner execution failed:", err);
         }
       }
+      // --- Planner Logic End ---
+
+      // 记录流式过程中的所有消息，用于容错恢复
+      let intermediateMessages: BaseMessage[] = [];
 
       try {
-        const stream = runClaudeAgent(prompt, sessionKey);
+        const agent = await initializeAgent();
+        const stream = await agent.stream({
+          messages: [...session.messages, new HumanMessage({ content: finalContentForPrompt as any })],
+        }, {
+          recursionLimit: config.LLM_RECURSION_LIMIT,
+          streamMode: "messages",
+        });
 
-        for await (const chunk of stream) {
-          if (chunk.type === "stream_event") {
-            const event = chunk.event;
-            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-              fullContent += event.delta.text;
-
-              if (Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-                await bot.replyStream(frame, streamId, fullContent, false);
-                lastUpdateTime = Date.now();
-              }
+        for await (const [message, metadata] of stream) {
+          const msg = message as BaseMessage;
+          intermediateMessages.push(msg); // 记录中间过程
+          
+          const type = (msg as any)._getType?.() || msg.constructor.name;
+          
+          if (type === "ai" || type === "AIMessage") {
+            const aiMsg = msg as AIMessage;
+            
+            // 排除掉包含工具调用的消息，避免展示中间过程
+            if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
+              continue;
             }
-          } else if (chunk.type === "assistant" && !fullContent) {
-            // Fallback for non-streaming models or final message if stream was missed
-            if (chunk.message.content) {
-                const textContent = chunk.message.content.find((c: any) => c.type === 'text');
-                if (textContent) {
-                  fullContent = (textContent as any).text;
+
+            if (aiMsg.content) {
+              const delta = aiMsg.content.toString();
+              if (delta.length > 0) {
+                if (fullContent && delta.startsWith(fullContent)) {
+                    fullContent = delta;
+                } else {
+                    fullContent += delta;
                 }
+
+                if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
+                  await bot.replyStream(frame, streamId, fullContent, false);
+                  lastUpdateTime = Date.now();
+                }
+              }
             }
           }
         }
       } catch (err: any) {
         console.error(`Agent execution error for ${body.msgid}:`, err);
-        fullContent = fullContent || "抱歉，处理您的请求时遇到了意外错误，请稍后重试。";
+        
+        // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
+        if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
+          try {
+            console.log(`[Recovery] Recursion limit reached for ${body.msgid}, attempting fallback synthesis...`);
+            const baseModel = await getBaseModel();
+            const businessPrompt = await getBusinessPrompt();
+
+            // 构造恢复提示词：将已有的所有中间历史（包括工具调用和结果）发给不带 tools 的大模型进行总结
+            const recoveryMessages = [
+              new SystemMessage(`${businessPrompt}\n\n注意：当前任务由于逻辑过于复杂已达到执行上限。请根据下述已有的中间查询结果（包括已调用的工具返回），尽可能为用户提供一个阶段性的总结回答。如果关键信息不足，请明确告知已查到的部分，并指引用户如何提供更精确的信息以继续。`),
+              ...session.messages,
+              new HumanMessage({ content: finalContentForPrompt as any }),
+              ...intermediateMessages
+            ];
+
+            const recoveryResponse = await baseModel.invoke(recoveryMessages);
+            fullContent = recoveryResponse.content.toString();
+          } catch (recoveryErr) {
+            console.error(`Recovery synthesis failed for ${body.msgid}:`, recoveryErr);
+            fullContent = fullContent || "抱歉，由于问题过于复杂且处理达到限制，我暂时无法给出完整回答。您可以尝试缩小查询范围。";
+          }
+        } else {
+          fullContent = fullContent || "抱歉，处理您的请求时遇到了意外错误，请稍后重试。";
+        }
       }
 
       // --- Update Session History ---
@@ -277,5 +315,5 @@ export async function startBot() {
 
   bot.connect();
   const contextWindow = getModelContextWindow();
-  console.log(`WeCom Bot starting... Model: ${config.LLM_MODEL_NAME}, Context Window: ${contextWindow} tokens`);
+  console.log(`WeCom Bot starting... Model: ${config.LLM_MODEL_NAME}, Recursion Limit: ${config.LLM_RECURSION_LIMIT}, Context Window: ${contextWindow} tokens`);
 }

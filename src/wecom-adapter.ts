@@ -192,18 +192,13 @@ export async function startBot() {
     // --- Session Handling Start ---
     const session = sessionManager.getOrCreateSession(sessionKey);
 
-    // Handle /new and "清理会话" commands
+    // Handle high-priority system commands (Exact match only)
     const textContent = typeof parsedContent === "string" ? parsedContent.trim().toLowerCase() : "";
-    const isNewCommand = 
-      textContent === "/new" || 
-      textContent === "清理会话" || 
-      textContent === "重置会话" ||
-      textContent.includes("清理会话") || // 处理 "@机器人 清理会话"
-      textContent.includes("重置会话");
+    const isHardcodedNew = textContent === "/new" || textContent === "reset";
 
-    if (isNewCommand) {
+    if (isHardcodedNew) {
       sessionManager.clearSession(sessionKey);
-      processedMsgs.add(body.msgid); // Mark this message as processed
+      processedMsgs.add(body.msgid);
       await bot.replyStreamWithCard(
         frame,
         body.msgid,
@@ -242,6 +237,14 @@ export async function startBot() {
       if (typeof parsedContent === 'string' && parsedContent.trim().length > 0) {
         try {
           const plannerResult = await runPlanner(parsedContent);
+          
+          // 语义化意图识别：如果 Planner 判定为清理会话
+          if (plannerResult?.status === 'clear_session') {
+            sessionManager.clearSession(sessionKey);
+            await bot.replyStream(frame, streamId, "✅ 已通过语义识别为您清理会话记录。我们可以重新开始了。", true);
+            return;
+          }
+
           if (plannerResult) {
             // 提供结构化的搜索建议，引导大模型按 MCP 要求进行高效率查询
             const searchPlanHint = `系统提示：【搜索规划建议】

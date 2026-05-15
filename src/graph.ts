@@ -66,7 +66,7 @@ export async function getBusinessPrompt() {
 /**
  * 运行 Planner 节点，将用户问题转化为高质量搜索 Query
  */
-export async function runPlanner(userQuestion: string): Promise<{ combined: string; regex: string; semantic: string } | null> {
+export async function runPlanner(userQuestion: string): Promise<{ combined: string; regex: string; semantic: string; status?: string } | null> {
   const model = await getBaseModel();
   const plannerPrompt = await getPlannerPrompt();
   

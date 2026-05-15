@@ -6,6 +6,37 @@ import { sessionManager } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 
 /**
+ * 格式化工具调用显示，提取关键参数以提升用户体验
+ */
+function getToolDisplay(name: string, argsStr: string): string {
+  if (!argsStr || argsStr === '{}' || argsStr === '') return name;
+  try {
+    const args = JSON.parse(argsStr);
+    // 提取最能代表查询意图的参数
+    const keyParams = ['query', 'searchText', 'pattern', 'target', 'symbol', 'path', 'table_name', 'sql'];
+    for (const key of keyParams) {
+      if (args[key]) {
+        const val = String(args[key]);
+        const truncated = val.length > 30 ? val.substring(0, 30) + "..." : val;
+        return `${name}("${truncated}")`;
+      }
+    }
+    // 如果没有匹配到常用参数，则显示简短的 JSON 片段
+    const briefArgs = JSON.stringify(args);
+    return briefArgs.length > 40 ? `${name}(${briefArgs.substring(0, 40)}...)` : `${name}(${briefArgs})`;
+  } catch {
+    // 尝试正则匹配还没写完的 JSON 片段（流式过程中常见）
+    const match = argsStr.match(/"(query|searchText|pattern|target|symbol|path|table_name|sql)"\s*:\s*"([^"]*)"/);
+    if (match && match[2]) {
+      const val = match[2];
+      const truncated = val.length > 30 ? val.substring(0, 30) + "..." : val;
+      return `${name}("${truncated}...")`;
+    }
+  }
+  return name;
+}
+
+/**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
  */
 export async function parseWeComMessage(body: any, bot: WSClient): Promise<string | { type: string; text?: string; image_url?: { url: string } | string }[]> {
@@ -234,32 +265,57 @@ export async function startBot() {
           streamMode: "messages",
         });
 
+        // 工具调用累加器：用于聚合流式的 tool_call_chunks
+        const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
+
         for await (const [message, metadata] of stream) {
           const msg = message as BaseMessage;
           intermediateMessages.push(msg); // 记录中间过程
           
           const type = (msg as any)._getType?.() || msg.constructor.name;
           
+          // 处理工具执行结果：记录完整调用日志
+          if (type === "tool" || type === "ToolMessage") {
+            const toolMsg = msg as any;
+            const id = toolMsg.tool_call_id;
+            const entry = toolCallMap.get(id);
+            if (entry) {
+              entry.completed = true;
+              console.log(`[Tool Call Success] Name: ${entry.name}, Args: ${entry.args}, Result Size: ${String(toolMsg.content).length}`);
+            }
+            continue;
+          }
+
           if (type === "ai" || type === "AIMessage" || type === "AIMessageChunk") {
             const aiMsg = msg as any; // Cast to any to handle both AIMessage and AIMessageChunk
             
             // 处理工具调用：记录日志并发送状态反馈给企微
-            // 在流式返回中，使用 tool_call_chunks 来获取增量的工具调用信息
             if (aiMsg.tool_call_chunks && aiMsg.tool_call_chunks.length > 0) {
               for (const chunk of aiMsg.tool_call_chunks) {
-                // 只在首次出现 tool name 的 chunk 时打印日志和发送提示，避免重复刷屏
-                if (chunk.name) {
-                  console.log(`[Tool Call Started] Name: ${chunk.name}, ID: ${chunk.id}`);
-                  
-                  // 给企微发送一个友好的状态提示
+                const id = chunk.id;
+                if (!id) continue;
+                if (!toolCallMap.has(id)) {
+                  toolCallMap.set(id, { name: "", args: "", notified: false, completed: false });
+                }
+                const entry = toolCallMap.get(id)!;
+                if (chunk.name) entry.name = chunk.name;
+                if (chunk.args) entry.args += chunk.args;
+
+                // 聚合当前所有正在活跃的调用（名字已知且未完成）
+                const activeCalls = Array.from(toolCallMap.values())
+                  .filter(c => c.name && !c.completed)
+                  .map(c => `> 🔍 正在调用: ${getToolDisplay(c.name, c.args)}...`);
+                
+                if (activeCalls.length > 0) {
                   const statusMsg = fullContent 
-                    ? `${fullContent}\n\n> 🔍 正在调用: ${chunk.name}...` 
-                    : `> 🔍 正在调用: ${chunk.name}...`;
+                    ? `${fullContent}\n\n${activeCalls.join("\n")}` 
+                    : activeCalls.join("\n");
                   
-                  await bot.replyStream(frame, streamId, statusMsg, false);
-                } else if (chunk.args) {
-                   // 可选：在这里记录参数增量，如果需要的话
-                   // console.log(`[Tool Call Args Delta] ${chunk.args}`);
+                  // 节流推送：避免高频更新导致前端闪烁
+                  if (Date.now() - lastUpdateTime > 1000) { 
+                    await bot.replyStream(frame, streamId, statusMsg, false);
+                    lastUpdateTime = Date.now();
+                  }
                 }
               }
               continue;
@@ -293,6 +349,14 @@ export async function startBot() {
             }
           }
         }
+
+        // 最终检查：记录那些可能未返回 ToolMessage 的调用
+        for (const [id, entry] of toolCallMap.entries()) {
+          if (!entry.completed && entry.name) {
+            console.log(`[Tool Call Pending/Final] Name: ${entry.name}, Args: ${entry.args}`);
+          }
+        }
+
       } catch (err: any) {
         console.error(`Agent execution error for ${body.msgid}:`, err);
         

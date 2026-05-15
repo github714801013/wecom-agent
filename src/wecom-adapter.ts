@@ -206,13 +206,13 @@ export async function startBot() {
       let finalContentForPrompt: any = parsedContent;
       if (typeof parsedContent === 'string' && parsedContent.trim().length > 0) {
         try {
-          const queries = await runPlanner(parsedContent);
-          if (queries && queries.length > 0) {
-            // 提供结构化的搜索建议，引导大模型按 MCP 要求拼接查询
+          const plannerResult = await runPlanner(parsedContent);
+          if (plannerResult) {
+            // 提供结构化的搜索建议，引导大模型按 MCP 要求进行高效率查询
             const searchPlanHint = `系统提示：【搜索规划建议】
-为了提高效率，请优先按 MCP 要求将以下关键词拼接后进行单次查询（例如使用空格分隔），严禁对每个词进行循环搜索：
-关键词列表：${queries.join(", ")}
-推荐拼接 Query：${queries.join(" ")}`;
+请根据以下优化后的 Query 进行单次一站式搜索，严禁对关键词进行拆分循环搜索。
+1. 关键词合并 (推荐): ${plannerResult.combined}
+2. 逻辑或 (备选): ${plannerResult.regex}`;
             
             finalContentForPrompt = `${searchPlanHint}\n\n${parsedContent}`;
           }
@@ -246,6 +246,11 @@ export async function startBot() {
             // 处理工具调用：记录日志并发送状态反馈给企微
             if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
               for (const tool of aiMsg.tool_calls) {
+                if (!tool.name) {
+                  console.warn(`[Warning] Received tool call with empty name for msg ${body.msgid}:`, JSON.stringify(tool));
+                  continue;
+                }
+                
                 console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
                 
                 // 给企微发送一个友好的状态提示

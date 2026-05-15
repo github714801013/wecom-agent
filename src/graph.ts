@@ -66,7 +66,7 @@ export async function getBusinessPrompt() {
 /**
  * 运行 Planner 节点，将用户问题转化为高质量搜索 Query
  */
-export async function runPlanner(userQuestion: string): Promise<string[]> {
+export async function runPlanner(userQuestion: string): Promise<{ combined: string; regex: string } | null> {
   const model = await getBaseModel();
   const plannerPrompt = await getPlannerPrompt();
   
@@ -78,14 +78,14 @@ export async function runPlanner(userQuestion: string): Promise<string[]> {
   try {
     const content = response.content.toString();
     // 简单提取 JSON 部分，防止 LLM 输出多余文字
-    const jsonMatch = content.match(/\[.*\]/s);
+    const jsonMatch = content.match(/\{.*\}/s);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
     }
-    return [userQuestion];
+    return null;
   } catch (err) {
     console.error("Failed to parse planner response:", err);
-    return [userQuestion];
+    return null;
   }
 }
 

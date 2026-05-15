@@ -27,52 +27,11 @@
 - [ ] 本地工程合规审计表输出 (Compliance Audit Report)
 - [ ] 完结审计拦截 (Final Phase Check)
 
-## Dynamic Tasks (Sync at 2026-05-15 12:49:21)
+## Dynamic Tasks (Sync at 2026-05-16 07:22:52)
+- [x] 重命名压缩提示词文件\n- [x] 在 graph.ts 中实现 runCompressor\n- [x] 在 business-prompt.md 中增加自动压缩节点说明\n- [ ] 在 wecom-adapter.ts 中实现自动压缩触发逻辑\n- [ ] 编写测试用例验证自动压缩功能
 
-## Phase 1: Research & Setup (初始化)
-- [x] 运行环境与版本确认 (Runtime/Environment Check)
-- [x] 租户隔离/路径前缀确认 (Tenant/Path Context)
-- [x] 核心规范检索 (qmd Discovery)
-- [x] 涉及技能识别：提示词增强 (Prompt Engineering)
+## Dynamic Tasks (Sync at 2026-05-16 07:23:28)
+- [x] 在 wecom-adapter.ts 中实现自动压缩触发逻辑
 
-## Phase 2: Design (文档先行)
-- [x] 性能优化要点：不适用
-- [x] 编码规范要点：不适用
-- [x] 测试要点：编写 SQL 完整性测试用例
-
-## Phase 3: Implementation (开发)
-- [/] 业务逻辑实现 (Surgical Change): 更新 business-prompt.md 增强 SQL 规则
-- [ ] 规范合规注释注入 (Spec Compliance Comments)
-
-## Phase 4: Verification (验证)
-- [ ] 单入口/集成测试验证 (Single-Entry/Integration Test): 验证 SQL 输出完整性
-
-
-## Dynamic Tasks (Sync at 2026-05-15 12:52:55)
-
-## Phase 1: Research & Setup (初始化)
-- [x] 运行环境与版本确认 (Runtime/Environment Check)
-- [x] 租户隔离/路径前缀确认 (Tenant/Path Context)
-- [x] 核心规范检索 (qmd Discovery)
-- [x] 涉及技能识别：提示词增强 (Prompt Engineering)
-
-## Phase 2: Design (文档先行)
-- [x] 性能优化要点：不适用
-- [x] 编码规范要点：不适用
-- [x] 测试要点：编写 SQL 完整性测试用例
-
-## Phase 3: Implementation (开发)
-- [x] 业务逻辑实现 (Surgical Change): 更新 business-prompt.md 增强 SQL 规则
-- [ ] 语义去噪实现 (Semantic De-noising): 升级 Planner 支持 stripped_combined 字段
-- [ ] 规范合规注释注入 (Spec Compliance Comments)
-
-## Phase 4: Verification (验证)
-- [x] 单入口/集成测试验证 (Single-Entry/Integration Test): 验证 SQL 输出完整性 (Pass)
-- [ ] 逻辑验证：验证 stripped_combined 成功剔除人名/商品等实例数据
-- [x] 物理构建/编译通过 (Build Passed)
-
-
-## Phase 5: Audit & Finish (审计与完结)
-- [x] 本地工程合规审计表输出 (Compliance Audit Report)
-- [x] 完结审计拦截 (Final Phase Check)
-
+## Dynamic Tasks (Sync at 2026-05-16 07:28:56)
+- [x] 编写测试用例验证自动压缩功能 (Pass)

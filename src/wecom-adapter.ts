@@ -240,27 +240,40 @@ export async function startBot() {
           
           const type = (msg as any)._getType?.() || msg.constructor.name;
           
-          if (type === "ai" || type === "AIMessage") {
-            const aiMsg = msg as AIMessage;
+          if (type === "ai" || type === "AIMessage" || type === "AIMessageChunk") {
+            const aiMsg = msg as any; // Cast to any to handle both AIMessage and AIMessageChunk
             
             // 处理工具调用：记录日志并发送状态反馈给企微
-            if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
-              for (const tool of aiMsg.tool_calls) {
-                if (!tool.name) {
-                  console.warn(`[Warning] Received tool call with empty name for msg ${body.msgid}:`, JSON.stringify(tool));
-                  continue;
+            // 在流式返回中，使用 tool_call_chunks 来获取增量的工具调用信息
+            if (aiMsg.tool_call_chunks && aiMsg.tool_call_chunks.length > 0) {
+              for (const chunk of aiMsg.tool_call_chunks) {
+                // 只在首次出现 tool name 的 chunk 时打印日志和发送提示，避免重复刷屏
+                if (chunk.name) {
+                  console.log(`[Tool Call Started] Name: ${chunk.name}, ID: ${chunk.id}`);
+                  
+                  // 给企微发送一个友好的状态提示
+                  const statusMsg = fullContent 
+                    ? `${fullContent}\n\n> 🔍 正在调用: ${chunk.name}...` 
+                    : `> 🔍 正在调用: ${chunk.name}...`;
+                  
+                  await bot.replyStream(frame, streamId, statusMsg, false);
+                } else if (chunk.args) {
+                   // 可选：在这里记录参数增量，如果需要的话
+                   // console.log(`[Tool Call Args Delta] ${chunk.args}`);
                 }
-                
-                console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
-                
-                // 给企微发送一个友好的状态提示
-                const statusMsg = fullContent 
-                  ? `${fullContent}\n\n> 🔍 正在调用: ${tool.name}...` 
-                  : `> 🔍 正在调用: ${tool.name}...`;
-                
-                await bot.replyStream(frame, streamId, statusMsg, false);
               }
               continue;
+            } else if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
+                // 回退逻辑：如果模型非流式返回，直接使用 tool_calls
+                for (const tool of aiMsg.tool_calls) {
+                  if (!tool.name) continue;
+                  console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
+                  const statusMsg = fullContent 
+                    ? `${fullContent}\n\n> 🔍 正在调用: ${tool.name}...` 
+                    : `> 🔍 正在调用: ${tool.name}...`;
+                  await bot.replyStream(frame, streamId, statusMsg, false);
+                }
+                continue;
             }
 
             if (aiMsg.content) {

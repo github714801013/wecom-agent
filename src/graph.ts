@@ -63,10 +63,38 @@ export async function getBusinessPrompt() {
   }
 }
 
+export interface PlannerResult {
+  intent: string;
+  confidence: number;
+  normalized_question: string;
+  business_terms: string[];
+  code_terms: {
+    english: string[];
+    pinyin: string[];
+    abbr: string[];
+  };
+  queries: Array<{
+    query: string;
+    type: string;
+    priority: number;
+    reason: string;
+  }>;
+  hypotheses: Array<{
+    title: string;
+    queries: string[];
+  }>;
+  search_plan: {
+    primary: string[];
+    secondary: string[];
+    exclude: string[];
+  };
+  missing_info: string[];
+}
+
 /**
  * 运行 Planner 节点，将用户问题转化为高质量搜索 Query
  */
-export async function runPlanner(userQuestion: string): Promise<{ combined: string; regex: string; semantic: string; stripped_combined: string; status?: string } | null> {
+export async function runPlanner(userQuestion: string): Promise<PlannerResult | null> {
   const model = await getBaseModel();
   const plannerPrompt = await getPlannerPrompt();
   

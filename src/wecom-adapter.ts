@@ -237,27 +237,30 @@ export async function startBot() {
       if (typeof parsedContent === 'string' && parsedContent.trim().length > 0) {
         try {
           const plannerResult = await runPlanner(parsedContent);
-          
-          // 语义化意图识别：如果 Planner 判定为清理会话
-          if (plannerResult?.status === 'clear_session') {
-            sessionManager.clearSession(sessionKey);
-            await bot.replyStream(frame, streamId, "✅ 已通过语义识别为您清理会话记录。我们可以重新开始了。", true);
-            return;
-          }
 
           if (plannerResult) {
+            const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
+            const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
+            const codeTerms = plannerResult.code_terms?.english?.join(' ') || '';
+
             // 提供结构化的搜索建议，引导大模型按 MCP 要求进行高效率查询
-            const searchPlanHint = `系统提示：【搜索规划建议】
-请根据以下优化后的 Query 进行搜索。
-1. 纯净逻辑词 (优先用于代码检索): ${plannerResult.stripped_combined}
-2. 关键词合并: ${plannerResult.combined}
-3. 逻辑或: ${plannerResult.regex}
-4. 语义向量: ${plannerResult.semantic}
+            const searchPlanHint = `系统提示：【检索与分析规划建议】
+意图识别: ${plannerResult.intent} (置信度: ${plannerResult.confidence})
+标准问题: ${plannerResult.normalized_question}
+
+【高优代码检索词】
+${codeTerms}
+
+【推荐查询 (Queries)】
+${queries}
+
+【问题假设与排查方向】
+${hypotheses}
 
 【核心红线】
-* **必须**优先使用“纯净逻辑词”进行单次一站式检索。
-* **严禁**在代码检索中包含人名、商品名、租户名、订单号等实例数据。
-* 如果意图模糊或纯净关键词检索不到，必须配合使用 \`query\` 工具进行“语义向量”检索。
+* **必须**优先使用上述“高优代码检索词”或“推荐查询”进行单次一站式检索。
+* 严禁在代码检索中包含人名、商品名、租户名、订单号等实例数据。
+* 如果意图模糊，参考问题假设进行进一步排查。
 * 严禁拆分关键词进行多次循环搜索。`;
             
             finalContentForPrompt = `${searchPlanHint}\n\n${parsedContent}`;

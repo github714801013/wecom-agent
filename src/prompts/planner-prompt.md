@@ -585,11 +585,12 @@ hypotheses 用于假设驱动检索。
 "normalized_question": "排查云南国补订单未同步的原因",
 "business_terms": ["云南", "国补", "订单", "同步"],
 "code_terms": {
-"chinese": ["国补", "订单", "同步"],
-"english": ["subsidy", "order", "sync"],
-"pinyin": ["guobu", "dingdan", "tongbu"],
-"abbr": ["gb", "dd", "tb"],
-"mixed": ["gbOrderSync", "guobu_order_sync"]
+  "chinese": ["云南", "国补", "订单", "同步"],
+  "english": ["subsidy", "order", "sync"],
+  "pinyin": ["guobu", "dingdan", "tongbu"],
+  "abbr": ["gb", "dd", "tb"],
+  "mixed": ["gbOrderSync", "guobu_order_sync"],
+  "combined": "subsidy order sync guobu dingdan yn gb dd tb"
 },
 "queries": [
 {

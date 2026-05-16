@@ -75,6 +75,7 @@ export interface PlannerResult {
     pinyin: string[];
     abbr: string[];
     mixed: string[];
+    combined?: string;
   };
   queries: Array<{
     query: string;

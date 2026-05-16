@@ -8,29 +8,38 @@ import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 /**
  * 格式化工具调用显示，提取关键参数以提升用户体验
  */
-function getToolDisplay(name: string, argsStr: string): string {
-  if (!argsStr || argsStr === '{}' || argsStr === '') return name;
+function getToolDisplay(name: string, args: any): string {
+  if (!args || args === '{}' || args === '') return name;
+  
+  let argsObj: any;
   try {
-    const args = JSON.parse(argsStr);
+    if (typeof args === 'string') {
+      argsObj = JSON.parse(args);
+    } else {
+      argsObj = args;
+    }
+
     // 提取最能代表查询意图的参数
     const keyParams = ['query', 'searchText', 'pattern', 'target', 'symbol', 'path', 'table_name', 'sql'];
     for (const key of keyParams) {
-      if (args[key]) {
-        const val = String(args[key]);
+      if (argsObj[key]) {
+        const val = String(argsObj[key]);
         const truncated = val.length > 30 ? val.substring(0, 30) + "..." : val;
         return `${name}("${truncated}")`;
       }
     }
     // 如果没有匹配到常用参数，则显示简短的 JSON 片段
-    const briefArgs = JSON.stringify(args);
+    const briefArgs = JSON.stringify(argsObj);
     return briefArgs.length > 40 ? `${name}(${briefArgs.substring(0, 40)}...)` : `${name}(${briefArgs})`;
   } catch {
     // 尝试正则匹配还没写完的 JSON 片段（流式过程中常见）
-    const match = argsStr.match(/"(query|searchText|pattern|target|symbol|path|table_name|sql)"\s*:\s*"([^"]*)"/);
-    if (match && match[2]) {
-      const val = match[2];
-      const truncated = val.length > 30 ? val.substring(0, 30) + "..." : val;
-      return `${name}("${truncated}...")`;
+    if (typeof args === 'string') {
+      const match = args.match(/"(query|searchText|pattern|target|symbol|path|table_name|sql)"\s*:\s*"([^"]*)"/);
+      if (match && match[2]) {
+        const val = match[2];
+        const truncated = val.length > 30 ? val.substring(0, 30) + "..." : val;
+        return `${name}("${truncated}...")`;
+      }
     }
   }
   return name;
@@ -234,21 +243,34 @@ export async function startBot() {
 
       // --- Planner Logic Start ---
       let finalContentForPrompt: any = parsedContent;
-      if (typeof parsedContent === 'string' && parsedContent.trim().length > 0) {
-        try {
-          const plannerResult = await runPlanner(parsedContent);
+      let plannerResult = null;
 
+      // 提取文本内容进行 Planner 分析
+      let textToPlan = "";
+      if (typeof parsedContent === 'string') {
+        textToPlan = parsedContent;
+      } else if (Array.isArray(parsedContent)) {
+        const textItem = parsedContent.find(i => i.type === 'text');
+        if (textItem) textToPlan = textItem.text || "";
+      }
+
+      if (textToPlan.trim().length > 0) {
+        try {
+          plannerResult = await runPlanner(textToPlan);
           if (plannerResult) {
             const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
             
-            // 聚合所有检索词
-            const allTerms = [
-              ...(plannerResult.code_terms?.english || []),
-              ...(plannerResult.code_terms?.chinese || []),
-              ...(plannerResult.code_terms?.mixed || [])
-            ].filter(t => t && t.length > 0);
-            const codeTerms = Array.from(new Set(allTerms)).join(' ');
+            // 聚合所有检索词，优先使用 planner 返回的 combined 字段
+            let codeTerms = plannerResult.code_terms?.combined || "";
+            if (!codeTerms) {
+              const allTerms = [
+                ...(plannerResult.code_terms?.english || []),
+                ...(plannerResult.code_terms?.chinese || []),
+                ...(plannerResult.code_terms?.mixed || [])
+              ].filter(t => t && t.length > 0);
+              codeTerms = Array.from(new Set(allTerms)).join(' ');
+            }
             
             const intents = [plannerResult.intent, ...(plannerResult.secondary_intents || [])].filter(Boolean).join(', ');
 
@@ -257,7 +279,7 @@ export async function startBot() {
 意图识别: ${intents} (置信度: ${plannerResult.confidence})
 标准问题: ${plannerResult.normalized_question}
 
-【高优代码检索词】
+【高优代码检索词 (combined)】
 ${codeTerms}
 
 【推荐查询 (Queries)】
@@ -272,7 +294,14 @@ ${hypotheses}
 * 如果意图模糊，参考问题假设进行进一步排查。
 * 严禁拆分关键词进行多次循环搜索。`;
             
-            finalContentForPrompt = `${searchPlanHint}\n\n${parsedContent}`;
+            if (typeof parsedContent === 'string') {
+              finalContentForPrompt = `${searchPlanHint}\n\n${parsedContent}`;
+            } else if (Array.isArray(parsedContent)) {
+              finalContentForPrompt = [
+                { type: 'text', text: `${searchPlanHint}\n\n` },
+                ...parsedContent
+              ];
+            }
           }
         } catch (err) {
           console.error("Planner execution failed:", err);
@@ -352,8 +381,8 @@ ${hypotheses}
                   if (!tool.name) continue;
                   console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
                   const statusMsg = fullContent 
-                    ? `${fullContent}\n\n> 🔍 正在调用: ${tool.name}...` 
-                    : `> 🔍 正在调用: ${tool.name}...`;
+                    ? `${fullContent}\n\n> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...` 
+                    : `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`;
                   await bot.replyStream(frame, streamId, statusMsg, false);
                 }
                 continue;

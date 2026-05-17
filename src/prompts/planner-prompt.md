@@ -590,7 +590,8 @@ hypotheses 用于假设驱动检索。
   "pinyin": ["guobu", "dingdan", "tongbu"],
   "abbr": ["gb", "dd", "tb"],
   "mixed": ["gbOrderSync", "guobu_order_sync"],
-  "combined": "subsidy order sync guobu dingdan yn gb dd tb"
+  "combined": "云南 国补 订单 同步 subsidy order sync guobu dingdan yn gb dd tb",
+  "stripped_combined": "国补 订单 同步 subsidy order sync guobu dingdan gb dd tb"
 },
 "queries": [
 {
@@ -621,11 +622,36 @@ hypotheses 用于假设驱动检索。
 3. confidence 必填，范围 0 到 1。
 4. normalized_question 必填，必须是一句话。
 5. business_terms 必填，可以为空数组。
-6. code_terms 必填，必须包含 chinese、english、pinyin、abbr、mixed。
+6. code_terms 必填，必须包含 chinese、english、pinyin、abbr、mixed、combined、stripped_combined。
+   - combined：保留用户原始业务词和必要代码词，用于理解上下文。
+   - stripped_combined：剔除品牌名、租户名、人名、手机号、订单号、完整短信文案等实例数据，仅保留业务动作、领域词和技术词，用于代码搜索。
 7. queries 必填，至少 5 条，最多 15 条。
 8. hypotheses 必填，至少 2 条，最多 5 条。
 9. search_plan 必填。
 10. missing_info 必填，可以为空数组。
+
+短信来源类问题示例：
+
+输入：
+
+user_question:
+【兴鸿数码】恭喜您成为兴鸿数码会员 是哪里推送的
+
+关键输出片段：
+
+{
+"normalized_question": "查询会员注册成功短信从哪里触发推送",
+"business_terms": ["会员", "短信", "模板", "推送"],
+"code_terms": {
+  "chinese": ["会员", "短信", "模板", "推送", "注册", "入会"],
+  "english": ["member", "sms", "template", "push", "send", "register"],
+  "pinyin": ["huiyuan", "duanxin", "moban", "tuisong", "zhuce"],
+  "abbr": ["hy", "dx", "mb", "ts", "zc"],
+  "mixed": ["memberSms", "smsTemplate", "registerSend"],
+  "combined": "兴鸿数码 会员 短信 模板 推送 member sms template push send",
+  "stripped_combined": "会员 短信 模板 推送 注册 入会 member sms template push send register"
+}
+}
 
 ====================
 十、优先级规则

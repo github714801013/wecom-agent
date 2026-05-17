@@ -76,6 +76,7 @@ export interface PlannerResult {
     abbr: string[];
     mixed: string[];
     combined?: string;
+    stripped_combined?: string;
   };
   queries: Array<{
     query: string;

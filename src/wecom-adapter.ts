@@ -45,6 +45,71 @@ function getToolDisplay(name: string, args: any): string {
   return name;
 }
 
+export function extractTextContent(content: string | { type: string; text?: string }[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter(item => item.type === "text" && item.text)
+    .map(item => item.text)
+    .join("\n");
+}
+
+export function isClearSessionCommand(text: string): boolean {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[\s，。！？!?.]/g, "")
+    .replace(/的/g, "");
+
+  if (!normalized) return false;
+
+  if (/^(怎么|如何|为什么|为何|查询|排查|分析|说明|解释)/.test(normalized)) {
+    return false;
+  }
+
+  if (/(不生效|没生效|无效|失败|问题|原因)/.test(normalized)) {
+    return false;
+  }
+
+  const exactCommands = new Set([
+    "/new",
+    "reset",
+    "清理当前会话",
+    "清理会话",
+    "清空当前会话",
+    "清空会话",
+    "重置当前会话",
+    "重置会话",
+    "清理当前对话",
+    "清理对话",
+    "清空对话",
+    "重置对话",
+    "清理上下文",
+    "清空上下文",
+    "重置上下文",
+    "清理记忆",
+    "清空记忆",
+    "忘记之前对话",
+    "忘记历史对话"
+  ]);
+
+  if (exactCommands.has(normalized)) return true;
+
+  const politePrefix = "(请|麻烦|麻烦你|帮我|帮忙|给我|帮我把|把)?";
+  const scope = "(当前|本次|这次|这个|刚才|之前|历史|上面|前面|所有|全部)?";
+  const filler = "(一下|下)?";
+  const target = "(会话|对话|聊天记录|上下文|记忆|历史|内容|消息|记录)";
+
+  const semanticPatterns = [
+    new RegExp(`^${politePrefix}${scope}?(清理|清空|清除|删除|重置|刷新|抹掉|擦掉|删掉|清掉|清一下|清一清)${filler}${scope}?${target}(吧|一下|下)?$`),
+    new RegExp(`^${politePrefix}${scope}?${target}(清理|清空|清除|删除|重置|刷新|抹掉|擦掉|删掉|清掉)${filler}(吧|一下|下)?$`),
+    new RegExp(`^${politePrefix}(忘记|忘掉|不要记|别记|删除|清掉)${scope}?${target}(吧|一下|下)?$`),
+    /^(重新开始|从头开始|新开会话|开启新会话|开始新会话|开始新的会话|开个新会话|另起会话|另起一个会话)$/,
+    /^(不带上下文|不要上下文|不要带历史|不参考历史|不看历史|不看上文|忽略上文|忽略前文|忽略之前内容)$/
+  ];
+
+  return semanticPatterns.some(pattern => pattern.test(normalized));
+}
+
 /**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
  */
@@ -202,8 +267,10 @@ export async function startBot() {
     const session = sessionManager.getOrCreateSession(sessionKey);
 
     // Handle high-priority system commands (Exact match only)
-    const textContent = typeof parsedContent === "string" ? parsedContent.trim().toLowerCase() : "";
-    const isHardcodedNew = textContent === "/new" || textContent === "reset";
+    const commandText = body.msgtype === MessageType.Text
+      ? body.text?.content || ""
+      : extractTextContent(parsedContent as any);
+    const isHardcodedNew = isClearSessionCommand(commandText);
 
     if (isHardcodedNew) {
       sessionManager.clearSession(sessionKey);
@@ -261,26 +328,40 @@ export async function startBot() {
             const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
             
-            // 聚合所有检索词，优先使用 planner 返回的 combined 字段
-            let codeTerms = plannerResult.code_terms?.combined || "";
-            if (!codeTerms) {
+            // 优先使用去实例化检索词，避免品牌/租户/完整文案干扰代码搜索。
+            const rawCodeTerms = plannerResult.code_terms?.combined || "";
+            let cleanCodeTerms = plannerResult.code_terms?.stripped_combined || "";
+            if (!cleanCodeTerms) {
               const allTerms = [
                 ...(plannerResult.code_terms?.english || []),
                 ...(plannerResult.code_terms?.chinese || []),
                 ...(plannerResult.code_terms?.mixed || [])
               ].filter(t => t && t.length > 0);
-              codeTerms = Array.from(new Set(allTerms)).join(' ');
+              cleanCodeTerms = Array.from(new Set(allTerms)).join(' ');
             }
             
             const intents = [plannerResult.intent, ...(plannerResult.secondary_intents || [])].filter(Boolean).join(', ');
+            const smsTemplateEvidenceHint = /短信|模板|文案|推送|发送|通知/.test(textToPlan)
+              ? `
+
+【短信/模板/推送来源通用证据规则】
+当前问题涉及短信、模板、文案、推送、发送或通知来源。必须按证据优先排查：
+1. 先从用户问题中提取“消息正文/模板正文”的稳定片段，剔除品牌、租户、人名、手机号、订单号、验证码、时间等实例值。
+2. 使用 \`query\` 做业务流程召回后，必须用 \`zoekt_search\` 对稳定片段 + 发送动作词做精确验证；动作词优先包含 sms、message、template、push、send、notify、sendMessage。
+3. 一旦命中代码文件，必须继续用 \`context\` 或 \`code_snippet\` 读取触发方法和发送调用附近代码。
+4. 最终回答必须引用已命中的仓库、文件、方法和发送调用；没有直接代码/配置证据时，只能说明“未核实到直接来源”，禁止按业务经验猜测具体系统或流程。`
+              : "";
 
             // 提供结构化的搜索建议，引导大模型按 MCP 要求进行高效率查询
             const searchPlanHint = `系统提示：【检索与分析规划建议】
 意图识别: ${intents} (置信度: ${plannerResult.confidence})
 标准问题: ${plannerResult.normalized_question}
 
-【高优代码检索词 (combined)】
-${codeTerms}
+【纯净逻辑检索词 (stripped_combined，优先用于 Zoekt/GitNexus 代码检索)】
+${cleanCodeTerms}
+
+【原始业务词 (combined，仅用于理解上下文，禁止直接作为代码检索词)】
+${rawCodeTerms}
 
 【推荐查询 (Queries)】
 ${queries}
@@ -290,10 +371,10 @@ ${hypotheses}
 
 【核心红线】
 * **必须**首选调用 GitNexus 的 \`query\` 工具（多路召回语义搜索），使用“标准问题”配合核心业务词进行初步探测，以获取相关的“执行流 (Process)”。
-* 只有当 \`query\` 工具未能精准锁定目标，或需要查找特定文本（如配置、日志、正则）时，才使用“高优代码检索词”调用 \`zoekt_search\` 进行一站式检索。
+* 只有当 \`query\` 工具未能精准锁定目标，或需要查找特定文本（如配置、日志、正则）时，才使用“纯净逻辑检索词”调用 \`zoekt_search\` 进行一站式检索。
 * 严禁在代码检索中包含人名、商品名、租户名、订单号等实例数据。
 * 如果意图模糊，参考问题假设进行进一步排查。
-* 严禁拆分关键词进行多次循环搜索。`;
+* 严禁拆分关键词进行多次循环搜索。${smsTemplateEvidenceHint}`;
             
             if (typeof parsedContent === 'string') {
               finalContentForPrompt = `${searchPlanHint}\n\n${parsedContent}`;

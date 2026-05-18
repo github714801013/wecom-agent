@@ -35,7 +35,10 @@ export async function getAllMcpTools() {
       
       let transport;
       if (server.type === "sse") {
-        transport = new SSEClientTransport(new URL(server.url));
+        transport = new SSEClientTransport(new URL(server.url), {
+          requestInit: server.headers ? { headers: server.headers } as any : undefined,
+          eventSourceInit: server.headers ? { headers: server.headers } as any : undefined,
+        });
       } else {
         // Handle stdio if needed in the future
         console.warn(`Unsupported MCP transport type: ${server.type} for ${server.name}`);

@@ -625,6 +625,11 @@ hypotheses 用于假设驱动检索。
 6. code_terms 必填，必须包含 chinese、english、pinyin、abbr、mixed、combined、stripped_combined。
    - combined：保留用户原始业务词和必要代码词，用于理解上下文。
    - stripped_combined：剔除品牌名、租户名、人名、手机号、订单号、完整短信文案等实例数据，仅保留业务动作、领域词和技术词，用于代码搜索。
+   - 短信/通知/模板来源类问题中，带品牌、租户或完整短信正文的 query 只能用于配置/日志/发送记录核对，优先级不得高于 3；代码检索优先级 1 必须使用去实例化后的稳定片段、业务动作词和发送动作词。
+   - 用户问“哪里推送/哪里发送/哪里触发”时，template/config 类 query 只能作为辅助验证，优先级不得高于 2；只有用户明确问“短信模板配置、模板ID、配置表、模板内容”时，template/config 类 query 才允许优先级 1。
+   - 当问题涉及旧系统/新系统、多仓库或未明确项目时，必须生成用于“当前实现/新版实现/历史实现”对比的 query；优先使用用户明确指定的项目、上下文命中的项目、命名上更接近当前系统的项目，不得把某几个项目名写成固定优先级。
+   - 对多项目同业务场景，query 应包含通用业务词 + 技术动作词；只有用户明确提到项目名或上下文给出 repo_hint 时，才把具体项目名放入高优先级 query。
+   - 不要在 queries、search_plan 或 reason 中要求首轮代码检索使用具体工具参数、固定仓库名或项目名过滤；工具参数由执行阶段按当前 MCP description/schema 决定。
 7. queries 必填，至少 5 条，最多 15 条。
 8. hypotheses 必填，至少 2 条，最多 5 条。
 9. search_plan 必填。
@@ -650,7 +655,51 @@ user_question:
   "mixed": ["memberSms", "smsTemplate", "registerSend"],
   "combined": "兴鸿数码 会员 短信 模板 推送 member sms template push send",
   "stripped_combined": "会员 短信 模板 推送 注册 入会 member sms template push send register"
-}
+},
+"queries": [
+  {
+    "query": "会员 注册 短信 发送",
+    "type": "keyword",
+    "priority": 1,
+    "reason": "去实例代码词"
+  },
+  {
+    "query": "member register sms send",
+    "type": "keyword",
+    "priority": 1,
+    "reason": "英文代码词"
+  },
+  {
+    "query": "会员注册 短信配置 模板 发送",
+    "type": "keyword",
+    "priority": 1,
+    "reason": "当前实现"
+  },
+  {
+    "query": "ESmsCode 会员注册 smsConfig",
+    "type": "symbol",
+    "priority": 2,
+    "reason": "配置候选"
+  },
+  {
+    "query": "恭喜 成为 会员",
+    "type": "keyword",
+    "priority": 2,
+    "reason": "跨库文案片段"
+  },
+  {
+    "query": "恭喜您成为 Enum.GetName",
+    "type": "keyword",
+    "priority": 3,
+    "reason": "硬编码对比"
+  },
+  {
+    "query": "恭喜您成为兴鸿数码会员",
+    "type": "log",
+    "priority": 3,
+    "reason": "原始文案核对"
+  }
+]
 }
 
 ====================

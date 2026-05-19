@@ -63,6 +63,32 @@ export async function getBusinessPrompt() {
   }
 }
 
+export interface SearchQuery {
+  query: string;
+  type: string;
+  priority: number;
+  reason: string;
+}
+
+export interface SearchResult {
+  id: string;
+  source: "mcp" | "gitnexus" | "local";
+  query: string;
+  type: string;
+  content: string;
+  file_path?: string;
+  symbol?: string;
+  score?: number;
+}
+
+export interface CompressorInput {
+  user_question: string;
+  rewrite_result?: PlannerResult;
+  search_results: SearchResult[];
+  project_context?: string;
+  token_budget?: { target: number; max_per_section: number; mode: string };
+}
+
 export interface PlannerResult {
   intent: string;
   secondary_intents: string[];
@@ -78,12 +104,7 @@ export interface PlannerResult {
     combined?: string;
     stripped_combined?: string;
   };
-  queries: Array<{
-    query: string;
-    type: string;
-    priority: number;
-    reason: string;
-  }>;
+  queries: SearchQuery[];
   hypotheses: Array<{
     title: string;
     queries: string[];
@@ -177,13 +198,7 @@ export async function getCompressorPrompt() {
 /**
  * 运行 Compressor 节点，压缩检索结果或历史上下文
  */
-export async function runCompressor(input: {
-  user_question: string;
-  rewrite_result?: PlannerResult;
-  search_results: any[];
-  project_context?: string;
-  token_budget?: { target: number; max_per_section: number; mode: string };
-}): Promise<CompressorResult | null> {
+export async function runCompressor(input: CompressorInput): Promise<CompressorResult | null> {
   const model = await getBaseModel();
   const compressorPrompt = await getCompressorPrompt();
 
@@ -208,6 +223,164 @@ export async function runCompressor(input: {
     console.error("Raw response content:", response.content.toString());
     return null;
   }
+}
+
+export interface MinimalSearchLoopOptions {
+  planner: (userQuestion: string) => Promise<PlannerResult | null>;
+  searcher: (query: SearchQuery) => Promise<SearchResult[]>;
+  compressor: (input: CompressorInput) => Promise<CompressorResult | null>;
+  nextQueryPlanner: (input: {
+    userQuestion: string;
+    plannerResult: PlannerResult;
+    compression: CompressorResult;
+    previousQueries: SearchQuery[];
+  }) => Promise<SearchQuery | null>;
+  maxIterations?: number;
+}
+
+export interface MinimalSearchLoopResult {
+  plannerResult: PlannerResult;
+  compressions: CompressorResult[];
+  executedQueries: SearchQuery[];
+  iterations: number;
+  complete: boolean;
+}
+
+function sortQueriesByKeywordPriority(queries: SearchQuery[]) {
+  return [...queries].sort((left, right) => {
+    const leftKeywordRank = /keyword|lex|exact/i.test(left.type) ? 0 : 1;
+    const rightKeywordRank = /keyword|lex|exact/i.test(right.type) ? 0 : 1;
+
+    return leftKeywordRank - rightKeywordRank || left.priority - right.priority;
+  });
+}
+
+function getMissingInfo(compression: CompressorResult) {
+  return Array.isArray(compression.missing_info)
+    ? compression.missing_info.filter(Boolean)
+    : [];
+}
+
+function hasMissingInfo(compression: CompressorResult) {
+  return getMissingInfo(compression).length > 0 || compression.status === "no_hits";
+}
+
+function normalizeQueryKey(query: string) {
+  return query.trim().toLowerCase();
+}
+
+function isValidMaxIterations(maxIterations: number) {
+  return Number.isInteger(maxIterations) && maxIterations > 0;
+}
+
+export async function runDefaultNextQueryPlanner(input: {
+  userQuestion: string;
+  plannerResult: PlannerResult;
+  compression: CompressorResult;
+  previousQueries: SearchQuery[];
+}): Promise<SearchQuery | null> {
+  const usedQueries = new Set(input.previousQueries.map(query => normalizeQueryKey(query.query)));
+  const fallbackQuery = sortQueriesByKeywordPriority(input.plannerResult.queries)
+    .find(query => !usedQueries.has(normalizeQueryKey(query.query)));
+
+  if (fallbackQuery) {
+    return fallbackQuery;
+  }
+
+  const missingInfo = getMissingInfo(input.compression).join(" ").trim();
+  if (!missingInfo) return null;
+
+  const baseTerms = input.plannerResult.code_terms?.stripped_combined
+    || input.plannerResult.code_terms?.combined
+    || input.plannerResult.business_terms.join(" ");
+
+  const query = `${baseTerms} ${missingInfo}`.trim();
+  if (!query || usedQueries.has(normalizeQueryKey(query))) return null;
+
+  return {
+    query,
+    type: "keyword",
+    priority: 1,
+    reason: "补充缺失证据",
+  };
+}
+
+export function createMinimalSearchLoop(options: MinimalSearchLoopOptions) {
+  const maxIterations = options.maxIterations ?? 2;
+
+  if (!isValidMaxIterations(maxIterations)) {
+    throw new Error("maxIterations must be greater than 0");
+  }
+
+  return {
+    async run(userQuestion: string): Promise<MinimalSearchLoopResult> {
+      const plannerResult = await options.planner(userQuestion);
+
+      if (!plannerResult) {
+        throw new Error("Planner did not return a valid search plan");
+      }
+
+      const orderedQueries = sortQueriesByKeywordPriority(plannerResult.queries);
+      const firstQuery = orderedQueries[0];
+
+      if (!firstQuery) {
+        throw new Error("Planner did not return any search query");
+      }
+
+      let nextQuery: SearchQuery | null = firstQuery;
+      const compressions: CompressorResult[] = [];
+      const executedQueries: SearchQuery[] = [];
+      const accumulatedSearchResults: SearchResult[] = [];
+
+      for (let iteration = 0; iteration < maxIterations && nextQuery; iteration += 1) {
+        if (executedQueries.some(query => normalizeQueryKey(query.query) === normalizeQueryKey(nextQuery!.query))) {
+          break;
+        }
+
+        const searchResults = await options.searcher(nextQuery);
+        accumulatedSearchResults.push(...searchResults);
+        executedQueries.push(nextQuery);
+
+        const compression = await options.compressor({
+          user_question: userQuestion,
+          rewrite_result: plannerResult,
+          search_results: accumulatedSearchResults,
+          token_budget: {
+            target: Math.floor(getModelContextWindow() * 0.2),
+            max_per_section: 1000,
+            mode: "balanced",
+          },
+        });
+
+        if (!compression) {
+          throw new Error("Compressor did not return a valid result");
+        }
+
+        compressions.push(compression);
+
+        if (!hasMissingInfo(compression)) {
+          break;
+        }
+
+        nextQuery = await options.nextQueryPlanner({
+          userQuestion,
+          plannerResult,
+          compression,
+          previousQueries: executedQueries,
+        });
+      }
+
+      const lastCompression = compressions[compressions.length - 1];
+
+      return {
+        plannerResult,
+        compressions,
+        executedQueries,
+        iterations: executedQueries.length,
+        complete: Boolean(lastCompression && !hasMissingInfo(lastCompression)),
+      };
+    },
+  };
 }
 
 export async function initializeAgent() {

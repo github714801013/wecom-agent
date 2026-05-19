@@ -80,6 +80,8 @@ export class SessionManager {
           .filter(m => m instanceof AIMessage)
           .map((m, i) => ({
             id: `hist_${i}`,
+            source: "local" as const,
+            query: userQuestion,
             content: m.content.toString(),
             type: "historical_context"
           }));

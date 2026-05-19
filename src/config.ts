@@ -18,7 +18,10 @@ const envSchema = z.object({
   LLM_MODEL_NAME: z.string().default("MiniMax-M2.5"),
   LLM_RECURSION_LIMIT: z.coerce.number().default(25),
   LLM_CONTEXT_WINDOW: z.coerce.number().default(0),
-  MCP_REMOTE_URL: z.string(),
+  MCP_REMOTE_URL: z.preprocess(
+    value => value === "" ? undefined : value,
+    z.string().url().optional()
+  ),
   MCP_PROJECTS: z.string().optional(),
   MCP_SERVERS: z.string().optional(),
   ALLOWED_TOOLS: z.string().optional(),

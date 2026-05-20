@@ -79,6 +79,7 @@ export interface SearchResult {
   file_path?: string;
   symbol?: string;
   score?: number;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CompressorInput {
@@ -246,6 +247,25 @@ export interface MinimalSearchLoopResult {
   complete: boolean;
 }
 
+export interface SearchLoopPreludeOptions {
+  userQuestion: string;
+  plannerResult: PlannerResult;
+  tools: any[];
+  compressor?: (input: CompressorInput) => Promise<CompressorResult | null>;
+  maxIterations?: number;
+}
+
+function isProjectCatalogQuestion(question: string) {
+  const normalized = question.trim().toLowerCase();
+  if (!normalized) return false;
+
+  const asksCatalog = /哪些|什么|列表|清单|列出|多少/.test(normalized);
+  const mentionsProject = /项目|仓库|repo|repository/.test(normalized);
+  const mentionsQueryAbility = /能|可以|可|支持|查|查询|检索|搜索/.test(normalized);
+
+  return asksCatalog && mentionsProject && mentionsQueryAbility;
+}
+
 function sortQueriesByKeywordPriority(queries: SearchQuery[]) {
   return [...queries].sort((left, right) => {
     const leftKeywordRank = /keyword|lex|exact/i.test(left.type) ? 0 : 1;
@@ -280,29 +300,8 @@ export async function runDefaultNextQueryPlanner(input: {
   previousQueries: SearchQuery[];
 }): Promise<SearchQuery | null> {
   const usedQueries = new Set(input.previousQueries.map(query => normalizeQueryKey(query.query)));
-  const fallbackQuery = sortQueriesByKeywordPriority(input.plannerResult.queries)
-    .find(query => !usedQueries.has(normalizeQueryKey(query.query)));
-
-  if (fallbackQuery) {
-    return fallbackQuery;
-  }
-
-  const missingInfo = getMissingInfo(input.compression).join(" ").trim();
-  if (!missingInfo) return null;
-
-  const baseTerms = input.plannerResult.code_terms?.stripped_combined
-    || input.plannerResult.code_terms?.combined
-    || input.plannerResult.business_terms.join(" ");
-
-  const query = `${baseTerms} ${missingInfo}`.trim();
-  if (!query || usedQueries.has(normalizeQueryKey(query))) return null;
-
-  return {
-    query,
-    type: "keyword",
-    priority: 1,
-    reason: "补充缺失证据",
-  };
+  return sortQueriesByKeywordPriority(input.plannerResult.queries)
+    .find(query => !usedQueries.has(normalizeQueryKey(query.query))) ?? null;
 }
 
 export function createMinimalSearchLoop(options: MinimalSearchLoopOptions) {
@@ -383,14 +382,140 @@ export function createMinimalSearchLoop(options: MinimalSearchLoopOptions) {
   };
 }
 
-export async function initializeAgent() {
+function getToolSchemaKeys(tool: any) {
+  const schema = tool?.schema || tool?.input_schema || tool?.inputSchema;
+  const shape = schema?.shape;
+  if (shape && typeof shape === "object") {
+    return Object.keys(shape);
+  }
+
+  const properties = schema?.properties || schema?.jsonSchema?.properties;
+  if (properties && typeof properties === "object") {
+    return Object.keys(properties);
+  }
+
+  return [];
+}
+
+function chooseQueryArgName(tool: any) {
+  const keys = getToolSchemaKeys(tool);
+  return ["query", "searchText", "pattern"].find(key => keys.includes(key));
+}
+
+function chooseSearchTool(tools: any[]) {
+  return tools.find(tool => chooseQueryArgName(tool) && /query|search|grep|zoekt|gitnexus/i.test(tool.name || ""))
+    || tools.find(tool => chooseQueryArgName(tool));
+}
+
+function stringifyToolResult(result: unknown) {
+  if (typeof result === "string") return result;
+  try {
+    return JSON.stringify(result);
+  } catch {
+    return String(result);
+  }
+}
+
+function extractFilePath(result: unknown) {
+  if (!result || typeof result !== "object") return undefined;
+  const item = result as Record<string, unknown>;
+  return typeof item.file_path === "string" ? item.file_path
+    : typeof item.filePath === "string" ? item.filePath
+      : typeof item.path === "string" ? item.path
+        : undefined;
+}
+
+export function createToolSearchLoopSearcher(tools: any[]) {
+  const searchTool = chooseSearchTool(tools);
+
+  return async (query: SearchQuery): Promise<SearchResult[]> => {
+    if (!searchTool) return [];
+
+    const queryArgName = chooseQueryArgName(searchTool);
+    if (!queryArgName) return [];
+
+    const result = await searchTool.invoke({ [queryArgName]: query.query });
+    const searchResult: SearchResult = {
+      id: `${searchTool.name || "tool"}:${query.query}`,
+      source: /gitnexus/i.test(searchTool.name || "") ? "gitnexus" : "mcp",
+      query: query.query,
+      type: query.type,
+      content: stringifyToolResult(result),
+      metadata: {
+        tool: searchTool.name || "unknown",
+        queryArgName,
+      },
+    };
+    const filePath = extractFilePath(result);
+    if (filePath) {
+      searchResult.file_path = filePath;
+    }
+    return [searchResult];
+  };
+}
+
+export function formatSearchLoopPrelude(loopResult: MinimalSearchLoopResult) {
+  const lastCompression = loopResult.compressions[loopResult.compressions.length - 1];
+  if (!lastCompression) return "";
+
+  const executedQueries = loopResult.executedQueries
+    .map(query => `- ${query.query} (${query.type}, 优先级: ${query.priority})`)
+    .join("\n");
+  const keyEvidence = lastCompression.key_evidence
+    .map(evidence => `- ${evidence}`)
+    .join("\n");
+  const sections = lastCompression.compressed_sections
+    .map(section => `- 文件: ${section.file_path || "未知"}\n  证据: ${section.content}`)
+    .join("\n");
+  const missingInfo = lastCompression.missing_info.length > 0
+    ? lastCompression.missing_info.map(item => `- ${item}`).join("\n")
+    : "- 无";
+
+  return `【预检索证据】
+已执行查询:
+${executedQueries || "- 无"}
+
+关键证据:
+${keyEvidence || "- 无"}
+
+压缩代码片段:
+${sections || "- 无"}
+
+仍缺少:
+${missingInfo}
+
+注意：以上只来自 MCP 预检索工具结果；如证据不足，继续使用工具核实，禁止把“仍缺少”内容直接拼成新的检索词。`;
+}
+
+export async function runSearchLoopPrelude(options: SearchLoopPreludeOptions) {
+  if (isProjectCatalogQuestion(options.userQuestion)) {
+    return "";
+  }
+
+  try {
+    const loop = createMinimalSearchLoop({
+      planner: async () => options.plannerResult,
+      searcher: createToolSearchLoopSearcher(options.tools),
+      compressor: options.compressor || runCompressor,
+      nextQueryPlanner: runDefaultNextQueryPlanner,
+      maxIterations: options.maxIterations ?? 2,
+    });
+    const result = await loop.run(options.userQuestion);
+    return formatSearchLoopPrelude(result);
+  } catch (err) {
+    console.error("Search loop prelude failed:", err);
+    return "";
+  }
+}
+
+export async function initializeAgent(tools?: any[]) {
   const model = await getBaseModel();
-  const tools = await getAllMcpTools();
+  const agentTools = tools || await getAllMcpTools();
   const systemPrompt = await getBusinessPrompt();
 
   return createAgent({
     model: model,
-    tools,
+    tools: agentTools,
     systemPrompt: systemPrompt,
   });
 }

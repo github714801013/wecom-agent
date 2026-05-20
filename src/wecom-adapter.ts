@@ -1,9 +1,10 @@
 import { WSClient, MessageType } from "@wecom/aibot-node-sdk";
-import { initializeAgent, runPlanner, getModelContextWindow, getBaseModel, getBusinessPrompt } from "./graph.js";
+import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt } from "./graph.js";
 import { config } from "./config.js";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 import { sessionManager } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
+import { getAllMcpTools } from "./mcp-client.js";
 
 /**
  * 格式化工具调用显示，提取关键参数以提升用户体验
@@ -400,7 +401,28 @@ ${hypotheses}
       let intermediateMessages: BaseMessage[] = [];
 
       try {
-        const agent = await initializeAgent();
+        const tools = await getAllMcpTools();
+
+        if (plannerResult && textToPlan.trim().length > 0) {
+          const prelude = await runSearchLoopPrelude({
+            userQuestion: textToPlan,
+            plannerResult,
+            tools,
+          });
+
+          if (prelude) {
+            if (typeof finalContentForPrompt === 'string') {
+              finalContentForPrompt = `${prelude}\n\n${finalContentForPrompt}`;
+            } else if (Array.isArray(finalContentForPrompt)) {
+              finalContentForPrompt = [
+                { type: 'text', text: `${prelude}\n\n` },
+                ...finalContentForPrompt,
+              ];
+            }
+          }
+        }
+
+        const agent = await initializeAgent(tools);
         const stream = await agent.stream({
           messages: [...session.messages, new HumanMessage({ content: finalContentForPrompt as any })],
         }, {

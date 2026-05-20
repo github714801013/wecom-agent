@@ -74,21 +74,24 @@ export class SessionManager {
       console.log(`[Session] Context size (${Math.round(currentTokens)} tokens) exceeds threshold. Triggering compression...`);
       
       try {
+        const lastHumanMsg = [...session.messages].reverse().find(m => m instanceof HumanMessage);
+        const userQuestion = lastHumanMsg ? lastHumanMsg.content.toString() : "Summary of previous conversation";
+
         // Prepare input for compressor
-        // We treat historical AIMessages as "search results" if they contain code
+        // Historical AI messages are summaries, not raw tool evidence.
         const searchResults = session.messages
           .filter(m => m instanceof AIMessage)
           .map((m, i) => ({
             id: `hist_${i}`,
             source: "local" as const,
             query: userQuestion,
-            content: m.content.toString(),
-            type: "historical_context"
+            content: `历史模型输出，仅可作为低可信上下文，不能等同于原始工具证据：\n${m.content.toString()}`,
+            type: "historical_context",
+            metadata: {
+              trust_level: "low",
+              source_kind: "ai_message_history"
+            }
           }));
-
-        const lastHumanMsg = session.messages.reverse().find(m => m instanceof HumanMessage);
-        const userQuestion = lastHumanMsg ? lastHumanMsg.content.toString() : "Summary of previous conversation";
-        session.messages.reverse(); // Restore order
 
         const compressionResult = await runCompressor({
           user_question: userQuestion,

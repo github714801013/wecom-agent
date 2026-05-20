@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createMinimalSearchLoop } from "../graph.js";
+import { createMinimalSearchLoop, runDefaultNextQueryPlanner } from "../graph.js";
 import type { CompressorInput, SearchQuery } from "../graph.js";
 
 async function runTest() {
@@ -73,6 +73,25 @@ async function runTest() {
   assert.equal(compressedInputs[1].search_results.length, 2);
   assert.equal(compressedInputs[1].search_results[1].content, "sendSms 调用证据");
   assert.equal(result.iterations, 2);
+  const noSynthesizedQuery = await runDefaultNextQueryPlanner({
+    userQuestion: "短信模板从哪里发送？",
+    plannerResult: result.plannerResult,
+    compression: {
+      status: "ok",
+      intent: "FLOW",
+      partial: false,
+      compressed_sections: [],
+      call_chain: [],
+      key_evidence: [],
+      dropped: [],
+      missing_info: ["缺少发送调用"],
+      warnings: [],
+      errors: [],
+      budget: { input_est: 0, output_est: 0, target: 1000, mode: "balanced" },
+    },
+    previousQueries: result.plannerResult.queries,
+  });
+  assert.equal(noSynthesizedQuery, null);
   console.log("[SUCCESS] minimal search loop verified");
 }
 

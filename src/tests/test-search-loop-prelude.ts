@@ -85,7 +85,7 @@ async function runTest() {
   assert.match(prelude, /sendSms 调用证据/);
   assert.doesNotMatch(prelude, /sms template 缺少发送调用/);
 
-  const projectListCalls: any[] = [];
+  const nonQueryToolCalls: any[] = [];
   const skippedPrelude = await runSearchLoopPrelude({
     userQuestion: "能查询哪些项目",
     plannerResult: {
@@ -95,22 +95,66 @@ async function runTest() {
         { query: "项目", type: "keyword", priority: 1, reason: "项目清单" },
       ],
     },
+    toolIntentResolver: async () => ({ toolName: "gitnexus_list_repos", shouldRunPrelude: false }),
     tools: [{
       name: "gitnexus_query",
       description: "Search code by query",
       schema: { shape: { query: {} } },
       invoke: async (args: any) => {
-        projectListCalls.push(args);
+        nonQueryToolCalls.push(args);
         return { content: "should not be called" };
       },
     }],
     compressor: async () => {
-      throw new Error("project list intent should skip prelude");
+      throw new Error("non-query tool intent should skip prelude");
     },
   });
 
   assert.equal(skippedPrelude, "");
-  assert.equal(projectListCalls.length, 0);
+  assert.equal(nonQueryToolCalls.length, 0);
+
+  const queryIntentCalls: any[] = [];
+  const queryIntentPrelude = await runSearchLoopPrelude({
+    userQuestion: "查询短信模板来源",
+    plannerResult,
+    toolIntentResolver: async () => ({ toolName: "gitnexus_query", shouldRunPrelude: true }),
+    tools: [{
+      name: "gitnexus_query",
+      description: "Search code by query",
+      schema: { shape: { query: {} } },
+      invoke: async (args: any) => {
+        queryIntentCalls.push(args);
+        return { filePath: "src/sms.ts", content: "query intent evidence" };
+      },
+    }],
+    compressor: async (input: CompressorInput) => ({
+      status: "ok",
+      intent: "FLOW",
+      partial: false,
+      compressed_sections: input.search_results.map((item, index) => ({
+        section_id: `q${index}`,
+        file_path: item.file_path || "",
+        symbol: "",
+        kind: "code",
+        lines: "",
+        score: 1,
+        reason: "命中检索词",
+        anchors: [],
+        content: item.content,
+        merged_from: [item.id],
+      })),
+      call_chain: [],
+      key_evidence: input.search_results.map(item => item.content),
+      dropped: [],
+      missing_info: [],
+      warnings: [],
+      errors: [],
+      budget: { input_est: 0, output_est: 0, target: 1000, mode: "balanced" },
+    }),
+  });
+
+  assert.equal(queryIntentCalls.length, 1);
+  assert.match(queryIntentPrelude, /query intent evidence/);
   console.log("[SUCCESS] search loop prelude verified");
 }
 

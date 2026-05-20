@@ -252,19 +252,20 @@ export interface SearchLoopPreludeOptions {
   plannerResult: PlannerResult;
   tools: any[];
   compressor?: (input: CompressorInput) => Promise<CompressorResult | null>;
+  toolIntentResolver?: ToolIntentResolver;
   maxIterations?: number;
 }
 
-function isProjectCatalogQuestion(question: string) {
-  const normalized = question.trim().toLowerCase();
-  if (!normalized) return false;
-
-  const asksCatalog = /哪些|什么|列表|清单|列出|多少/.test(normalized);
-  const mentionsProject = /项目|仓库|repo|repository/.test(normalized);
-  const mentionsQueryAbility = /能|可以|可|支持|查|查询|检索|搜索/.test(normalized);
-
-  return asksCatalog && mentionsProject && mentionsQueryAbility;
+export interface ToolIntentDecision {
+  toolName: string;
+  shouldRunPrelude: boolean;
 }
+
+export type ToolIntentResolver = (input: {
+  userQuestion: string;
+  tools: any[];
+  searchToolName?: string;
+}) => Promise<ToolIntentDecision | null>;
 
 function sortQueriesByKeywordPriority(queries: SearchQuery[]) {
   return [...queries].sort((left, right) => {
@@ -425,6 +426,58 @@ function extractFilePath(result: unknown) {
         : undefined;
 }
 
+function formatToolsForIntentResolver(tools: any[]) {
+  return tools.map(tool => ({
+    name: tool?.name || "unknown",
+    description: tool?.description || "",
+    inputKeys: getToolSchemaKeys(tool),
+  }));
+}
+
+function parseToolIntentDecision(content: string): ToolIntentDecision | null {
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (typeof parsed.toolName !== "string") return null;
+    return {
+      toolName: parsed.toolName,
+      shouldRunPrelude: Boolean(parsed.shouldRunPrelude),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function defaultToolIntentResolver(input: {
+  userQuestion: string;
+  tools: any[];
+  searchToolName?: string;
+}): Promise<ToolIntentDecision | null> {
+  if (!input.searchToolName) return null;
+
+  const model = await getBaseModel();
+  const response = await model.invoke([
+    new SystemMessage(`你是 MCP 工具意图路由器。根据用户问题和当前工具列表，判断最应该优先调用哪个工具。
+
+只输出 JSON，不要输出解释。格式：
+{"toolName":"工具名","shouldRunPrelude":true或false}
+
+规则：
+1. toolName 必须来自工具列表。
+2. 只有当最应该优先调用的工具就是 searchToolName 时，shouldRunPrelude 才为 true。
+3. 如果用户问题更适合列表、结构、上下文、影响面、数据库或其他专用工具，shouldRunPrelude 必须为 false。`),
+    new HumanMessage(JSON.stringify({
+      question: input.userQuestion,
+      searchToolName: input.searchToolName,
+      tools: formatToolsForIntentResolver(input.tools),
+    })),
+  ]);
+
+  return parseToolIntentDecision(response.content.toString());
+}
+
 export function createToolSearchLoopSearcher(tools: any[]) {
   const searchTool = chooseSearchTool(tools);
 
@@ -488,7 +541,14 @@ ${missingInfo}
 }
 
 export async function runSearchLoopPrelude(options: SearchLoopPreludeOptions) {
-  if (isProjectCatalogQuestion(options.userQuestion)) {
+  const searchTool = chooseSearchTool(options.tools);
+  const toolIntent = await (options.toolIntentResolver || defaultToolIntentResolver)({
+    userQuestion: options.userQuestion,
+    tools: options.tools,
+    searchToolName: searchTool?.name,
+  });
+
+  if (!toolIntent?.shouldRunPrelude || toolIntent.toolName !== searchTool?.name) {
     return "";
   }
 

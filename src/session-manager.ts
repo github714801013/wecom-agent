@@ -5,6 +5,7 @@ export interface Session {
   messages: BaseMessage[];
   lastActivity: number;
   isCompressed?: boolean;
+  currentRepoHints?: string[] | undefined;
 }
 
 export class SessionManager {
@@ -22,6 +23,7 @@ export class SessionManager {
       if (now - session.lastActivity > this.SESSION_EXPIRATION_MS) {
         console.log(`[Session] Session for ${sessionKey} expired, clearing history.`);
         session.messages = [];
+        session.currentRepoHints = undefined;
         session.isCompressed = false;
       }
     } else {
@@ -43,6 +45,14 @@ export class SessionManager {
   clearSession(sessionKey: string) {
     console.log(`[Session] Clearing session for ${sessionKey}`);
     this.sessions.delete(sessionKey);
+  }
+
+  resolveRepoHints(sessionKey: string, explicitRepoHints: string[] = []) {
+    const session = this.getOrCreateSession(sessionKey);
+    if (explicitRepoHints.length > 0) {
+      session.currentRepoHints = [...explicitRepoHints];
+    }
+    return [...(session.currentRepoHints ?? [])];
   }
 
   async addMessages(sessionKey: string, newMessages: BaseMessage[]) {

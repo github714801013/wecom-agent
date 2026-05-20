@@ -18,12 +18,7 @@ const envSchema = z.object({
   LLM_MODEL_NAME: z.string().default("MiniMax-M2.5"),
   LLM_RECURSION_LIMIT: z.coerce.number().default(25),
   LLM_CONTEXT_WINDOW: z.coerce.number().default(0),
-  MCP_REMOTE_URL: z.preprocess(
-    value => value === "" ? undefined : value,
-    z.string().url().optional()
-  ),
-  MCP_PROJECTS: z.string().optional(),
-  MCP_SERVERS: z.string().optional(),
+  MCP_SERVERS: z.string(),
   ALLOWED_TOOLS: z.string().optional(),
   EXCLUDED_TOOLS: z.string().optional(),
 });
@@ -32,28 +27,7 @@ const parsedEnv = envSchema.parse(process.env);
 
 let mcpServers = [];
 try {
-  if (parsedEnv.MCP_SERVERS) {
-    mcpServers = JSON.parse(parsedEnv.MCP_SERVERS);
-  } else if (parsedEnv.MCP_REMOTE_URL) {
-    mcpServers = [
-      {
-        name: "gitnexus",
-        url: parsedEnv.MCP_REMOTE_URL,
-        type: "sse",
-        headers: parsedEnv.MCP_PROJECTS ? { projects: parsedEnv.MCP_PROJECTS } : {}
-      },
-    ];
-  }
-
-  // If gitnexus server exists but doesn't have projects header, and MCP_PROJECTS is set, add it
-  if (parsedEnv.MCP_PROJECTS) {
-    mcpServers = mcpServers.map((s: any) => {
-      if (s.name === "gitnexus" && !s.headers?.projects) {
-        return { ...s, headers: { ...s.headers, projects: parsedEnv.MCP_PROJECTS } };
-      }
-      return s;
-    });
-  }
+  mcpServers = JSON.parse(parsedEnv.MCP_SERVERS);
 } catch (e) {
   console.error("Failed to parse MCP_SERVERS", e);
 }

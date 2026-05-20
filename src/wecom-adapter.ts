@@ -1,5 +1,5 @@
 import { WSClient, MessageType } from "@wecom/aibot-node-sdk";
-import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt } from "./graph.js";
+import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt, extractExplicitRepoHints, extractMcpProjectCandidates, buildMessagesForCurrentTurn, scopeToolsToRepo } from "./graph.js";
 import { config } from "./config.js";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 import { sessionManager } from "./session-manager.js";
@@ -377,7 +377,7 @@ ${hypotheses}
 
 【核心红线】
 * 工具选择、调用顺序、参数名和跨库方式以当前 MCP tools 的 description/schema 为准；系统提示只提供业务检索词和证据约束，不替代工具说明。
-* 首轮代码检索必须保持跨项目发现能力：除非用户明确要求“只查某仓库/某项目”，否则不得把项目名作为过滤参数；项目名只能用于结果判读和后续二次验证。
+* 首轮代码检索必须保持跨项目发现能力：除非用户明确要求“只查某仓库/某项目”，否则不得把项目名作为过滤参数；如果用户明确指定 GitNexus repo 且工具 schema 支持 repo 参数，当次查询必须携带该 repo。
 * 严禁在代码检索中包含人名、商品名、租户名、订单号等实例数据。
 * 如果意图模糊，参考问题假设进行进一步排查。
 * 严禁拆分关键词进行多次循环搜索。${smsTemplateEvidenceHint}`;
@@ -399,15 +399,23 @@ ${hypotheses}
 
       // 记录流式过程中的所有消息，用于容错恢复
       let intermediateMessages: BaseMessage[] = [];
+      let repoHints: string[] = [];
 
       try {
         const tools = await getAllMcpTools();
+        const explicitRepoHints = extractExplicitRepoHints(
+          textToPlan,
+          extractMcpProjectCandidates(config.mcpServers)
+        );
+        repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints);
+        const agentTools = scopeToolsToRepo(tools, repoHints);
 
         if (plannerResult && textToPlan.trim().length > 0) {
           const prelude = await runSearchLoopPrelude({
             userQuestion: textToPlan,
             plannerResult,
             tools,
+            repoHint: repoHints,
           });
 
           if (prelude) {
@@ -422,9 +430,13 @@ ${hypotheses}
           }
         }
 
-        const agent = await initializeAgent(tools);
+        const agent = await initializeAgent(agentTools);
         const stream = await agent.stream({
-          messages: [...session.messages, new HumanMessage({ content: finalContentForPrompt as any })],
+          messages: buildMessagesForCurrentTurn({
+            sessionMessages: session.messages,
+            userContent: finalContentForPrompt,
+            repoHint: repoHints,
+          }),
         }, {
           recursionLimit: config.LLM_RECURSION_LIMIT,
           streamMode: "messages",
@@ -535,8 +547,11 @@ ${hypotheses}
             // 构造恢复提示词：将已有的所有中间历史（包括工具调用和结果）发给不带 tools 的大模型进行总结
             const recoveryMessages = [
               new SystemMessage(`${businessPrompt}\n\n注意：当前任务由于逻辑过于复杂已达到执行上限。请根据下述已有的中间查询结果（包括已调用的工具返回），尽可能为用户提供一个阶段性的总结回答。如果关键信息不足，请明确告知已查到的部分，并指引用户如何提供更精确的信息以继续。`),
-              ...session.messages,
-              new HumanMessage({ content: finalContentForPrompt as any }),
+              ...buildMessagesForCurrentTurn({
+                sessionMessages: session.messages,
+                userContent: finalContentForPrompt,
+                repoHint: repoHints,
+              }),
               ...intermediateMessages
             ];
 

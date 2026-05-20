@@ -1,7 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { createAgent } from "langchain";
 import { getModelContextSize } from "@langchain/core/language_models/base";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage, BaseMessage } from "@langchain/core/messages";
 import { getAllMcpTools } from "./mcp-client.js";
 import { config } from "./config.js";
 import { readFile } from "fs/promises";
@@ -251,6 +251,7 @@ export interface SearchLoopPreludeOptions {
   userQuestion: string;
   plannerResult: PlannerResult;
   tools: any[];
+  repoHint?: string | string[] | undefined;
   compressor?: (input: CompressorInput) => Promise<CompressorResult | null>;
   toolIntentResolver?: ToolIntentResolver;
   maxIterations?: number;
@@ -478,8 +479,82 @@ async function defaultToolIntentResolver(input: {
   return parseToolIntentDecision(response.content.toString());
 }
 
-export function createToolSearchLoopSearcher(tools: any[]) {
-  const searchTool = chooseSearchTool(tools);
+export function extractMcpProjectCandidates(mcpServers: any[] = []) {
+  const projectNames = mcpServers.flatMap(server => typeof server?.headers?.projects === "string"
+    ? server.headers.projects.split(",")
+    : []);
+
+  return Array.from(new Set(projectNames.map(project => project.trim()).filter(Boolean)));
+}
+
+export function extractExplicitRepoHints(userQuestion: string, repoCandidates: string[] = []) {
+  const candidates = repoCandidates.filter(Boolean);
+  if (candidates.length === 0) return [];
+
+  const candidateByLower = new Map(candidates.map(candidate => [candidate.toLowerCase(), candidate]));
+  const explicitRepoPattern = /(?:只查|在|从|某项目|某仓库|项目|仓库|repo)\s*([A-Za-z0-9_.\-/，,、和及与\s]+)|([A-Za-z0-9_.\-/]+)\s*(?:项目|仓库|repo)/gi;
+  const matches = Array.from(userQuestion.matchAll(explicitRepoPattern))
+    .flatMap(match => (match[1] || match[2] || "").split(/[，,、和及与\s]+/))
+    .filter(Boolean);
+  const matchedRepos = matches
+    .map(match => candidateByLower.get(match.toLowerCase()))
+    .filter((match): match is string => Boolean(match));
+
+  return Array.from(new Set(matchedRepos));
+}
+
+export function extractExplicitRepoHint(userQuestion: string, repoCandidates: string[] = []) {
+  return extractExplicitRepoHints(userQuestion, repoCandidates)[0] ?? null;
+}
+
+function mergeScopedToolResults(results: unknown[], repoHints: string[]) {
+  return results.length === 1
+    ? results[0]
+    : results.map((result, index) => ({ repo: repoHints[index], result }));
+}
+
+function shouldScopeToolToRepo(tool: any) {
+  return Boolean(
+    chooseQueryArgName(tool)
+    && getToolSchemaKeys(tool).includes("repo")
+    && /query|search|zoekt|gitnexus/i.test(tool?.name || "")
+  );
+}
+
+export function scopeToolsToRepo(tools: any[], repoHint?: string | string[]) {
+  const repoHints = Array.isArray(repoHint) ? repoHint.filter(Boolean) : repoHint ? [repoHint] : [];
+  if (repoHints.length === 0) return tools;
+
+  return tools.map(tool => {
+    if (!shouldScopeToolToRepo(tool) || typeof tool?.invoke !== "function") {
+      return tool;
+    }
+
+    const scopedTool = Object.assign(Object.create(Object.getPrototypeOf(tool)), tool);
+    const invoke = tool.invoke.bind(tool);
+    scopedTool.invoke = async (args: any, ...rest: any[]) => {
+      if (!args || typeof args !== "object" || Array.isArray(args)) {
+        return invoke(args, ...rest);
+      }
+
+      const results = await Promise.all(repoHints.map(repo => {
+        const queryValue = args.query ?? args.searchText ?? args.pattern;
+        console.log("[GitNexus Scope]", JSON.stringify({
+          tool: tool.name || "unknown",
+          repo,
+          queryLength: typeof queryValue === "string" ? queryValue.length : 0,
+        }));
+        return invoke({ ...args, repo }, ...rest);
+      }));
+      return mergeScopedToolResults(results, repoHints);
+    };
+    return scopedTool;
+  });
+}
+
+export function createToolSearchLoopSearcher(tools: any[], repoHint?: string | string[]) {
+  const scopedTools = scopeToolsToRepo(tools, repoHint);
+  const searchTool = chooseSearchTool(scopedTools);
 
   return async (query: SearchQuery): Promise<SearchResult[]> => {
     if (!searchTool) return [];
@@ -487,7 +562,12 @@ export function createToolSearchLoopSearcher(tools: any[]) {
     const queryArgName = chooseQueryArgName(searchTool);
     if (!queryArgName) return [];
 
-    const result = await searchTool.invoke({ [queryArgName]: query.query });
+    const keys = getToolSchemaKeys(searchTool);
+    const repoHints = Array.isArray(repoHint) ? repoHint.filter(Boolean) : repoHint ? [repoHint] : [];
+    const args = repoHints.length > 0 && keys.includes("repo")
+      ? { [queryArgName]: query.query, repo: repoHints[0] }
+      : { [queryArgName]: query.query };
+    const result = await searchTool.invoke(args);
     const searchResult: SearchResult = {
       id: `${searchTool.name || "tool"}:${query.query}`,
       source: /gitnexus/i.test(searchTool.name || "") ? "gitnexus" : "mcp",
@@ -555,7 +635,7 @@ export async function runSearchLoopPrelude(options: SearchLoopPreludeOptions) {
   try {
     const loop = createMinimalSearchLoop({
       planner: async () => options.plannerResult,
-      searcher: createToolSearchLoopSearcher(options.tools),
+      searcher: createToolSearchLoopSearcher(options.tools, options.repoHint),
       compressor: options.compressor || runCompressor,
       nextQueryPlanner: runDefaultNextQueryPlanner,
       maxIterations: options.maxIterations ?? 2,
@@ -566,6 +646,14 @@ export async function runSearchLoopPrelude(options: SearchLoopPreludeOptions) {
     console.error("Search loop prelude failed:", err);
     return "";
   }
+}
+
+export function buildMessagesForCurrentTurn(input: {
+  sessionMessages: BaseMessage[];
+  userContent: any;
+  repoHint?: string | string[] | undefined;
+}) {
+  return [...input.sessionMessages, new HumanMessage({ content: input.userContent })];
 }
 
 export async function initializeAgent(tools?: any[]) {

@@ -17,9 +17,9 @@ const MODEL_CONTEXT_MAP: Record<string, number> = {
 };
 
 export function getModelContextWindow() {
-  if (config.LLM_CONTEXT_WINDOW > 0) return config.LLM_CONTEXT_WINDOW;
+  if (config.llm.contextWindow > 0) return config.llm.contextWindow;
   
-  const modelName = config.LLM_MODEL_NAME;
+  const modelName = config.llm.modelName;
   const langchainSize = getModelContextSize(modelName);
   
   if (langchainSize !== 4097) {
@@ -34,10 +34,10 @@ export function getModelContextWindow() {
 
 export async function getBaseModel() {
   return new ChatOpenAI({
-    modelName: config.LLM_MODEL_NAME,
-    apiKey: config.LLM_API_KEY,
+    modelName: config.llm.modelName,
+    apiKey: config.llm.apiKey,
     configuration: {
-      baseURL: config.LLM_BASE_URL,
+      baseURL: config.llm.baseUrl,
     },
     temperature: 0,
   });

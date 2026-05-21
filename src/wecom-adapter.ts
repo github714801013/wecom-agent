@@ -1,6 +1,6 @@
 import { WSClient, MessageType } from "@wecom/aibot-node-sdk";
 import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt, extractExplicitRepoHints, extractMcpProjectCandidates, buildMessagesForCurrentTurn, scopeToolsToRepo } from "./graph.js";
-import { config } from "./config.js";
+import { config, type BotConfig } from "./config.js";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 import { sessionManager } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
@@ -220,11 +220,11 @@ export async function parseWeComMessage(body: any, bot: WSClient): Promise<strin
   }
 }
 
-export async function startBot() {
+export async function startBot(botConfig: BotConfig) {
   const bot = new WSClient({
-    botId: config.WECOM_BOT_ID,
-    secret: config.WECOM_BOT_SECRET,
-    wsUrl: config.WECOM_WS_URL, 
+    botId: botConfig.botId,
+    secret: botConfig.secret,
+    wsUrl: botConfig.wsUrl, 
   });
 
   // 用于消息去重的简单缓存（在多实例部署时建议改用 Redis）
@@ -238,7 +238,7 @@ export async function startBot() {
     
     // 1. 消息去重，防止企业微信重试导致重复处理
     if (processedMsgs.has(body.msgid)) {
-      console.log(`[Deduplication] Message ${body.msgid} already processed, skipping.`);
+      console.log(`[${botConfig.name}] [Deduplication] Message ${body.msgid} already processed, skipping.`);
       return;
     }
     processedMsgs.add(body.msgid);
@@ -402,7 +402,7 @@ ${hypotheses}
       let repoHints: string[] = [];
 
       try {
-        const tools = await getAllMcpTools();
+        const tools = await getAllMcpTools(botConfig);
         const explicitRepoHints = extractExplicitRepoHints(
           textToPlan,
           extractMcpProjectCandidates(config.mcpServers)
@@ -438,7 +438,7 @@ ${hypotheses}
             repoHint: repoHints,
           }),
         }, {
-          recursionLimit: config.LLM_RECURSION_LIMIT,
+          recursionLimit: config.llm.recursionLimit,
           streamMode: "messages",
         });
 
@@ -540,7 +540,7 @@ ${hypotheses}
         // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
         if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
           try {
-            console.log(`[Recovery] Recursion limit reached for ${body.msgid}, attempting fallback synthesis...`);
+            console.log(`[${botConfig.name}] [Recovery] Recursion limit reached for ${body.msgid}, attempting fallback synthesis...`);
             const baseModel = await getBaseModel();
             const businessPrompt = await getBusinessPrompt();
 
@@ -587,11 +587,15 @@ ${hypotheses}
     }
   });
 
-  bot.on("connected", () => console.log("WeCom WebSocket connected."));
-  bot.on("authenticated", () => console.log("WeCom Authentication successful."));
-  bot.on("error", (err) => console.error("WeCom WebSocket error:", err));
+  bot.on("connected", () => console.log(`[${botConfig.name}] WeCom WebSocket connected.`));
+  bot.on("authenticated", () => console.log(`[${botConfig.name}] WeCom Authentication successful.`));
+  bot.on("error", (err) => console.error(`[${botConfig.name}] WeCom WebSocket error:`, err));
 
   bot.connect();
   const contextWindow = getModelContextWindow();
-  console.log(`WeCom Bot starting... Model: ${config.LLM_MODEL_NAME}, Recursion Limit: ${config.LLM_RECURSION_LIMIT}, Context Window: ${contextWindow} tokens`);
+  console.log(`[${botConfig.name}] WeCom Bot starting... Model: ${config.llm.modelName}, Recursion Limit: ${config.llm.recursionLimit}, Context Window: ${contextWindow} tokens`);
+}
+
+export async function startBots() {
+  await Promise.all(config.bots.map(botConfig => startBot(botConfig)));
 }

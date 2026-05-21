@@ -2,7 +2,7 @@ import { getModelContextSize } from "@langchain/core/language_models/base";
 import { config } from "../config.js";
 
 function testContextSize() {
-  const modelName = config.LLM_MODEL_NAME;
+  const modelName = config.llm.modelName;
   try {
     const size = getModelContextSize(modelName);
     console.log(`Model: ${modelName}, Context Size: ${size}`);

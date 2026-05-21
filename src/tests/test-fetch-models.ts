@@ -1,9 +1,9 @@
 import { config } from '../config.js';
 
 async function checkModels() {
-  const res = await fetch(`${config.LLM_BASE_URL}/models`, {
+  const res = await fetch(`${config.llm.baseUrl}/models`, {
     headers: {
-      "Authorization": `Bearer ${config.LLM_API_KEY}`
+      "Authorization": `Bearer ${config.llm.apiKey}`
     }
   });
   if (res.ok) {

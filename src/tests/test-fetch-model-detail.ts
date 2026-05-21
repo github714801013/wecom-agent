@@ -1,12 +1,12 @@
 import { config } from "../config.js";
 
 async function fetchModelDetail() {
-  const url = `${config.LLM_BASE_URL}/models/${config.LLM_MODEL_NAME}`;
+  const url = `${config.llm.baseUrl}/models/${config.llm.modelName}`;
   console.log(`Fetching from: ${url}`);
   try {
     const resp = await fetch(url, {
       headers: {
-        "Authorization": `Bearer ${config.LLM_API_KEY}`
+        "Authorization": `Bearer ${config.llm.apiKey}`
       }
     });
     if (!resp.ok) {

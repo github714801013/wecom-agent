@@ -5,9 +5,9 @@ import { config } from "../config.js";
 async function test() {
   const model = new ChatOpenAI({
     modelName: "gemini-3.1-pro-preview",
-    apiKey: config.LLM_API_KEY,
+    apiKey: config.llm.apiKey,
     configuration: {
-      baseURL: config.LLM_BASE_URL,
+      baseURL: config.llm.baseUrl,
     },
     temperature: 0,
   });

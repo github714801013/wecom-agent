@@ -3,9 +3,9 @@ import { config } from "../config.js";
 
 function testContextDetection() {
   const window = getModelContextWindow();
-  console.log(`Detected Context Window for ${config.LLM_MODEL_NAME}: ${window} tokens`);
+  console.log(`Detected Context Window for ${config.llm.modelName}: ${window} tokens`);
   
-  if (config.LLM_MODEL_NAME === "MiniMax-M2.5") {
+  if (config.llm.modelName === "MiniMax-M2.5") {
     if (window === 200000) {
       console.log("Validation: SUCCESS (Matched hardcoded map)");
     } else {

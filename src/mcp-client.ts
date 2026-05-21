@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { loadMcpTools } from "@langchain/mcp-adapters";
-import { config } from "./config.js";
+import { config, type BotConfig, type McpServerConfig } from "./config.js";
 import { sessionManager } from "./session-manager.js";
 
 /**
@@ -25,7 +25,14 @@ const clearHistoryTool = {
   }
 };
 
-export async function getAllMcpTools() {
+export function buildMcpHeaders(server: McpServerConfig, bot?: BotConfig) {
+  return {
+    ...server.headers,
+    ...(bot?.mcpHeaders?.[server.name] || {}),
+  };
+}
+
+export async function getAllMcpTools(bot?: BotConfig) {
 // ... rest of code unchanged ...
   const allTools = [];
 
@@ -35,9 +42,11 @@ export async function getAllMcpTools() {
       
       let transport;
       if (server.type === "sse") {
+        const headers = buildMcpHeaders(server, bot);
+        const transportInit = Object.keys(headers).length > 0 ? { headers } as any : undefined;
         transport = new SSEClientTransport(new URL(server.url), {
-          requestInit: server.headers ? { headers: server.headers } as any : undefined,
-          eventSourceInit: server.headers ? { headers: server.headers } as any : undefined,
+          requestInit: transportInit,
+          eventSourceInit: transportInit,
         });
       } else {
         // Handle stdio if needed in the future
@@ -64,15 +73,15 @@ export async function getAllMcpTools() {
   let filteredTools = allTools;
   const originalCount = allTools.length;
 
-  // Apply whitelist (ALLOWED_TOOLS)
-  if (config.allowedTools && config.allowedTools.length > 0) {
-    const whitelist = new Set(config.allowedTools);
+  // Apply whitelist
+  if (config.tools.allowed.length > 0) {
+    const whitelist = new Set(config.tools.allowed);
     filteredTools = filteredTools.filter(tool => whitelist.has(tool.name));
   }
 
-  // Apply blacklist (EXCLUDED_TOOLS)
-  if (config.excludedTools && config.excludedTools.length > 0) {
-    const blacklist = new Set(config.excludedTools);
+  // Apply blacklist
+  if (config.tools.excluded.length > 0) {
+    const blacklist = new Set(config.tools.excluded);
     filteredTools = filteredTools.filter(tool => !blacklist.has(tool.name));
   }
 

@@ -2,8 +2,8 @@ import { config } from "../config.js";
 import { getAllMcpTools } from "../mcp-client.js";
 
 async function testFiltering() {
-  console.log("Config - Allowed Tools:", config.allowedTools);
-  console.log("Config - Excluded Tools:", config.excludedTools);
+  console.log("Config - Allowed Tools:", config.tools.allowed);
+  console.log("Config - Excluded Tools:", config.tools.excluded);
   
   const tools = await getAllMcpTools();
   const toolNames = tools.map(t => t.name);
@@ -11,23 +11,23 @@ async function testFiltering() {
 
   let success = true;
 
-  if (config.allowedTools) {
-    const unauthorized = toolNames.filter(name => !config.allowedTools!.includes(name));
+  if (config.tools.allowed.length > 0) {
+    const unauthorized = toolNames.filter(name => !config.tools.allowed.includes(name));
     if (unauthorized.length > 0) {
-      console.error("FAILED: Found tools NOT in ALLOWED_TOOLS whitelist:", unauthorized);
+      console.error("FAILED: Found tools NOT in configured whitelist:", unauthorized);
       success = false;
     } else {
-      console.log("CHECK: Whitelist (ALLOWED_TOOLS) verified.");
+      console.log("CHECK: Whitelist verified.");
     }
   }
 
-  if (config.excludedTools) {
-    const forbidden = toolNames.filter(name => config.excludedTools!.includes(name));
+  if (config.tools.excluded.length > 0) {
+    const forbidden = toolNames.filter(name => config.tools.excluded.includes(name));
     if (forbidden.length > 0) {
       console.error("FAILED: Found tools that should have been EXCLUDED:", forbidden);
       success = false;
     } else {
-      console.log("CHECK: Blacklist (EXCLUDED_TOOLS) verified.");
+      console.log("CHECK: Blacklist verified.");
     }
   }
 

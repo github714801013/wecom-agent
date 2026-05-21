@@ -1,0 +1,55 @@
+{
+  "llm": {
+    "apiKey": "${LLM_API_KEY}",
+    "baseUrl": "${LLM_BASE_URL}",
+    "modelName": "MiniMax-M2.5",
+    "recursionLimit": 25,
+    "contextWindow": 0
+  },
+  "mcpServers": [
+    {
+      "name": "gitnexus",
+      "url": "http://127.0.0.1:1348/sse",
+      "type": "sse",
+      "headers": {
+        "projects": "project-a,project-b"
+      }
+    },
+    {
+      "name": "db",
+      "url": "http://127.0.0.1:1248/sse",
+      "type": "sse",
+      "headers": {}
+    }
+  ],
+  "bots": [
+    {
+      "name": "robot-a",
+      "botId": "${WECOM_ROBOT_A_BOT_ID}",
+      "secret": "${WECOM_ROBOT_A_SECRET}",
+      "wsUrl": "wss://openws.work.weixin.qq.com",
+      "mcpHeaders": {
+        "gitnexus": {
+          "x-project": "project-a",
+          "x-robot": "robot-a"
+        }
+      }
+    },
+    {
+      "name": "robot-b",
+      "botId": "${WECOM_ROBOT_B_BOT_ID}",
+      "secret": "${WECOM_ROBOT_B_SECRET}",
+      "wsUrl": "wss://openws.work.weixin.qq.com",
+      "mcpHeaders": {
+        "db": {
+          "x-project": "project-b",
+          "x-robot": "robot-b"
+        }
+      }
+    }
+  ],
+  "tools": {
+    "allowed": [],
+    "excluded": []
+  }
+}

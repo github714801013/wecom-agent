@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+config/wecom-agent.config.json
 *.tar.gz
 deploy.sh
 .idea/

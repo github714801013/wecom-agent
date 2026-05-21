@@ -8,23 +8,35 @@
 - **进度反馈机制**：用户发送请求后，机器人会立即回复“任务处理中”的进度卡片，并在 AI 计算完成后自动替换为最终答案，提升交互体验。
 - **消息去重机制**：基于 `msgid` 的去重逻辑，有效防止企业微信因网络重试导致的 AI 重复调用。
 - **多模态消息处理**：支持文本、图片（Vision 能力）、语音、视频及多图文消息的解析与响应。
-- **系统提示词定制**：通过 `src/prompts/system-prompt.md` 灵活配置助手的身份、风格和业务边界。
+- **系统提示词定制**：通过 `src/prompts/business-prompt.md` 灵活配置助手的身份、风格和业务边界。
 - **生产环境就绪**：提供完整的 Docker 部署方案，支持一键发布。
 
 ## 配置说明
 
-项目运行需要配置 `.env` 文件。你可以参考以下变量进行设置：
+项目运行需要两个配置入口：
 
-| 变量名 | 说明 | 示例 |
+- `.env`：只存放密钥和部署环境变量。
+- `config/wecom-agent.config.json`：存放格式化 JSON 结构配置，默认不提交仓库。
+
+仓库提供 `config/wecom-agent.config.example.json` 作为模板。真实配置文件支持 `${ENV_NAME}` 占位符，启动时会从 `.env` 或运行环境变量中替换。
+
+| 配置项 | 说明 | 示例 |
 | :--- | :--- | :--- |
-| `WECOM_BOT_ID` | 企业微信机器人 ID | `wa...` |
-| `WECOM_BOT_SECRET` | 企业微信机器人 Secret | `...` |
-| `WECOM_WS_URL` | 企业微信 WebSocket 服务地址 | `wss://openws.work.weixin.qq.com` |
-| `LLM_API_KEY` | 大模型 API Key | `sk-...` |
-| `LLM_BASE_URL` | 大模型接口 Base URL | `https://api.example.com/v1` |
-| `LLM_MODEL_NAME` | 大模型模型名称 | `MiniMax-M2.5` |
-| `LLM_RECURSION_LIMIT` | 递归限制（控制 ReAct 深度） | `25` |
-| `MCP_SERVERS` | MCP 服务器配置（JSON 数组字符串） | `[{"name":"db","url":"http://ip:1248/sse"}]` |
+| `CONFIG_FILE` | 可选，指定 JSON 配置文件路径 | `config/wecom-agent.config.json` |
+| `llm.apiKey` | 大模型 API Key，建议写 `${LLM_API_KEY}` | `${LLM_API_KEY}` |
+| `llm.baseUrl` | 大模型接口 Base URL，建议写 `${LLM_BASE_URL}` | `${LLM_BASE_URL}` |
+| `mcpServers[]` | MCP 服务器列表 | `{"name":"gitnexus","url":"http://ip:1348/sse"}` |
+| `bots[]` | 企业微信机器人列表 | `{"name":"robot-a","botId":"${WECOM_ROBOT_A_BOT_ID}"}` |
+| `bots[].mcpHeaders` | 指定机器人对指定 MCP server 注入的 headers | `{"gitnexus":{"x-project":"project-a"}}` |
+
+MCP header 合并规则：
+
+- `mcpServers[].headers` 是 MCP server 默认 headers。
+- `bots[].mcpHeaders[serverName]` 只作用于指定 MCP server。
+- 同名 header 由机器人级配置覆盖 server 默认配置。
+- 未出现在 `mcpHeaders` 中的 MCP server 不会收到该机器人的自定义 headers。
+
+旧的单机器人环境变量配置不再作为运行入口；如需继续使用原密钥名，可以在 JSON 中通过 `${ENV_NAME}` 引用。
 
 ## 快速开始
 
@@ -34,8 +46,9 @@
    ```bash
    npm install
    ```
-2. 配置环境变量：创建 `.env` 文件并填入上述配置。
-3. 启动开发模式：
+2. 配置环境变量：复制 `.env.example` 为 `.env`，填入密钥。
+3. 配置机器人和 MCP：复制 `config/wecom-agent.config.example.json` 为 `config/wecom-agent.config.json`，按需调整机器人、MCP server 和 headers。
+4. 启动开发模式：
    ```bash
    npm run dev
    ```
@@ -58,7 +71,8 @@
 - `src/graph.ts`: 定义智能体的核心逻辑（LangChain Graph）。
 - `src/wecom-adapter.ts`: 负责企业微信 SDK 的集成与消息转发。
 - `src/mcp-client.ts`: 负责连接并管理多个 MCP 服务器。
-- `src/prompts/system-prompt.md`: 助手的系统提示词配置。
+- `src/prompts/business-prompt.md`: 助手的系统提示词配置。
+- `config/wecom-agent.config.example.json`: 多机器人和 MCP 配置模板。
 
 ## 注意事项
 

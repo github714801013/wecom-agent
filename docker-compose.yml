@@ -3,17 +3,10 @@ services:
     image: wecom-agent:latest
     container_name: wecom-agent
     restart: always
-    environment:
-      - WECOM_BOT_ID=${WECOM_BOT_ID}
-      - WECOM_BOT_SECRET=${WECOM_BOT_SECRET}
-      - WECOM_WS_URL=${WECOM_WS_URL}
-      - LLM_API_KEY=${LLM_API_KEY}
-      - LLM_BASE_URL=${LLM_BASE_URL}
-      - LLM_MODEL_NAME=${LLM_MODEL_NAME}
-      - LLM_RECURSION_LIMIT=${LLM_RECURSION_LIMIT}
-      - MCP_SERVERS=${MCP_SERVERS}
-      - ALLOWED_TOOLS=${ALLOWED_TOOLS}
-      - EXCLUDED_TOOLS=${EXCLUDED_TOOLS}
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config:ro
     logging:
       driver: "json-file"
       options:

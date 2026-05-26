@@ -18,20 +18,28 @@ async function testSessionLogic() {
   console.log("First message content:", session.messages[0]?.content);
   console.log("Last message content:", session.messages[session.messages.length - 1]?.content);
 
-  if (session.messages.length === 20 && session.messages[0]?.content === "Answer 1") {
-    console.log("SUCCESS: Pruning works and keeps the latest 20 messages.");
+  if (session.messages.length === 22 && session.messages[0]?.content === "Question 1") {
+    console.log("SUCCESS: Session keeps messages below pruning limit.");
   } else {
-    // Note: If we add pairs, it should keep exactly 20. 
-    // Adding 22 messages means index 0 and 1 are removed.
-    // Index 2 becomes new index 0. (i=2's human message?)
-    // Wait, Answer 1 was index 1.
-    if (session.messages.length === 20 && session.messages[0]?.content === "Question 2") {
-       console.log("SUCCESS: Pruning works (Question 2 is the new head).");
-    } else {
-       console.log("FAILED: Pruning behavior unexpected.");
-       process.exit(1);
-    }
+    console.log("FAILED: Session message retention behavior unexpected.");
+    process.exit(1);
   }
+
+  const expiringSession = sm.getOrCreateSession("expiry-session");
+  expiringSession.messages.push(new HumanMessage("old question"));
+  expiringSession.lastActivity = Date.now() - 31 * 60 * 1000;
+  await sm.addMessages("expiry-session", [new HumanMessage("new question")]);
+
+  const refreshedSession = sm.getOrCreateSession("expiry-session");
+  if (refreshedSession.messages.some(message => message.content === "old question")) {
+    console.log("FAILED: Expired session history should be cleared before adding new messages.");
+    process.exit(1);
+  }
+  if (!refreshedSession.messages.some(message => message.content === "new question")) {
+    console.log("FAILED: New message should remain after expired session cleanup.");
+    process.exit(1);
+  }
+  console.log("SUCCESS: Expired sessions clear old history before appending new messages.");
 
   // Verify AI recovery response recording logic (simulation)
   const recoveryAnswer = "Final synthesized answer post-recovery";
@@ -45,6 +53,39 @@ async function testSessionLogic() {
     console.log("FAILED: Final response missing.");
     process.exit(1);
   }
+
+  sm.setPendingHumanLoop(key, {
+    reason: "clarification_required",
+    question: "请补充订单号",
+    resumeInstruction: "继续排查订单状态",
+    contextSnapshot: {
+      userQuestion: "订单状态不对",
+      knownFacts: [],
+      missingFacts: ["订单号"],
+    },
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 30 * 60 * 1000,
+    originalMessageId: "msg-1",
+    resumeCount: 0,
+  });
+
+  if (!sm.getPendingHumanLoop(key)) {
+    console.log("FAILED: Pending human-loop should be stored.");
+    process.exit(1);
+  }
+
+  sm.incrementPendingHumanLoopResume(key);
+  if (sm.getPendingHumanLoop(key)?.resumeCount !== 1) {
+    console.log("FAILED: Pending human-loop resume count should increment.");
+    process.exit(1);
+  }
+
+  sm.clearPendingHumanLoop(key);
+  if (sm.getPendingHumanLoop(key)) {
+    console.log("FAILED: Pending human-loop should be cleared.");
+    process.exit(1);
+  }
+  console.log("SUCCESS: Pending human-loop lifecycle works.");
 }
 
 testSessionLogic();

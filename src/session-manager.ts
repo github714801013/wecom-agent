@@ -1,11 +1,13 @@
 import { BaseMessage, HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { runCompressor, getModelContextWindow } from "./graph.js";
+import type { StoredHumanLoopRequest } from "./human-loop.js";
 
 export interface Session {
   messages: BaseMessage[];
   lastActivity: number;
   isCompressed?: boolean;
   currentRepoHints?: string[] | undefined;
+  pendingHumanLoop?: StoredHumanLoopRequest | undefined;
 }
 
 export class SessionManager {
@@ -14,19 +16,19 @@ export class SessionManager {
   private readonly MAX_MESSAGES_PER_SESSION = 100; // Increased to allow more room for compression
   private readonly COMPRESSION_THRESHOLD_PERCENT = 0.6; // Trigger at 60% of context window
 
-  getOrCreateSession(sessionKey: string): Session {
+  getOrCreateSession(sessionKey: string, expireInactive = false): Session {
     const now = Date.now();
     let session = this.sessions.get(sessionKey);
 
-    if (session) {
-      // Expiration check
-      if (now - session.lastActivity > this.SESSION_EXPIRATION_MS) {
-        console.log(`[Session] Session for ${sessionKey} expired, clearing history.`);
-        session.messages = [];
-        session.currentRepoHints = undefined;
-        session.isCompressed = false;
-      }
-    } else {
+    if (session && expireInactive && now - session.lastActivity > this.SESSION_EXPIRATION_MS) {
+      console.log(`[Session] Session for ${sessionKey} expired, clearing history.`);
+      session.messages = [];
+      session.currentRepoHints = undefined;
+      session.pendingHumanLoop = undefined;
+      session.isCompressed = false;
+    }
+
+    if (!session) {
       session = { messages: [], lastActivity: now };
       this.sessions.set(sessionKey, session);
     }
@@ -47,6 +49,30 @@ export class SessionManager {
     this.sessions.delete(sessionKey);
   }
 
+  setPendingHumanLoop(sessionKey: string, request: StoredHumanLoopRequest) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.pendingHumanLoop = request;
+    session.lastActivity = Date.now();
+  }
+
+  getPendingHumanLoop(sessionKey: string) {
+    return this.getOrCreateSession(sessionKey, true).pendingHumanLoop;
+  }
+
+  clearPendingHumanLoop(sessionKey: string) {
+    const session = this.sessions.get(sessionKey);
+    if (!session) return;
+    session.pendingHumanLoop = undefined;
+    session.lastActivity = Date.now();
+  }
+
+  incrementPendingHumanLoopResume(sessionKey: string) {
+    const session = this.sessions.get(sessionKey);
+    if (!session?.pendingHumanLoop) return;
+    session.pendingHumanLoop.resumeCount += 1;
+    session.lastActivity = Date.now();
+  }
+
   resolveRepoHints(sessionKey: string, explicitRepoHints: string[] = []) {
     const session = this.getOrCreateSession(sessionKey);
     if (explicitRepoHints.length > 0) {
@@ -56,11 +82,7 @@ export class SessionManager {
   }
 
   async addMessages(sessionKey: string, newMessages: BaseMessage[]) {
-    let session = this.sessions.get(sessionKey);
-    if (!session) {
-      session = { messages: [], lastActivity: Date.now() };
-      this.sessions.set(sessionKey, session);
-    }
+    const session = this.getOrCreateSession(sessionKey, true);
     session.messages.push(...newMessages);
     
     // Check for compression

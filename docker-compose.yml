@@ -5,6 +5,8 @@ services:
     restart: always
     env_file:
       - .env
+    ports:
+      - "3010:3010"
     volumes:
       - ./config:/app/config:ro
     logging:

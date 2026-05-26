@@ -5,6 +5,19 @@ import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/
 import { sessionManager } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 import { getAllMcpTools } from "./mcp-client.js";
+import {
+  buildHumanLoopReply,
+  buildHumanLoopResumeContent,
+  detectHumanLoopRequest,
+  isAmbiguousNewTopicWhilePending,
+  isHumanLoopExpired,
+  toStoredHumanLoopRequest,
+} from "./human-loop.js";
+import { buildProgressStreamContent, collapseProgressUpdates } from "./progress-updates.js";
+import { StreamIdleTimeoutError, withIdleTimeout } from "./stream-timeout.js";
+import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
+
+const AGENT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 /**
  * 格式化工具调用显示，提取关键参数以提升用户体验
@@ -46,11 +59,27 @@ function getToolDisplay(name: string, args: any): string {
   return name;
 }
 
+export function stripBoundaryMentions(text: string): string {
+  let result = text.trim();
+  const leadingMention = /^@[^\s，。！？!?,;；：:、]+[\s，。！？!?,;；：:、]*/u;
+  const trailingMention = /[\s，。！？!?,;；：:、]*@[^\s，。！？!?,;；：:、]+$/u;
+
+  while (leadingMention.test(result)) {
+    result = result.replace(leadingMention, "").trimStart();
+  }
+  while (trailingMention.test(result)) {
+    result = result.replace(trailingMention, "").trimEnd();
+  }
+  return result.trim();
+}
+
+
 export function extractTextContent(content: string | { type: string; text?: string }[]): string {
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return stripBoundaryMentions(content);
   return content
     .filter(item => item.type === "text" && item.text)
-    .map(item => item.text)
+    .map(item => stripBoundaryMentions(item.text || ""))
+    .filter(Boolean)
     .join("\n");
 }
 
@@ -265,7 +294,7 @@ export async function startBot(botConfig: BotConfig) {
     }
 
     // --- Session Handling Start ---
-    const session = sessionManager.getOrCreateSession(sessionKey);
+    const session = sessionManager.getOrCreateSession(sessionKey, true);
 
     // Handle high-priority system commands (Exact match only)
     const commandText = body.msgtype === MessageType.Text
@@ -291,6 +320,39 @@ export async function startBot(botConfig: BotConfig) {
       );
       return;
     }
+
+    let effectiveParsedContent: typeof parsedContent = parsedContent;
+    const pendingHumanLoop = sessionManager.getPendingHumanLoop(sessionKey);
+    const pendingText = stripBoundaryMentions(commandText);
+    const activePendingHumanLoop = pendingHumanLoop && !isHumanLoopExpired(pendingHumanLoop)
+      ? pendingHumanLoop
+      : undefined;
+
+    if (pendingHumanLoop && !activePendingHumanLoop) {
+      sessionManager.clearPendingHumanLoop(sessionKey);
+    }
+
+    if (activePendingHumanLoop && isAmbiguousNewTopicWhilePending(pendingText)) {
+      await bot.replyStreamWithCard(
+        frame,
+        body.msgid,
+        "当前还有一个等待补充信息的任务。请回复“继续”并带上补充结果，我会接着处理；如需开启新问题，请先发送“清理会话”。",
+        true,
+        {
+          templateCard: {
+            card_type: "text_notice",
+            main_title: { title: "等待确认", desc: "当前会话存在未完成的人工补充步骤" },
+            task_id: `task_${body.msgid}`,
+          },
+        }
+      );
+      return;
+    }
+
+    if (activePendingHumanLoop) {
+      effectiveParsedContent = buildHumanLoopResumeContent(activePendingHumanLoop, pendingText || extractTextContent(parsedContent as any));
+      sessionManager.incrementPendingHumanLoopResume(sessionKey);
+    }
     // --- Session Handling End ---
 
     try {
@@ -310,16 +372,16 @@ export async function startBot(botConfig: BotConfig) {
       const UPDATE_INTERVAL = 2000;
 
       // --- Planner Logic Start ---
-      let finalContentForPrompt: any = parsedContent;
+      let finalContentForPrompt: any = effectiveParsedContent;
       let plannerResult = null;
 
       // 提取文本内容进行 Planner 分析
       let textToPlan = "";
-      if (typeof parsedContent === 'string') {
-        textToPlan = parsedContent;
-      } else if (Array.isArray(parsedContent)) {
-        const textItem = parsedContent.find(i => i.type === 'text');
-        if (textItem) textToPlan = textItem.text || "";
+      if (typeof effectiveParsedContent === 'string') {
+        textToPlan = stripBoundaryMentions(effectiveParsedContent);
+      } else if (Array.isArray(effectiveParsedContent)) {
+        const textItem = effectiveParsedContent.find(i => i.type === 'text');
+        if (textItem) textToPlan = stripBoundaryMentions(textItem.text || "");
       }
 
       if (textToPlan.trim().length > 0) {
@@ -382,12 +444,12 @@ ${hypotheses}
 * 如果意图模糊，参考问题假设进行进一步排查。
 * 严禁拆分关键词进行多次循环搜索。${smsTemplateEvidenceHint}`;
             
-            if (typeof parsedContent === 'string') {
-              finalContentForPrompt = `${searchPlanHint}\n\n${parsedContent}`;
-            } else if (Array.isArray(parsedContent)) {
+            if (typeof effectiveParsedContent === 'string') {
+              finalContentForPrompt = `${searchPlanHint}\n\n${effectiveParsedContent}`;
+            } else if (Array.isArray(effectiveParsedContent)) {
               finalContentForPrompt = [
                 { type: 'text', text: `${searchPlanHint}\n\n` },
-                ...parsedContent
+                ...effectiveParsedContent.map(item => item.type === 'text' ? { ...item, text: stripBoundaryMentions(item.text || '') } : item)
               ];
             }
           }
@@ -399,6 +461,7 @@ ${hypotheses}
 
       // 记录流式过程中的所有消息，用于容错恢复
       let intermediateMessages: BaseMessage[] = [];
+      const toolContextRecords: ToolContextRecord[] = [];
       let repoHints: string[] = [];
 
       try {
@@ -444,8 +507,11 @@ ${hypotheses}
 
         // 工具调用累加器：用于聚合流式的 tool_call_chunks
         const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
+        const getActiveCallLabels = () => Array.from(toolCallMap.values())
+          .filter(c => c.name && !c.completed)
+          .map(c => getToolDisplay(c.name, c.args));
 
-        for await (const [message, metadata] of stream) {
+        for await (const [message, metadata] of withIdleTimeout(stream, AGENT_STREAM_IDLE_TIMEOUT_MS, getActiveCallLabels)) {
           const msg = message as BaseMessage;
           intermediateMessages.push(msg); // 记录中间过程
           
@@ -458,6 +524,14 @@ ${hypotheses}
             const entry = toolCallMap.get(id);
             if (entry) {
               entry.completed = true;
+              const toolRecord = {
+                id,
+                name: entry.name || "unknown_tool",
+                args: entry.args,
+                content: String(toolMsg.content),
+              };
+              toolContextRecords.push(toolRecord);
+              toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
               console.log(`[Tool Call Success] Name: ${entry.name}, Args: ${entry.args}, Result Size: ${String(toolMsg.content).length}`);
             }
             continue;
@@ -484,9 +558,7 @@ ${hypotheses}
                   .map(c => `> 🔍 正在调用: ${getToolDisplay(c.name, c.args)}...`);
                 
                 if (activeCalls.length > 0) {
-                  const statusMsg = fullContent 
-                    ? `${fullContent}\n\n${activeCalls.join("\n")}` 
-                    : activeCalls.join("\n");
+                  const statusMsg = buildProgressStreamContent(fullContent, activeCalls);
                   
                   // 节流推送：避免高频更新导致前端闪烁
                   if (Date.now() - lastUpdateTime > 1000) { 
@@ -500,10 +572,17 @@ ${hypotheses}
                 // 回退逻辑：如果模型非流式返回，直接使用 tool_calls
                 for (const tool of aiMsg.tool_calls) {
                   if (!tool.name) continue;
+                  const id = tool.id || `${tool.name}-${Date.now()}`;
+                  toolCallMap.set(id, {
+                    name: tool.name,
+                    args: JSON.stringify(tool.args || {}),
+                    notified: true,
+                    completed: false,
+                  });
                   console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
-                  const statusMsg = fullContent 
-                    ? `${fullContent}\n\n> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...` 
-                    : `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`;
+                  const statusMsg = buildProgressStreamContent(fullContent, [
+                    `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
+                  ]);
                   await bot.replyStream(frame, streamId, statusMsg, false);
                 }
                 continue;
@@ -519,7 +598,7 @@ ${hypotheses}
                 }
 
                 if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-                  await bot.replyStream(frame, streamId, fullContent, false);
+                  await bot.replyStream(frame, streamId, collapseProgressUpdates(fullContent), false);
                   lastUpdateTime = Date.now();
                 }
               }
@@ -538,7 +617,14 @@ ${hypotheses}
         console.error(`Agent execution error for ${body.msgid}:`, err);
         
         // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
-        if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
+        if (err instanceof StreamIdleTimeoutError) {
+          const activeCalls = err.activeCalls.length > 0 ? `（${err.activeCalls.join("、")}）` : "";
+          fullContent = collapseProgressUpdates(fullContent);
+          fullContent = [
+            fullContent,
+            `当前工具调用${activeCalls}超过 ${Math.round(err.timeoutMs / 1000)} 秒未返回，我先停止本轮等待，避免一直卡在“正在调用”。请稍后重试，或缩小仓库、文件路径、按钮文案等检索条件后继续。`,
+          ].filter(Boolean).join("\n\n");
+        } else if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
           try {
             console.log(`[${botConfig.name}] [Recovery] Recursion limit reached for ${body.msgid}, attempting fallback synthesis...`);
             const baseModel = await getBaseModel();
@@ -552,7 +638,9 @@ ${hypotheses}
                 userContent: finalContentForPrompt,
                 repoHint: repoHints,
               }),
-              ...intermediateMessages
+              ...(buildToolContextSummary(toolContextRecords)
+                ? [new SystemMessage(buildToolContextSummary(toolContextRecords))]
+                : intermediateMessages)
             ];
 
             const recoveryResponse = await baseModel.invoke(recoveryMessages);
@@ -568,14 +656,26 @@ ${hypotheses}
 
       // --- Update Session History ---
       if (fullContent) {
+        const humanLoopRequest = detectHumanLoopRequest(fullContent);
+        if (humanLoopRequest) {
+          const storedRequest = toStoredHumanLoopRequest(humanLoopRequest, body.msgid);
+          sessionManager.setPendingHumanLoop(sessionKey, storedRequest);
+          fullContent = buildHumanLoopReply(storedRequest);
+        } else if (activePendingHumanLoop) {
+          sessionManager.clearPendingHumanLoop(sessionKey);
+        }
+
         await sessionManager.addMessages(sessionKey, [
-          new HumanMessage({ content: parsedContent as any }),
-          ...intermediateMessages,
+          new HumanMessage({ content: effectiveParsedContent as any }),
+          ...(buildToolContextSummary(toolContextRecords)
+            ? [new SystemMessage(buildToolContextSummary(toolContextRecords))]
+            : []),
           new AIMessage(fullContent),
         ]);
       }
 
       // 发送最终结果
+      fullContent = collapseProgressUpdates(fullContent);
       await bot.replyStream(
         frame,
         streamId,

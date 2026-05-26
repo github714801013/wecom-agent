@@ -29,8 +29,8 @@ COPY --from=builder /app/dist ./dist
 # 复制必要的静态资源（提示词文件）
 COPY src/prompts ./src/prompts
 
-# 暴露端口（如果有 Web 服务的话，虽然目前主要是 WebSocket）
-# EXPOSE 8080
+# 诊断查询接口，用于远程验证当前规则实际效果
+EXPOSE 3010
 
 # 启动命令
 CMD ["node", "dist/index.js"]

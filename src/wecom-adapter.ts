@@ -14,10 +14,19 @@ import {
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
 import { buildProgressStreamContent, collapseProgressUpdates } from "./progress-updates.js";
-import { StreamIdleTimeoutError, withIdleTimeout } from "./stream-timeout.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
+import {
+  buildFollowupQuestion,
+  buildQuestionWithHistory,
+  detectActiveMessageIntent,
+  type ConversationContextItem,
+} from "./interaction-control.js";
 
-const AGENT_STREAM_IDLE_TIMEOUT_MS = 90_000;
+interface ActiveTaskState {
+  msgid: string;
+  cancelled: boolean;
+  question: string;
+}
 
 /**
  * 格式化工具调用显示，提取关键参数以提升用户体验
@@ -259,6 +268,7 @@ export async function startBot(botConfig: BotConfig) {
   // 用于消息去重的简单缓存（在多实例部署时建议改用 Redis）
   const processedMsgs = new Set<string>();
   const MAX_CACHE_SIZE = 1000;
+  const activeTasks = new Map<string, ActiveTaskState>();
 
   // 监听所有消息类型
   bot.on("message", async (frame) => {
@@ -301,6 +311,50 @@ export async function startBot(botConfig: BotConfig) {
       ? body.text?.content || ""
       : extractTextContent(parsedContent as any);
     const isHardcodedNew = isClearSessionCommand(commandText);
+    const activeTask = activeTasks.get(sessionKey);
+    const activeText = stripBoundaryMentions(commandText);
+    let followupQuestion = "";
+
+    if (activeTask && !activeTask.cancelled) {
+      const activeIntent = detectActiveMessageIntent(activeText);
+      if (activeIntent === "stop") {
+        activeTask.cancelled = true;
+        await bot.replyStreamWithCard(
+          frame,
+          body.msgid,
+          "已停止当前任务。",
+          true,
+          {
+            templateCard: {
+              card_type: "text_notice",
+              main_title: { title: "任务已停止", desc: "当前会话的上一轮回答已取消" },
+              task_id: `task_${body.msgid}`,
+            },
+          }
+        );
+        return;
+      }
+
+      if (activeIntent === "continue_current") {
+        await bot.replyStreamWithCard(
+          frame,
+          body.msgid,
+          "当前任务仍在继续处理，请稍候。",
+          true,
+          {
+            templateCard: {
+              card_type: "text_notice",
+              main_title: { title: "任务处理中", desc: "已收到继续处理指令" },
+              task_id: `task_${body.msgid}`,
+            },
+          }
+        );
+        return;
+      }
+
+      followupQuestion = buildFollowupQuestion(activeTask.question, activeText);
+      activeTask.cancelled = true;
+    }
 
     if (isHardcodedNew) {
       sessionManager.clearSession(sessionKey);
@@ -352,11 +406,31 @@ export async function startBot(botConfig: BotConfig) {
     if (activePendingHumanLoop) {
       effectiveParsedContent = buildHumanLoopResumeContent(activePendingHumanLoop, pendingText || extractTextContent(parsedContent as any));
       sessionManager.incrementPendingHumanLoopResume(sessionKey);
+    } else if (followupQuestion) {
+      effectiveParsedContent = followupQuestion;
+    } else if (session.messages.length > 0 && pendingText) {
+      const historyItems: ConversationContextItem[] = session.messages
+        .slice(-6)
+        .map(message => {
+          if (message instanceof HumanMessage) {
+            return { role: "user", content: extractTextContent(message.content as any) };
+          }
+          if (message instanceof AIMessage) {
+            return { role: "assistant", content: message.content.toString() };
+          }
+          return { role: "system", content: message.content.toString() };
+        });
+      effectiveParsedContent = buildQuestionWithHistory(historyItems, pendingText);
     }
     // --- Session Handling End ---
 
     try {
       const streamId = body.msgid;
+      const currentQuestion = typeof effectiveParsedContent === "string"
+        ? stripBoundaryMentions(effectiveParsedContent)
+        : extractTextContent(effectiveParsedContent as any);
+      const currentTask: ActiveTaskState = { msgid: body.msgid, cancelled: false, question: currentQuestion };
+      activeTasks.set(sessionKey, currentTask);
 
       // 发送初始进度卡片
       await bot.replyStreamWithCard(frame, streamId, "AI 正在思考中...", false, {
@@ -366,6 +440,8 @@ export async function startBot(botConfig: BotConfig) {
           task_id: `task_${body.msgid}`,
         }
       });
+
+      const shouldStopCurrentTask = () => activeTasks.get(sessionKey) !== currentTask || currentTask.cancelled;
 
       let fullContent = "";
       let lastUpdateTime = 0;
@@ -507,11 +583,11 @@ ${hypotheses}
 
         // 工具调用累加器：用于聚合流式的 tool_call_chunks
         const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
-        const getActiveCallLabels = () => Array.from(toolCallMap.values())
-          .filter(c => c.name && !c.completed)
-          .map(c => getToolDisplay(c.name, c.args));
-
-        for await (const [message, metadata] of withIdleTimeout(stream, AGENT_STREAM_IDLE_TIMEOUT_MS, getActiveCallLabels)) {
+        for await (const [message, metadata] of stream) {
+          if (shouldStopCurrentTask()) {
+            fullContent = "";
+            break;
+          }
           const msg = message as BaseMessage;
           intermediateMessages.push(msg); // 记录中间过程
           
@@ -562,7 +638,9 @@ ${hypotheses}
                   
                   // 节流推送：避免高频更新导致前端闪烁
                   if (Date.now() - lastUpdateTime > 1000) { 
-                    await bot.replyStream(frame, streamId, statusMsg, false);
+                    if (!shouldStopCurrentTask()) {
+                      await bot.replyStream(frame, streamId, statusMsg, false);
+                    }
                     lastUpdateTime = Date.now();
                   }
                 }
@@ -583,7 +661,9 @@ ${hypotheses}
                   const statusMsg = buildProgressStreamContent(fullContent, [
                     `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
                   ]);
-                  await bot.replyStream(frame, streamId, statusMsg, false);
+                  if (!shouldStopCurrentTask()) {
+                    await bot.replyStream(frame, streamId, statusMsg, false);
+                  }
                 }
                 continue;
             }
@@ -598,7 +678,9 @@ ${hypotheses}
                 }
 
                 if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-                  await bot.replyStream(frame, streamId, collapseProgressUpdates(fullContent), false);
+                  if (!shouldStopCurrentTask()) {
+                    await bot.replyStream(frame, streamId, collapseProgressUpdates(fullContent), false);
+                  }
                   lastUpdateTime = Date.now();
                 }
               }
@@ -617,14 +699,7 @@ ${hypotheses}
         console.error(`Agent execution error for ${body.msgid}:`, err);
         
         // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
-        if (err instanceof StreamIdleTimeoutError) {
-          const activeCalls = err.activeCalls.length > 0 ? `（${err.activeCalls.join("、")}）` : "";
-          fullContent = collapseProgressUpdates(fullContent);
-          fullContent = [
-            fullContent,
-            `当前工具调用${activeCalls}超过 ${Math.round(err.timeoutMs / 1000)} 秒未返回，我先停止本轮等待，避免一直卡在“正在调用”。请稍后重试，或缩小仓库、文件路径、按钮文案等检索条件后继续。`,
-          ].filter(Boolean).join("\n\n");
-        } else if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
+        if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
           try {
             console.log(`[${botConfig.name}] [Recovery] Recursion limit reached for ${body.msgid}, attempting fallback synthesis...`);
             const baseModel = await getBaseModel();
@@ -655,6 +730,10 @@ ${hypotheses}
       }
 
       // --- Update Session History ---
+      if (shouldStopCurrentTask()) {
+        fullContent = "";
+      }
+
       if (fullContent) {
         const humanLoopRequest = detectHumanLoopRequest(fullContent);
         if (humanLoopRequest) {
@@ -676,14 +755,23 @@ ${hypotheses}
 
       // 发送最终结果
       fullContent = collapseProgressUpdates(fullContent);
-      await bot.replyStream(
-        frame,
-        streamId,
-        fullContent || "未获取到有效回复",
-        true
-      );
+      if (!shouldStopCurrentTask()) {
+        await bot.replyStream(
+          frame,
+          streamId,
+          fullContent || "未获取到有效回复",
+          true
+        );
+      }
+      if (activeTasks.get(sessionKey) === currentTask) {
+        activeTasks.delete(sessionKey);
+      }
     } catch (error) {
       console.error(`Outer error processing message ${body.msgid}:`, error);
+      const activeTaskAfterError = activeTasks.get(sessionKey);
+      if (activeTaskAfterError?.msgid === body.msgid) {
+        activeTasks.delete(sessionKey);
+      }
     }
   });
 

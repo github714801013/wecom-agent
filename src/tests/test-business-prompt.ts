@@ -37,6 +37,10 @@ assertIncludes(prompt, "明确锚点优先", "business prompt should prefer prec
 assertIncludes(prompt, "接口路径、接口名、方法名、类名、表名、字段名、配置 key、错误文案", "business prompt should list precise anchor types");
 assertIncludes(prompt, "先做精确命中", "business prompt should require exact-match lookup first");
 assertIncludes(prompt, "再补充语义扩展", "business prompt should use semantic expansion after exact anchors");
+assertIncludes(prompt, "逻辑梳理流程图规范", "business prompt should require flow diagrams for logic explanations");
+assertIncludes(prompt, "企业微信可正常显示的 Markdown 文本流程图", "business prompt should use WeCom-compatible markdown flow diagrams");
+assertIncludes(prompt, "不要依赖 Mermaid", "business prompt should avoid Mermaid for WeCom answers");
+assertIncludes(prompt, "用缩进、编号、箭头和条件分支表达流程", "business prompt should define compatible flow syntax");
 assertIncludes(prompt, "关键操作总结协议", "business prompt should require Claude Code style operation summaries");
 assertIncludes(prompt, "一句话状态", "business prompt should require concise one-line operation updates");
 assertIncludes(prompt, "继续核实中", "business prompt should indicate when background search continues");
@@ -47,5 +51,11 @@ assertNotIncludes(prompt, "得到：", "business prompt should not use verbose o
 assertNotIncludes(prompt, "影响：", "business prompt should not use verbose operation summary impact field");
 assertNotIncludes(prompt, "下一步：", "business prompt should not use verbose operation summary next-step field");
 assertNotIncludes(prompt, "6e6", "business prompt should not hard-code a single permission value regression example");
+assertIncludes(prompt, "SQL 输出前验证", "business prompt should require SQL validation before output");
+assertIncludes(prompt, "必须先在 dev 环境对应库执行同一条只读查询", "business prompt should require dev database validation");
+assertIncludes(prompt, "查询不报错后才允许输出给用户", "business prompt should only output SQL after successful validation");
+assertIncludes(prompt, "验证失败时不得输出为已验证 SQL", "business prompt should not claim failed SQL is verified");
+assertIncludes(prompt, "生产 SQL 也必须先用 dev 对应库验证结构正确性", "business prompt should validate production SQL structure in dev first");
+assertIncludes(prompt, "输出 `prod_sql_required.sql` 前", "business prompt should apply validation to human-loop production SQL");
 
 console.log("business prompt 肯定结论规则验证通过");

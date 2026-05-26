@@ -57,5 +57,10 @@ assertIncludes(prompt, "查询不报错后才允许输出给用户", "business p
 assertIncludes(prompt, "验证失败时不得输出为已验证 SQL", "business prompt should not claim failed SQL is verified");
 assertIncludes(prompt, "生产 SQL 也必须先用 dev 对应库验证结构正确性", "business prompt should validate production SQL structure in dev first");
 assertIncludes(prompt, "输出 `prod_sql_required.sql` 前", "business prompt should apply validation to human-loop production SQL");
+assertIncludes(prompt, "截图信息提取规则", "business prompt should define screenshot extraction rules");
+assertIncludes(prompt, "优先识别截图中的 URL 地址", "business prompt should prioritize screenshot URLs");
+assertIncludes(prompt, "与问题直接相关的页面文案、按钮文案、错误提示、弹窗文案、字段标签和表格列名", "business prompt should prioritize problem-related screenshot text");
+assertIncludes(prompt, "不要只按用户转述提问", "business prompt should not ignore screenshot evidence");
+assertIncludes(prompt, "截图中的 URL 和关键文案应作为明确锚点", "business prompt should use screenshot evidence as anchors");
 
 console.log("business prompt 肯定结论规则验证通过");

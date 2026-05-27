@@ -66,6 +66,13 @@ assertIncludes(prompt, "查询不报错后才允许输出给用户", "business p
 assertIncludes(prompt, "验证失败时不得输出为已验证 SQL", "business prompt should not claim failed SQL is verified");
 assertIncludes(prompt, "生产 SQL 也必须先用 dev 对应库验证结构正确性", "business prompt should validate production SQL structure in dev first");
 assertIncludes(prompt, "输出 `prod_sql_required.sql` 前", "business prompt should apply validation to human-loop production SQL");
+assertIncludes(prompt, "审核流程节点", "business prompt should define a review workflow node");
+assertIncludes(prompt, "最终输出前必须先执行审核流程节点", "business prompt should require review before final output");
+assertIncludes(prompt, "审核 SQL 正确性", "business prompt should review SQL correctness");
+assertIncludes(prompt, "SQL 是否已经在 dev 环境对应库执行且不报错", "business prompt should verify SQL ran in dev");
+assertIncludes(prompt, "审核问题回答准确性", "business prompt should review answer accuracy");
+assertIncludes(prompt, "结论是否由已命中的项目、接口、入口、代码片段、数据库结果或用户补充支撑", "business prompt should verify answer evidence");
+assertIncludes(prompt, "审核不通过时不得输出最终结论", "business prompt should block final answer when review fails");
 assertIncludes(prompt, "截图信息提取规则", "business prompt should define screenshot extraction rules");
 assertIncludes(prompt, "优先识别截图中的 URL 地址", "business prompt should prioritize screenshot URLs");
 assertIncludes(prompt, "与问题直接相关的页面文案、按钮文案、错误提示、弹窗文案、字段标签和表格列名", "business prompt should prioritize problem-related screenshot text");

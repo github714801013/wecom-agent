@@ -28,6 +28,19 @@ try {
   const evaluate = await evaluateResponse.json() as any;
   assert.equal(evaluate.collapsed, "已定位候选文件，继续核实中。");
   assert.equal(evaluate.streamContent, "已定位候选文件，继续核实中。\n\n> 🔍 正在调用: query...");
+
+  const overwriteResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case: "progress",
+      content: "已读取问题，继续核实中。\n\n> 🔍 正在调用: query...\n\n已命中入口，继续核实中。",
+      activeCall: "> 🔍 正在调用: code_snippet...",
+    }),
+  });
+  assert.equal(overwriteResponse.status, 200, "overwrite evaluate endpoint should be callable");
+  const overwrite = await overwriteResponse.json() as any;
+  assert.equal(overwrite.streamContent, "已命中入口，继续核实中。\n\n> 🔍 正在调用: code_snippet...");
 } finally {
   await stopDiagnosticServer(server);
 }

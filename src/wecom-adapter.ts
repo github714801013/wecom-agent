@@ -1,4 +1,4 @@
-import { WSClient, MessageType } from "@wecom/aibot-node-sdk";
+import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
 import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt, extractExplicitRepoHints, extractMcpProjectCandidates, buildMessagesForCurrentTurn, scopeToolsToRepo } from "./graph.js";
 import { config, type BotConfig } from "./config.js";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
@@ -425,7 +425,7 @@ export async function startBot(botConfig: BotConfig) {
     // --- Session Handling End ---
 
     try {
-      const streamId = body.msgid;
+      const streamId = generateReqId("stream");
       const currentQuestion = typeof effectiveParsedContent === "string"
         ? stripBoundaryMentions(effectiveParsedContent)
         : extractTextContent(effectiveParsedContent as any);

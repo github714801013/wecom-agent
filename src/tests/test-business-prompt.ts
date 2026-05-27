@@ -37,6 +37,11 @@ assertIncludes(prompt, "明确锚点优先", "business prompt should prefer prec
 assertIncludes(prompt, "接口路径、接口名、方法名、类名、表名、字段名、配置 key、错误文案", "business prompt should list precise anchor types");
 assertIncludes(prompt, "先做精确命中", "business prompt should require exact-match lookup first");
 assertIncludes(prompt, "再补充语义扩展", "business prompt should use semantic expansion after exact anchors");
+assertIncludes(prompt, "追问锚点继承", "business prompt should inherit anchors across follow-up questions");
+assertIncludes(prompt, "前文已经确认项目、仓库、接口路径、入口文件、入口方法、类名、方法名或符号", "business prompt should identify prior confirmed anchors");
+assertIncludes(prompt, "必须优先带着这些已确认锚点继续查", "business prompt should narrow follow-up searches with prior anchors");
+assertIncludes(prompt, "不得重新放宽到其它项目、其它技术栈或宽泛业务词", "business prompt should not broaden follow-up search after anchors exist");
+assertIncludes(prompt, "AddOrUpdateV1、/add-or-update/v1、WuLiuController、oa-stock", "business prompt should include representative anchor example");
 assertIncludes(prompt, "逻辑梳理流程图规范", "business prompt should require flow diagrams for logic explanations");
 assertIncludes(prompt, "企业微信可正常显示的 Markdown 文本流程图", "business prompt should use WeCom-compatible markdown flow diagrams");
 assertIncludes(prompt, "不要依赖 Mermaid", "business prompt should avoid Mermaid for WeCom answers");

@@ -46,6 +46,10 @@ assertIncludes(prompt, "一句话状态", "business prompt should require concis
 assertIncludes(prompt, "继续核实中", "business prompt should indicate when background search continues");
 assertIncludes(prompt, "不要使用固定四段模板", "business prompt should avoid verbose four-field templates");
 assertIncludes(prompt, "读取需求、GitNexus 检索、代码片段核实、数据库查询、生产 SQL 等待用户执行、测试或部署验证", "business prompt should list key operation summary scenarios");
+assertIncludes(prompt, "阶段性进度消息必须覆盖式表达", "business prompt should require overwrite-style progress updates");
+assertIncludes(prompt, "不要把多轮检索状态连续追加成一长段", "business prompt should forbid appending many progress updates");
+assertIncludes(prompt, "关键入口、接口路径、匹配项目", "business prompt should require key anchors in answers");
+assertIncludes(prompt, "仓库或项目、入口文件或入口方法、接口路径或页面路由", "business prompt should require returned matched evidence anchors");
 assertNotIncludes(prompt, "已做：", "business prompt should not use verbose operation summary action field");
 assertNotIncludes(prompt, "得到：", "business prompt should not use verbose operation summary evidence field");
 assertNotIncludes(prompt, "影响：", "business prompt should not use verbose operation summary impact field");

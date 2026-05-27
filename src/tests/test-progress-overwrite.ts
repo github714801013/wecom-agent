@@ -27,4 +27,13 @@ assert.equal(
   "final content should drop stale progress sentences when a conclusion exists",
 );
 
+assert.equal(
+  buildProgressStreamContent(
+    "已读取问题，当前缺少直接证据，继续核实中。\n\n> 🔍 正在调用: query...\n\n已命中候选入口，继续核实中。",
+    ["> 🔍 正在调用: code_snippet..."],
+  ),
+  "已命中候选入口，继续核实中。\n\n> 🔍 正在调用: code_snippet...",
+  "streaming content should overwrite old progress and old active tool lines",
+);
+
 console.log("progress overwrite 验证通过");

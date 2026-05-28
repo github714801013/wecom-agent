@@ -778,9 +778,8 @@ export async function runAnswerReview(input: {
   return parseAnswerReviewResult(response.content.toString());
 }
 
-function buildReviewCorrectionMessage(review: AnswerReviewResult, round: number, maxReviewRounds: number) {
+function buildReviewCorrectionMessage(review: AnswerReviewResult) {
   return new HumanMessage(`【回答审核未通过】
-审核轮次：${round}/${maxReviewRounds}
 审核状态：${review.status}
 审核原因：${review.reason || "未提供"}
 问题清单：
@@ -822,13 +821,6 @@ function isAnswerContentMessage(message: BaseMessage) {
   return Boolean(stringifyMessageContent(aiMsg.content));
 }
 
-function shouldStopReviewLoop(review: AnswerReviewResult, round: number, maxReviewRounds: number) {
-  return review.passed
-    || review.status === "needs_human_input"
-    || review.status === "blocked"
-    || round >= maxReviewRounds;
-}
-
 export function enforceFinalAnswerCompleteness(review: AnswerReviewResult, answer: string): AnswerReviewResult {
   const normalizedAnswer = answer.trim();
   const hasIncompleteProgress = INCOMPLETE_PROGRESS_PATTERNS.some(pattern => normalizedAnswer.includes(pattern));
@@ -852,14 +844,13 @@ export function enforceFinalAnswerCompleteness(review: AnswerReviewResult, answe
 
 export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOptions = {}) {
   const reviewer = options.reviewer || runAnswerReview;
-  const maxReviewRounds = options.maxReviewRounds ?? getConfiguredMaxReviewRounds();
 
   return {
     async *stream(input: { messages: BaseMessage[] }, config?: Record<string, unknown>) {
       let messages = input.messages;
 
-      // 符合 Dev-Spec-Gen：审核节点独立于业务节点，并以有限循环避免无限纠正。
-      for (let round = 1; round <= maxReviewRounds; round += 1) {
+      // 符合 Dev-Spec-Gen：审核节点只做路由判断；最终用户文本只能来自业务节点。
+      for (let round = 1; round <= 2; round += 1) {
         let answer = "";
         const stream = await baseAgent.stream({ ...input, messages }, config);
 
@@ -872,39 +863,35 @@ export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOption
           yield item;
         }
 
-        yield [
-          new AIMessage("已生成阶段性回答，正在审核完整性，继续核实中。"),
-          { answerReview: { progress: true, round } },
-        ];
+        if (round === 2) {
+          yield [
+            new AIMessage(answer),
+            { answerReview: { status: "passed_after_correction", final: true } },
+          ];
+          break;
+        }
 
         const review = enforceFinalAnswerCompleteness(
           await reviewer({ messages, answer, round }),
           answer,
         );
-        if (shouldStopReviewLoop(review, round, maxReviewRounds)) {
-          if (review.passed) {
-            yield [
-              new AIMessage(answer),
-              { answerReview: { status: review.status, final: true } },
-            ];
-          } else if (review.status !== "needs_correction" || round >= maxReviewRounds) {
-            yield [
-              new AIMessage(`审核未通过：${review.reason || review.status}\n\n${review.correction_instruction || "请补充必要信息后继续。"}`),
-              { answerReview: { status: review.status, final: true } },
-            ];
-          }
+        if (review.passed) {
+          yield [
+            new AIMessage(answer),
+            { answerReview: { status: review.status, final: true } },
+          ];
           break;
         }
 
         yield [
-          new AIMessage("审核发现回答需要修正，正在按审核意见重新核实。"),
+          new AIMessage("正在补齐回答依据，继续核实中。"),
           { answerReview: { status: review.status, resetContent: true, round } },
         ];
 
         messages = [
           ...messages,
           new AIMessage(answer),
-          buildReviewCorrectionMessage(review, round, maxReviewRounds),
+          buildReviewCorrectionMessage(review),
         ];
       }
     },

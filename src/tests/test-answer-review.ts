@@ -83,10 +83,9 @@ const passAgent = createReviewedAgent({
 
 const passOutputs = await collect(passAgent);
 assert.equal(passCalls, 1);
-assert.equal(passOutputs.length, 2);
-assert.equal((passOutputs[0]![1] as any).answerReview.progress, true);
-assert.equal(getText(passOutputs[1]![0]), "已验证结论");
-assert.equal((passOutputs[1]![1] as any).answerReview.final, true);
+assert.equal(passOutputs.length, 1);
+assert.equal(getText(passOutputs[0]![0]), "已验证结论");
+assert.equal((passOutputs[0]![1] as any).answerReview.final, true);
 
 let correctionCalls = 0;
 let reviewCalls = 0;
@@ -119,18 +118,21 @@ const correctionAgent = createReviewedAgent({
 
 const correctionOutputs = await collect(correctionAgent);
 assert.equal(correctionCalls, 2);
-assert.equal(reviewCalls, 2);
-assert.equal(correctionOutputs.length, 4);
-assert.equal((correctionOutputs[0]![1] as any).answerReview.progress, true);
-assert.equal(getText(correctionOutputs[1]![0]), "审核发现回答需要修正，正在按审核意见重新核实。");
-assert.equal((correctionOutputs[1]![1] as any).answerReview.resetContent, true);
-assert.equal((correctionOutputs[2]![1] as any).answerReview.progress, true);
-assert.equal(getText(correctionOutputs[3]![0]), "已核实接口逻辑，结论是 B");
-assert.equal((correctionOutputs[3]![1] as any).answerReview.final, true);
+assert.equal(reviewCalls, 1);
+assert.equal(correctionOutputs.length, 2);
+assert.equal(getText(correctionOutputs[0]![0]), "正在补齐回答依据，继续核实中。");
+assert.equal((correctionOutputs[0]![1] as any).answerReview.resetContent, true);
+assert.equal(getText(correctionOutputs[1]![0]), "已核实接口逻辑，结论是 B");
+assert.equal((correctionOutputs[1]![1] as any).answerReview.final, true);
 assert.equal(
   correctionOutputs.some(([message]) => getText(message) === "可能是 A"),
   false,
   "failed draft answer should not be streamed before review passes",
+);
+assert.equal(
+  correctionOutputs.some(([message]) => getText(message).includes("审核未通过") || getText(message).includes("审核发现")),
+  false,
+  "review result text should not be visible to users",
 );
 
 let maxRoundCalls = 0;
@@ -153,6 +155,11 @@ const maxRoundAgent = createReviewedAgent({
 const maxRoundOutputs = await collect(maxRoundAgent);
 assert.equal(maxRoundCalls, 2);
 assert.ok(maxRoundOutputs.length > 0);
-assert.equal(getText(maxRoundOutputs[maxRoundOutputs.length - 1]![0]).includes("审核未通过"), true);
+assert.equal(getText(maxRoundOutputs[maxRoundOutputs.length - 1]![0]), "第 2 版回答");
+assert.equal(
+  maxRoundOutputs.some(([message]) => getText(message).includes("审核未通过")),
+  false,
+  "final result should come from business node after one correction",
+);
 
 console.log("answer review 循环审核验证通过");

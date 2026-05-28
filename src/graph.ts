@@ -827,6 +827,11 @@ export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOption
           yield item;
         }
 
+        yield [
+          new AIMessage("已生成阶段性回答，正在审核完整性，继续核实中。"),
+          { answerReview: { progress: true, round } },
+        ];
+
         const review = await reviewer({ messages, answer, round });
         if (shouldStopReviewLoop(review, round, maxReviewRounds)) {
           if (!review.passed && (review.status !== "needs_correction" || round >= maxReviewRounds)) {

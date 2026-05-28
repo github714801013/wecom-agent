@@ -446,6 +446,12 @@ export async function startBot(botConfig: BotConfig) {
       let fullContent = "";
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 2000;
+      const sendStageProgress = async (content: string, force = false) => {
+        if (shouldStopCurrentTask()) return;
+        if (!force && Date.now() - lastUpdateTime <= 1000) return;
+        await bot.replyStream(frame, streamId, buildProgressStreamContent(content), false);
+        lastUpdateTime = Date.now();
+      };
 
       // --- Planner Logic Start ---
       let finalContentForPrompt: any = effectiveParsedContent;
@@ -462,8 +468,10 @@ export async function startBot(botConfig: BotConfig) {
 
       if (textToPlan.trim().length > 0) {
         try {
+          await sendStageProgress("已收到问题，正在识别意图和检索锚点，继续核实中。", true);
           plannerResult = await runPlanner(textToPlan);
           if (plannerResult) {
+            await sendStageProgress("已完成问题规划，正在整理检索词和候选方向，继续核实中。", true);
             const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
             
@@ -541,6 +549,7 @@ ${hypotheses}
       let repoHints: string[] = [];
 
       try {
+        await sendStageProgress("正在加载 MCP 工具和项目范围，继续核实中。", true);
         const tools = await getAllMcpTools(botConfig);
         const explicitRepoHints = extractExplicitRepoHints(
           textToPlan,
@@ -548,8 +557,10 @@ ${hypotheses}
         );
         repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints);
         const agentTools = scopeToolsToRepo(tools, repoHints);
+        await sendStageProgress("已加载可用工具，正在判断是否需要预检索，继续核实中。", true);
 
         if (plannerResult && textToPlan.trim().length > 0) {
+          await sendStageProgress("正在执行预检索以缩小证据范围，继续核实中。", true);
           const prelude = await runSearchLoopPrelude({
             userQuestion: textToPlan,
             plannerResult,
@@ -569,7 +580,9 @@ ${hypotheses}
           }
         }
 
+        await sendStageProgress("正在启动业务分析节点，继续核实中。", true);
         const agent = await initializeAgent(agentTools);
+        await sendStageProgress("业务分析节点已启动，正在调用模型和工具核实证据，继续核实中。", true);
         const stream = await agent.stream({
           messages: buildMessagesForCurrentTurn({
             sessionMessages: session.messages,
@@ -590,6 +603,10 @@ ${hypotheses}
           }
           if ((metadata as any)?.answerReview?.resetContent) {
             fullContent = "";
+          }
+          if ((metadata as any)?.answerReview?.progress) {
+            await sendStageProgress(message.content.toString(), true);
+            continue;
           }
           const msg = message as BaseMessage;
           intermediateMessages.push(msg); // 记录中间过程

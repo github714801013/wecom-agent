@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { buildProgressStreamContent, collapseProgressUpdates } from "../progress-updates.js";
+import { buildProgressStreamContent, collapseProgressUpdates, getProcessingFrame } from "../progress-updates.js";
 
 const longProgress = "已读取问题，当前缺少直接证据，继续核实中。已确认存在多个代码仓库，继续核实中。已获取仓库清单，继续核实中。";
 
@@ -34,6 +34,20 @@ assert.equal(
   ),
   "已命中候选入口，继续核实中。\n\n> 🔍 正在调用: code_snippet...",
   "streaming content should overwrite old progress and old active tool lines",
+);
+
+assert.equal(getProcessingFrame(0), "⠋", "processing frame should be deterministic by timestamp");
+
+assert.equal(
+  buildProgressStreamContent("已完成问题规划，继续核实中。", [], { motionFrame: "⠋" }),
+  "⠋ 处理中\n已完成问题规划，继续核实中。",
+  "streaming content should include a lightweight processing motion frame",
+);
+
+assert.equal(
+  buildProgressStreamContent("已完成问题规划，继续核实中。", ["> 🔍 正在调用: query..."], { motionFrame: "⠙" }),
+  "⠙ 处理中\n已完成问题规划，继续核实中。\n\n> 🔍 正在调用: query...",
+  "streaming content should keep motion frame with active tool calls",
 );
 
 console.log("progress overwrite 验证通过");

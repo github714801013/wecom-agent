@@ -92,6 +92,13 @@ export interface ReviewedAgentOptions {
   maxReviewRounds?: number;
 }
 
+const INCOMPLETE_PROGRESS_PATTERNS = [
+  "继续核实中",
+  "继续读取",
+  "继续确认",
+  "准备输出结论",
+];
+
 export interface SearchQuery {
   query: string;
   type: string;
@@ -808,6 +815,27 @@ function shouldStopReviewLoop(review: AnswerReviewResult, round: number, maxRevi
     || round >= maxReviewRounds;
 }
 
+export function enforceFinalAnswerCompleteness(review: AnswerReviewResult, answer: string): AnswerReviewResult {
+  const normalizedAnswer = answer.trim();
+  const hasIncompleteProgress = INCOMPLETE_PROGRESS_PATTERNS.some(pattern => normalizedAnswer.includes(pattern));
+  const endsAsProgress = /(?:继续核实中|继续读取|继续确认|准备输出结论)[。.!！\s]*$/u.test(normalizedAnswer);
+
+  if (!hasIncompleteProgress || !endsAsProgress) {
+    return review;
+  }
+
+  return {
+    passed: false,
+    status: "needs_correction",
+    reason: "最终回答仍停留在阶段性进度，缺少完整结论",
+    issues: [
+      "回答包含阶段性进度句",
+      "回答没有形成可发送的最终业务结论",
+    ],
+    correction_instruction: "继续完成核实后输出完整回答；必须包含支持的支付方式、判断依据、入口/接口/项目定位信息。若证据不足，改为 Human Loop 说明缺少的最小信息。",
+  };
+}
+
 export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOptions = {}) {
   const reviewer = options.reviewer || runAnswerReview;
   const maxReviewRounds = options.maxReviewRounds ?? getConfiguredMaxReviewRounds();
@@ -832,7 +860,10 @@ export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOption
           { answerReview: { progress: true, round } },
         ];
 
-        const review = await reviewer({ messages, answer, round });
+        const review = enforceFinalAnswerCompleteness(
+          await reviewer({ messages, answer, round }),
+          answer,
+        );
         if (shouldStopReviewLoop(review, round, maxReviewRounds)) {
           if (!review.passed && (review.status !== "needs_correction" || round >= maxReviewRounds)) {
             yield [

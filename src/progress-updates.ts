@@ -10,6 +10,12 @@ function isProgressSentence(sentence: string) {
   return sentence.includes("继续核实中");
 }
 
+const PROCESSING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+export function getProcessingFrame(now = Date.now()) {
+  return PROCESSING_FRAMES[Math.floor(now / 500) % PROCESSING_FRAMES.length] || PROCESSING_FRAMES[0]!;
+}
+
 export function collapseProgressUpdates(content: string) {
   const trimmed = content.trim();
   if (!trimmed.includes("继续核实中")) return content;
@@ -34,10 +40,18 @@ export function collapseProgressUpdates(content: string) {
   return sentences[lastProgressIndex] || trimmed;
 }
 
-export function buildProgressStreamContent(content: string, activeCalls: string[] = []) {
+export function buildProgressStreamContent(content: string, activeCalls: string[] = [], options: { motionFrame?: string } = {}) {
   const displayContent = collapseProgressUpdates(content);
-  if (displayContent && activeCalls.length > 0) {
-    return `${displayContent}\n\n${activeCalls.join("\n")}`;
+  const motionPrefix = options.motionFrame ? `${options.motionFrame} 处理中` : "";
+  const body = displayContent && activeCalls.length > 0
+    ? `${displayContent}\n\n${activeCalls.join("\n")}`
+    : displayContent || activeCalls.join("\n");
+
+  if (motionPrefix && body) {
+    return `${motionPrefix}\n${body}`;
   }
-  return displayContent || activeCalls.join("\n");
+  if (motionPrefix) {
+    return motionPrefix;
+  }
+  return body;
 }

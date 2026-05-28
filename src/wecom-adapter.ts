@@ -13,7 +13,7 @@ import {
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
-import { buildProgressStreamContent, collapseProgressUpdates } from "./progress-updates.js";
+import { buildProgressStreamContent, collapseProgressUpdates, getProcessingFrame } from "./progress-updates.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 import {
   buildFollowupQuestion,
@@ -449,7 +449,7 @@ export async function startBot(botConfig: BotConfig) {
       const sendStageProgress = async (content: string, force = false) => {
         if (shouldStopCurrentTask()) return;
         if (!force && Date.now() - lastUpdateTime <= 1000) return;
-        await bot.replyStream(frame, streamId, buildProgressStreamContent(content), false);
+        await bot.replyStream(frame, streamId, buildProgressStreamContent(content, [], { motionFrame: getProcessingFrame() }), false);
         lastUpdateTime = Date.now();
       };
 
@@ -654,7 +654,7 @@ ${hypotheses}
                   .map(c => `> 🔍 正在调用: ${getToolDisplay(c.name, c.args)}...`);
                 
                 if (activeCalls.length > 0) {
-                  const statusMsg = buildProgressStreamContent(fullContent, activeCalls);
+                  const statusMsg = buildProgressStreamContent(fullContent, activeCalls, { motionFrame: getProcessingFrame() });
                   
                   // 节流推送：避免高频更新导致前端闪烁
                   if (Date.now() - lastUpdateTime > 1000) { 
@@ -680,7 +680,7 @@ ${hypotheses}
                   console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
                   const statusMsg = buildProgressStreamContent(fullContent, [
                     `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
-                  ]);
+                  ], { motionFrame: getProcessingFrame() });
                   if (!shouldStopCurrentTask()) {
                     await bot.replyStream(frame, streamId, statusMsg, false);
                   }

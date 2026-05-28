@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import { createReviewedAgent, parseAnswerReviewResult } from "../graph.js";
+import { createReviewedAgent, enforceFinalAnswerCompleteness, parseAnswerReviewResult } from "../graph.js";
 import type { AnswerReviewResult } from "../graph.js";
 
 function getText(message: unknown) {
@@ -28,6 +28,32 @@ const invalidReview = parseAnswerReviewResult("not json");
 assert.equal(invalidReview.passed, false);
 assert.equal(invalidReview.status, "needs_correction");
 assert.ok(invalidReview.issues.length > 0);
+
+const progressOnlyReview = enforceFinalAnswerCompleteness(
+  {
+    passed: true,
+    status: "passed",
+    reason: "模型误判通过",
+    issues: [],
+    correction_instruction: "",
+  },
+  "已读取到移动端支付押金按钮，继续核实中。",
+);
+assert.equal(progressOnlyReview.passed, false);
+assert.equal(progressOnlyReview.status, "needs_correction");
+assert.match(progressOnlyReview.reason, /阶段性进度/);
+
+const completeReview = enforceFinalAnswerCompleteness(
+  {
+    passed: true,
+    status: "passed",
+    reason: "通过",
+    issues: [],
+    correction_instruction: "",
+  },
+  "备用机押金支付支持 alipay 和 weixin，其他支付方式会报支付接口错误。\n\n【定位依据】已核实后端 payport 分支。",
+);
+assert.equal(completeReview.passed, true);
 
 async function collect(agent: ReturnType<typeof createReviewedAgent>) {
   const outputs: Array<[unknown, any]> = [];

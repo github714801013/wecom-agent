@@ -588,6 +588,9 @@ ${hypotheses}
             fullContent = "";
             break;
           }
+          if ((metadata as any)?.answerReview?.resetContent) {
+            fullContent = "";
+          }
           const msg = message as BaseMessage;
           intermediateMessages.push(msg); // 记录中间过程
           

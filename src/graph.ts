@@ -1,7 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { createAgent } from "langchain";
 import { getModelContextSize } from "@langchain/core/language_models/base";
-import { HumanMessage, SystemMessage, BaseMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, SystemMessage, BaseMessage } from "@langchain/core/messages";
 import { getAllMcpTools } from "./mcp-client.js";
 import { config } from "./config.js";
 import { readFile } from "fs/promises";
@@ -61,6 +61,35 @@ export async function getBusinessPrompt() {
     console.error("Failed to load business prompt:", err);
     return "You are a professional assistant.";
   }
+}
+
+export async function getReviewPrompt() {
+  try {
+    const promptPath = join(process.cwd(), "src/prompts/review-prompt.md");
+    return await readFile(promptPath, "utf-8");
+  } catch (err) {
+    console.error("Failed to load review prompt:", err);
+    return "You are an answer reviewer. Output strict JSON.";
+  }
+}
+
+export type AnswerReviewStatus = "passed" | "needs_correction" | "needs_human_input" | "blocked";
+
+export interface AnswerReviewResult {
+  passed: boolean;
+  status: AnswerReviewStatus;
+  reason: string;
+  issues: string[];
+  correction_instruction: string;
+}
+
+export interface ReviewedAgentOptions {
+  reviewer?: (input: {
+    messages: BaseMessage[];
+    answer: string;
+    round: number;
+  }) => Promise<AnswerReviewResult>;
+  maxReviewRounds?: number;
 }
 
 export interface SearchQuery {
@@ -656,14 +685,184 @@ export function buildMessagesForCurrentTurn(input: {
   return [...input.sessionMessages, new HumanMessage({ content: input.userContent })];
 }
 
+function getConfiguredMaxReviewRounds() {
+  const rawValue = process.env.ANSWER_REVIEW_MAX_ROUNDS;
+  if (!rawValue) return 2;
+
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < 1) return 2;
+  return Math.min(parsed, 5);
+}
+
+function stringifyMessageContent(content: unknown) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map(item => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object" && "text" in item) {
+        return String((item as { text?: unknown }).text ?? "");
+      }
+      return "";
+    }).filter(Boolean).join("\n");
+  }
+  return content == null ? "" : String(content);
+}
+
+function normalizeReviewStatus(status: unknown, passed: boolean): AnswerReviewStatus {
+  if (status === "passed" || status === "needs_correction" || status === "needs_human_input" || status === "blocked") {
+    return status;
+  }
+  return passed ? "passed" : "needs_correction";
+}
+
+export function parseAnswerReviewResult(content: string): AnswerReviewResult {
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return {
+      passed: false,
+      status: "needs_correction",
+      reason: "审核节点未返回有效 JSON",
+      issues: ["审核节点输出格式无效"],
+      correction_instruction: "重新核对上一版回答，补齐证据后按要求输出最终答案；如证据不足，转为要求用户补充信息。",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const passed = Boolean(parsed.passed);
+    const status = normalizeReviewStatus(parsed.status, passed);
+    return {
+      passed: passed && status === "passed",
+      status,
+      reason: typeof parsed.reason === "string" ? parsed.reason : "",
+      issues: Array.isArray(parsed.issues) ? parsed.issues.map(String).filter(Boolean) : [],
+      correction_instruction: typeof parsed.correction_instruction === "string" ? parsed.correction_instruction : "",
+    };
+  } catch {
+    return {
+      passed: false,
+      status: "needs_correction",
+      reason: "审核节点 JSON 解析失败",
+      issues: ["审核节点输出不是合法 JSON"],
+      correction_instruction: "重新核对上一版回答，补齐证据后按要求输出最终答案；如证据不足，转为要求用户补充信息。",
+    };
+  }
+}
+
+export async function runAnswerReview(input: {
+  messages: BaseMessage[];
+  answer: string;
+  round: number;
+}): Promise<AnswerReviewResult> {
+  const model = await getBaseModel();
+  const reviewPrompt = await getReviewPrompt();
+  const response = await model.invoke([
+    new SystemMessage(reviewPrompt),
+    new HumanMessage(JSON.stringify({
+      round: input.round,
+      conversation: input.messages.map(message => ({
+        type: (message as any)._getType?.() || message.constructor.name,
+        content: stringifyMessageContent(message.content),
+      })),
+      answer: input.answer,
+    })),
+  ]);
+
+  return parseAnswerReviewResult(response.content.toString());
+}
+
+function buildReviewCorrectionMessage(review: AnswerReviewResult, round: number, maxReviewRounds: number) {
+  return new HumanMessage(`【回答审核未通过】
+审核轮次：${round}/${maxReviewRounds}
+审核状态：${review.status}
+审核原因：${review.reason || "未提供"}
+问题清单：
+${review.issues.length > 0 ? review.issues.map(issue => `- ${issue}`).join("\n") : "- 未提供"}
+
+纠正要求：
+${review.correction_instruction || "请重新核对证据并修正回答。"}
+
+请基于以上审核意见继续处理上一轮问题。若问题本身缺少关键信息、需要生产查询结果或遇到工具/环境阻塞，不要猜测，改为明确要求用户补充或说明阻塞。`);
+}
+
+function collectAnswerContent(current: string, message: BaseMessage) {
+  const type = (message as any)._getType?.() || message.constructor.name;
+  if (!(type === "ai" || type === "AIMessage" || type === "AIMessageChunk")) {
+    return current;
+  }
+
+  const aiMsg = message as any;
+  if ((aiMsg.tool_call_chunks && aiMsg.tool_call_chunks.length > 0) || (aiMsg.tool_calls && aiMsg.tool_calls.length > 0)) {
+    return current;
+  }
+
+  const delta = stringifyMessageContent(aiMsg.content);
+  if (!delta) return current;
+  return current && delta.startsWith(current) ? delta : current + delta;
+}
+
+function shouldStopReviewLoop(review: AnswerReviewResult, round: number, maxReviewRounds: number) {
+  return review.passed
+    || review.status === "needs_human_input"
+    || review.status === "blocked"
+    || round >= maxReviewRounds;
+}
+
+export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOptions = {}) {
+  const reviewer = options.reviewer || runAnswerReview;
+  const maxReviewRounds = options.maxReviewRounds ?? getConfiguredMaxReviewRounds();
+
+  return {
+    async *stream(input: { messages: BaseMessage[] }, config?: Record<string, unknown>) {
+      let messages = input.messages;
+
+      // 符合 Dev-Spec-Gen：审核节点独立于业务节点，并以有限循环避免无限纠正。
+      for (let round = 1; round <= maxReviewRounds; round += 1) {
+        let answer = "";
+        const stream = await baseAgent.stream({ ...input, messages }, config);
+
+        for await (const item of stream) {
+          const [message] = item as [BaseMessage, unknown];
+          answer = collectAnswerContent(answer, message);
+          yield item;
+        }
+
+        const review = await reviewer({ messages, answer, round });
+        if (shouldStopReviewLoop(review, round, maxReviewRounds)) {
+          if (!review.passed && (review.status !== "needs_correction" || round >= maxReviewRounds)) {
+            yield [
+              new AIMessage(`审核未通过：${review.reason || review.status}\n\n${review.correction_instruction || "请补充必要信息后继续。"}`),
+              { answerReview: { status: review.status, final: true } },
+            ];
+          }
+          break;
+        }
+
+        yield [
+          new AIMessage("审核发现回答需要修正，正在按审核意见重新核实。"),
+          { answerReview: { status: review.status, resetContent: true, round } },
+        ];
+
+        messages = [
+          ...messages,
+          new AIMessage(answer),
+          buildReviewCorrectionMessage(review, round, maxReviewRounds),
+        ];
+      }
+    },
+  };
+}
+
 export async function initializeAgent(tools?: any[]) {
   const model = await getBaseModel();
   const agentTools = tools || await getAllMcpTools();
   const systemPrompt = await getBusinessPrompt();
 
-  return createAgent({
+  const baseAgent = createAgent({
     model: model,
     tools: agentTools,
     systemPrompt: systemPrompt,
   });
+
+  return createReviewedAgent(baseAgent);
 }

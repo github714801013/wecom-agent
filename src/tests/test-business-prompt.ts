@@ -21,6 +21,11 @@ assertIncludes(prompt, "不确定性只能保留在未核实的枚举含义、�
 assertIncludes(prompt, "代码事实提取类问题", "business prompt should generalize direct code fact extraction");
 assertIncludes(prompt, "权限码、按钮编码、配置值、枚举值、接口路径、字段名", "business prompt should cover common direct facts");
 assertIncludes(prompt, "直接提取并回答证据中的原值", "business prompt should require extracting values from evidence");
+assertIncludes(prompt, "编码语义并列输出", "business prompt should require code and semantic meaning together");
+assertIncludes(prompt, "枚举值、常量值、状态值、类型值、数据库字段编码或数字字典值", "business prompt should cover enum constants and database code values");
+assertIncludes(prompt, "必须继续核实对应语义", "business prompt should require resolving semantic meaning");
+assertIncludes(prompt, "结果必须同时包含编码和值对应的语义", "business prompt should include both code and meaning");
+assertIncludes(prompt, "语义未核实时，不得只输出数字或编码", "business prompt should not output code alone when meaning is unknown");
 assertIncludes(prompt, "不要把已命中的事实改写成泛化建议", "business prompt should avoid generic advice after direct evidence");
 assertIncludes(prompt, "证据不足或证据冲突类问题", "business prompt should handle insufficient or conflicting evidence");
 assertIncludes(prompt, "不同问法命中不同候选流程、不同仓库或相反结论", "business prompt should detect inconsistent evidence from query variants");
@@ -72,6 +77,9 @@ assertIncludes(prompt, "审核 SQL 正确性", "business prompt should review SQ
 assertIncludes(prompt, "SQL 是否已经在 dev 环境对应库执行且不报错", "business prompt should verify SQL ran in dev");
 assertIncludes(prompt, "审核问题回答准确性", "business prompt should review answer accuracy");
 assertIncludes(prompt, "结论是否由已命中的项目、接口、入口、代码片段、数据库结果或用户补充支撑", "business prompt should verify answer evidence");
+assertIncludes(prompt, "验收阶段必须核对编码语义并列输出", "business prompt should review code meaning output during acceptance");
+assertIncludes(prompt, "涉及枚举值、常量值、状态值、类型值、数据库字段编码或数字字典值时", "business prompt should apply acceptance review to all code-like values");
+assertIncludes(prompt, "最终答案是否同时包含编码和值对应的语义", "business prompt should verify final answer includes code and meaning");
 assertIncludes(prompt, "审核不通过时不得输出最终结论", "business prompt should block final answer when review fails");
 assertIncludes(prompt, "截图信息提取规则", "business prompt should define screenshot extraction rules");
 assertIncludes(prompt, "优先识别截图中的 URL 地址", "business prompt should prioritize screenshot URLs");

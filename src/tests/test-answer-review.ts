@@ -84,8 +84,9 @@ const passAgent = createReviewedAgent({
 const passOutputs = await collect(passAgent);
 assert.equal(passCalls, 1);
 assert.equal(passOutputs.length, 2);
-assert.equal(getText(passOutputs[0]![0]), "已验证结论");
-assert.equal((passOutputs[1]![1] as any).answerReview.progress, true);
+assert.equal((passOutputs[0]![1] as any).answerReview.progress, true);
+assert.equal(getText(passOutputs[1]![0]), "已验证结论");
+assert.equal((passOutputs[1]![1] as any).answerReview.final, true);
 
 let correctionCalls = 0;
 let reviewCalls = 0;
@@ -119,12 +120,18 @@ const correctionAgent = createReviewedAgent({
 const correctionOutputs = await collect(correctionAgent);
 assert.equal(correctionCalls, 2);
 assert.equal(reviewCalls, 2);
-assert.equal(correctionOutputs.length, 5);
-assert.equal(getText(correctionOutputs[0]![0]), "可能是 A");
-assert.equal((correctionOutputs[1]![1] as any).answerReview.progress, true);
-assert.equal((correctionOutputs[2]![1] as any).answerReview.resetContent, true);
+assert.equal(correctionOutputs.length, 4);
+assert.equal((correctionOutputs[0]![1] as any).answerReview.progress, true);
+assert.equal(getText(correctionOutputs[1]![0]), "审核发现回答需要修正，正在按审核意见重新核实。");
+assert.equal((correctionOutputs[1]![1] as any).answerReview.resetContent, true);
+assert.equal((correctionOutputs[2]![1] as any).answerReview.progress, true);
 assert.equal(getText(correctionOutputs[3]![0]), "已核实接口逻辑，结论是 B");
-assert.equal((correctionOutputs[4]![1] as any).answerReview.progress, true);
+assert.equal((correctionOutputs[3]![1] as any).answerReview.final, true);
+assert.equal(
+  correctionOutputs.some(([message]) => getText(message) === "可能是 A"),
+  false,
+  "failed draft answer should not be streamed before review passes",
+);
 
 let maxRoundCalls = 0;
 const maxRoundAgent = createReviewedAgent({

@@ -808,6 +808,20 @@ function collectAnswerContent(current: string, message: BaseMessage) {
   return current && delta.startsWith(current) ? delta : current + delta;
 }
 
+function isAnswerContentMessage(message: BaseMessage) {
+  const type = (message as any)._getType?.() || message.constructor.name;
+  if (!(type === "ai" || type === "AIMessage" || type === "AIMessageChunk")) {
+    return false;
+  }
+
+  const aiMsg = message as any;
+  if ((aiMsg.tool_call_chunks && aiMsg.tool_call_chunks.length > 0) || (aiMsg.tool_calls && aiMsg.tool_calls.length > 0)) {
+    return false;
+  }
+
+  return Boolean(stringifyMessageContent(aiMsg.content));
+}
+
 function shouldStopReviewLoop(review: AnswerReviewResult, round: number, maxReviewRounds: number) {
   return review.passed
     || review.status === "needs_human_input"
@@ -852,6 +866,9 @@ export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOption
         for await (const item of stream) {
           const [message] = item as [BaseMessage, unknown];
           answer = collectAnswerContent(answer, message);
+          if (isAnswerContentMessage(message)) {
+            continue;
+          }
           yield item;
         }
 
@@ -865,7 +882,12 @@ export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOption
           answer,
         );
         if (shouldStopReviewLoop(review, round, maxReviewRounds)) {
-          if (!review.passed && (review.status !== "needs_correction" || round >= maxReviewRounds)) {
+          if (review.passed) {
+            yield [
+              new AIMessage(answer),
+              { answerReview: { status: review.status, final: true } },
+            ];
+          } else if (review.status !== "needs_correction" || round >= maxReviewRounds) {
             yield [
               new AIMessage(`审核未通过：${review.reason || review.status}\n\n${review.correction_instruction || "请补充必要信息后继续。"}`),
               { answerReview: { status: review.status, final: true } },

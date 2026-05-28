@@ -73,6 +73,7 @@ assertIncludes(prompt, "生产 SQL 也必须先用 dev 对应库验证结构正�
 assertIncludes(prompt, "输出 `prod_sql_required.sql` 前", "business prompt should apply validation to human-loop production SQL");
 assertIncludes(prompt, "业务节点自检边界", "business prompt should keep a lightweight self-check boundary");
 assertIncludes(prompt, "详细审核交给独立审核节点处理", "business prompt should delegate detailed review to review agent");
+assertIncludes(prompt, "最终回答不能停留在“继续核实中”", "business prompt should not stop at progress-only final answers");
 assertIncludes(prompt, "不要输出审核过程、审核清单或自检说明", "business prompt should hide self-check details");
 assertNotIncludes(prompt, "最终输出前必须先执行审核流程节点", "business prompt should not duplicate review agent flow");
 assertNotIncludes(prompt, "审核 SQL 正确性", "business prompt should not duplicate SQL review details");

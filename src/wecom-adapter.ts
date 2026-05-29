@@ -14,6 +14,7 @@ import {
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
 import { buildProgressStreamContent, collapseProgressUpdates, getProcessingFrame } from "./progress-updates.js";
+import { isStreamExpired, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 import {
   buildFollowupQuestion,
@@ -426,6 +427,7 @@ export async function startBot(botConfig: BotConfig) {
 
     try {
       const streamId = generateReqId("stream");
+      const streamStartedAt = Date.now();
       const currentQuestion = typeof effectiveParsedContent === "string"
         ? stripBoundaryMentions(effectiveParsedContent)
         : extractTextContent(effectiveParsedContent as any);
@@ -446,10 +448,51 @@ export async function startBot(botConfig: BotConfig) {
       let fullContent = "";
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 2000;
+      let expiredStreamFinalSent = false;
+      let expiredStreamHistorySaved = false;
+      const saveExpiredStreamHistory = async () => {
+        if (expiredStreamHistorySaved) return;
+        expiredStreamHistorySaved = true;
+        await sessionManager.addMessages(sessionKey, [
+          new HumanMessage({ content: effectiveParsedContent as any }),
+          new AIMessage(STREAM_EXPIRED_MESSAGE),
+        ]);
+      };
+      const safeReplyStream = async (content: string, final = false) => {
+        if (shouldStopCurrentTask()) return false;
+        if (isStreamExpired(streamStartedAt)) {
+          await saveExpiredStreamHistory();
+          currentTask.cancelled = true;
+          if (!expiredStreamFinalSent) {
+            expiredStreamFinalSent = true;
+            try {
+              await bot.replyStream(frame, streamId, STREAM_EXPIRED_MESSAGE, true);
+            } catch (error) {
+              if (!isWeComStreamExpiredError(error)) throw error;
+              console.warn(`[${botConfig.name}] WeCom stream already expired for ${body.msgid}; skip final pause update.`);
+            }
+          }
+          return false;
+        }
+
+        try {
+          await bot.replyStream(frame, streamId, content, final);
+          return true;
+        } catch (error) {
+          if (isWeComStreamExpiredError(error)) {
+            await saveExpiredStreamHistory();
+            currentTask.cancelled = true;
+            expiredStreamFinalSent = true;
+            console.warn(`[${botConfig.name}] WeCom stream expired for ${body.msgid}; stop updating old streamId.`);
+            return false;
+          }
+          throw error;
+        }
+      };
       const sendStageProgress = async (content: string, force = false) => {
         if (shouldStopCurrentTask()) return;
         if (!force && Date.now() - lastUpdateTime <= 1000) return;
-        await bot.replyStream(frame, streamId, buildProgressStreamContent(content, [], { motionFrame: getProcessingFrame() }), false);
+        await safeReplyStream(buildProgressStreamContent(content, [], { motionFrame: getProcessingFrame() }), false);
         lastUpdateTime = Date.now();
       };
 
@@ -659,7 +702,7 @@ ${hypotheses}
                   // 节流推送：避免高频更新导致前端闪烁
                   if (Date.now() - lastUpdateTime > 1000) { 
                     if (!shouldStopCurrentTask()) {
-                      await bot.replyStream(frame, streamId, statusMsg, false);
+                      await safeReplyStream(statusMsg, false);
                     }
                     lastUpdateTime = Date.now();
                   }
@@ -682,7 +725,7 @@ ${hypotheses}
                     `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
                   ], { motionFrame: getProcessingFrame() });
                   if (!shouldStopCurrentTask()) {
-                    await bot.replyStream(frame, streamId, statusMsg, false);
+                    await safeReplyStream(statusMsg, false);
                   }
                 }
                 continue;
@@ -699,7 +742,7 @@ ${hypotheses}
 
                 if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
                   if (!shouldStopCurrentTask()) {
-                    await bot.replyStream(frame, streamId, collapseProgressUpdates(fullContent), false);
+                    await safeReplyStream(collapseProgressUpdates(fullContent), false);
                   }
                   lastUpdateTime = Date.now();
                 }
@@ -776,12 +819,7 @@ ${hypotheses}
       // 发送最终结果
       fullContent = collapseProgressUpdates(fullContent);
       if (!shouldStopCurrentTask()) {
-        await bot.replyStream(
-          frame,
-          streamId,
-          fullContent || "未获取到有效回复",
-          true
-        );
+        await safeReplyStream(fullContent || "未获取到有效回复", true);
       }
       if (activeTasks.get(sessionKey) === currentTask) {
         activeTasks.delete(sessionKey);

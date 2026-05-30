@@ -65,6 +65,7 @@ async function collect(agent: ReturnType<typeof createReviewedAgent>) {
 }
 
 let passCalls = 0;
+let passReviewCalls = 0;
 const passAgent = createReviewedAgent({
   async *stream() {
     passCalls += 1;
@@ -72,20 +73,17 @@ const passAgent = createReviewedAgent({
   },
 }, {
   maxReviewRounds: 2,
-  reviewer: async (): Promise<AnswerReviewResult> => ({
-    passed: true,
-    status: "passed",
-    reason: "通过",
-    issues: [],
-    correction_instruction: "",
-  }),
+  reviewer: async (): Promise<AnswerReviewResult> => {
+    passReviewCalls += 1;
+    throw new Error("reviewer should be merged into business prompt");
+  },
 });
 
 const passOutputs = await collect(passAgent);
 assert.equal(passCalls, 1);
+assert.equal(passReviewCalls, 0);
 assert.equal(passOutputs.length, 1);
 assert.equal(getText(passOutputs[0]![0]), "已验证结论");
-assert.equal((passOutputs[0]![1] as any).answerReview.final, true);
 
 let correctionCalls = 0;
 let reviewCalls = 0;
@@ -117,22 +115,14 @@ const correctionAgent = createReviewedAgent({
 });
 
 const correctionOutputs = await collect(correctionAgent);
-assert.equal(correctionCalls, 2);
-assert.equal(reviewCalls, 1);
-assert.equal(correctionOutputs.length, 2);
-assert.equal(getText(correctionOutputs[0]![0]), "正在补齐回答依据，继续核实中。");
-assert.equal((correctionOutputs[0]![1] as any).answerReview.resetContent, true);
-assert.equal(getText(correctionOutputs[1]![0]), "已核实接口逻辑，结论是 B");
-assert.equal((correctionOutputs[1]![1] as any).answerReview.final, true);
-assert.equal(
-  correctionOutputs.some(([message]) => getText(message) === "可能是 A"),
-  false,
-  "failed draft answer should not be streamed before review passes",
-);
+assert.equal(correctionCalls, 1);
+assert.equal(reviewCalls, 0);
+assert.equal(correctionOutputs.length, 1);
+assert.equal(getText(correctionOutputs[0]![0]), "可能是 A");
 assert.equal(
   correctionOutputs.some(([message]) => getText(message).includes("审核未通过") || getText(message).includes("审核发现")),
   false,
-  "review result text should not be visible to users",
+  "review result text should not exist after review node is merged",
 );
 
 let maxRoundCalls = 0;
@@ -153,13 +143,34 @@ const maxRoundAgent = createReviewedAgent({
 });
 
 const maxRoundOutputs = await collect(maxRoundAgent);
-assert.equal(maxRoundCalls, 2);
+assert.equal(maxRoundCalls, 1);
 assert.ok(maxRoundOutputs.length > 0);
-assert.equal(getText(maxRoundOutputs[maxRoundOutputs.length - 1]![0]), "第 2 版回答");
+assert.equal(getText(maxRoundOutputs[maxRoundOutputs.length - 1]![0]), "第 1 版回答");
 assert.equal(
   maxRoundOutputs.some(([message]) => getText(message).includes("审核未通过")),
   false,
   "final result should come from business node after one correction",
 );
 
-console.log("answer review 循环审核验证通过");
+let timeoutReviewCalls = 0;
+let timeoutNow = 0;
+const timeoutAgent = createReviewedAgent({
+  async *stream() {
+    timeoutNow = 301000;
+    yield [new AIMessage("耗时较长但已有业务结论"), {}];
+  },
+}, {
+  reviewDeadlineMs: 300000,
+  now: () => timeoutNow,
+  reviewer: async (): Promise<AnswerReviewResult> => {
+    timeoutReviewCalls += 1;
+    throw new Error("answer review should be skipped after deadline");
+  },
+});
+
+const timeoutOutputs = await collect(timeoutAgent);
+assert.equal(timeoutReviewCalls, 0);
+assert.equal(timeoutOutputs.length, 1);
+assert.equal(getText(timeoutOutputs[0]![0]), "耗时较长但已有业务结论");
+
+console.log("answer review 合并业务节点验证通过");

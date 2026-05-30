@@ -90,6 +90,8 @@ export interface ReviewedAgentOptions {
     round: number;
   }) => Promise<AnswerReviewResult>;
   maxReviewRounds?: number;
+  reviewDeadlineMs?: number;
+  now?: () => number;
 }
 
 const INCOMPLETE_PROGRESS_PATTERNS = [
@@ -445,6 +447,15 @@ function chooseSearchTool(tools: any[]) {
     || tools.find(tool => chooseQueryArgName(tool));
 }
 
+function isGitNexusQueryTool(tool: any) {
+  const keys = getToolSchemaKeys(tool);
+  return tool?.name === "query"
+    && keys.includes("query")
+    && keys.includes("zoekt")
+    && keys.includes("repo")
+    && keys.includes("max_symbols");
+}
+
 function stringifyToolResult(result: unknown) {
   if (typeof result === "string") return result;
   try {
@@ -668,6 +679,11 @@ export async function runSearchLoopPrelude(options: SearchLoopPreludeOptions) {
     return "";
   }
 
+  if (isGitNexusQueryTool(searchTool)) {
+    console.log("[Search Loop Prelude] Skip GitNexus query prelude to avoid duplicate vector search.");
+    return "";
+  }
+
   try {
     const loop = createMinimalSearchLoop({
       planner: async () => options.plannerResult,
@@ -843,56 +859,11 @@ export function enforceFinalAnswerCompleteness(review: AnswerReviewResult, answe
 }
 
 export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOptions = {}) {
-  const reviewer = options.reviewer || runAnswerReview;
-
   return {
     async *stream(input: { messages: BaseMessage[] }, config?: Record<string, unknown>) {
-      let messages = input.messages;
-
-      // 符合 Dev-Spec-Gen：审核节点只做路由判断；最终用户文本只能来自业务节点。
-      for (let round = 1; round <= 2; round += 1) {
-        let answer = "";
-        const stream = await baseAgent.stream({ ...input, messages }, config);
-
-        for await (const item of stream) {
-          const [message] = item as [BaseMessage, unknown];
-          answer = collectAnswerContent(answer, message);
-          if (isAnswerContentMessage(message)) {
-            continue;
-          }
-          yield item;
-        }
-
-        if (round === 2) {
-          yield [
-            new AIMessage(answer),
-            { answerReview: { status: "passed_after_correction", final: true } },
-          ];
-          break;
-        }
-
-        const review = enforceFinalAnswerCompleteness(
-          await reviewer({ messages, answer, round }),
-          answer,
-        );
-        if (review.passed) {
-          yield [
-            new AIMessage(answer),
-            { answerReview: { status: review.status, final: true } },
-          ];
-          break;
-        }
-
-        yield [
-          new AIMessage("正在补齐回答依据，继续核实中。"),
-          { answerReview: { status: review.status, resetContent: true, round } },
-        ];
-
-        messages = [
-          ...messages,
-          new AIMessage(answer),
-          buildReviewCorrectionMessage(review),
-        ];
+      const stream = await baseAgent.stream(input, config);
+      for await (const item of stream) {
+        yield item;
       }
     },
   };

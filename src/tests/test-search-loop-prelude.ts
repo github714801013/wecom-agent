@@ -157,6 +157,37 @@ async function runTest() {
   assert.equal(queryIntentCalls.length, 1);
   assert.match(queryIntentPrelude, /query intent evidence/);
 
+  const gitnexusQueryCalls: any[] = [];
+  const skippedGitnexusPrelude = await runSearchLoopPrelude({
+    userQuestion: "oa-pc项目 备用机 押金支付 支持哪些支付方式逻辑",
+    plannerResult,
+    toolIntentResolver: async () => ({ toolName: "query", shouldRunPrelude: true }),
+    tools: [{
+      name: "query",
+      description: "Query the code knowledge graph for execution flows related to a concept.",
+      schema: {
+        type: "object",
+        properties: {
+          query: {},
+          zoekt: {},
+          goal: {},
+          max_symbols: {},
+          repo: {},
+        },
+      },
+      invoke: async (args: any) => {
+        gitnexusQueryCalls.push(args);
+        return { content: "slow gitnexus vector search" };
+      },
+    }],
+    compressor: async () => {
+      throw new Error("GitNexus query prelude should be skipped");
+    },
+  });
+
+  assert.equal(skippedGitnexusPrelude, "");
+  assert.equal(gitnexusQueryCalls.length, 0);
+
   const repoHintCalls: any[] = [];
   const repoHintPrelude = await runSearchLoopPrelude({
     userQuestion: "只查 oa-order 短信模板来源",

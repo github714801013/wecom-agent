@@ -569,6 +569,7 @@ ${hypotheses}
 * 首轮代码检索必须保持跨项目发现能力：除非用户明确要求“只查某仓库/某项目”，否则不得把项目名作为过滤参数；如果用户明确指定 GitNexus repo 且工具 schema 支持 repo 参数，当次查询必须携带该 repo。
 * 严禁在代码检索中包含人名、商品名、租户名、订单号等实例数据。
 * 如果意图模糊，参考问题假设进行进一步排查。
+* GitNexus query 成本较高，必须合并查询条件：把项目、核心业务词、动作词、接口/文件锚点尽量放入一次 query/zoekt；同一问题原则上不超过 2 次 query，命中候选文件后改用 code_snippet/context 或已有证据回答。
 * 严禁拆分关键词进行多次循环搜索。${smsTemplateEvidenceHint}`;
             
             if (typeof effectiveParsedContent === 'string') {

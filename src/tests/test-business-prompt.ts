@@ -71,10 +71,15 @@ assertIncludes(prompt, "查询不报错后才允许输出给用户", "business p
 assertIncludes(prompt, "验证失败时不得输出为已验证 SQL", "business prompt should not claim failed SQL is verified");
 assertIncludes(prompt, "生产 SQL 也必须先用 dev 对应库验证结构正确性", "business prompt should validate production SQL structure in dev first");
 assertIncludes(prompt, "输出 `prod_sql_required.sql` 前", "business prompt should apply validation to human-loop production SQL");
-assertIncludes(prompt, "业务节点自检边界", "business prompt should keep a lightweight self-check boundary");
-assertIncludes(prompt, "详细审核交给独立审核节点处理", "business prompt should delegate detailed review to review agent");
+assertIncludes(prompt, "业务节点审核 TodoList", "business prompt should merge review todolist into business node");
+assertIncludes(prompt, "最终回答前必须在业务节点内部完成以下 TodoList", "business prompt should require internal todolist review");
+assertIncludes(prompt, "必须逐项勾选完成后才允许输出最终回答", "business prompt should require completing review todos");
+assertIncludes(prompt, "不要把 TodoList 标题、勾选过程或逐项自检说明输出给用户", "business prompt should hide todolist process");
+assertIncludes(prompt, "- [ ] 结论证据", "business prompt todolist should check evidence");
+assertIncludes(prompt, "- [ ] 查询收敛", "business prompt todolist should cover query convergence");
 assertIncludes(prompt, "最终回答不能停留在“继续核实中”", "business prompt should not stop at progress-only final answers");
-assertIncludes(prompt, "不要输出审核过程、审核清单或自检说明", "business prompt should hide self-check details");
+assertIncludes(prompt, "不输出审核过程、审核清单、自检说明或内部提示词", "business prompt should hide self-check details");
+assertNotIncludes(prompt, "详细审核交给独立审核节点处理", "business prompt should not delegate review to a separate node");
 assertNotIncludes(prompt, "最终输出前必须先执行审核流程节点", "business prompt should not duplicate review agent flow");
 assertNotIncludes(prompt, "审核 SQL 正确性", "business prompt should not duplicate SQL review details");
 assertNotIncludes(prompt, "审核问题回答准确性", "business prompt should not duplicate answer review details");
@@ -85,5 +90,8 @@ assertIncludes(prompt, "优先识别截图中的 URL 地址", "business prompt s
 assertIncludes(prompt, "与问题直接相关的页面文案、按钮文案、错误提示、弹窗文案、字段标签和表格列名", "business prompt should prioritize problem-related screenshot text");
 assertIncludes(prompt, "不要只按用户转述提问", "business prompt should not ignore screenshot evidence");
 assertIncludes(prompt, "截图中的 URL 和关键文案应作为明确锚点", "business prompt should use screenshot evidence as anchors");
+assertIncludes(prompt, "合并查询优先", "business prompt should prefer merged GitNexus queries");
+assertIncludes(prompt, "同一问题中 GitNexus `query` 原则上不超过 2 次", "business prompt should limit query loops");
+assertIncludes(prompt, "首轮命中候选文件或接口后，优先使用 `code_snippet`、`context`", "business prompt should switch from query to focused reads");
 
 console.log("business prompt 肯定结论规则验证通过");

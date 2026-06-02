@@ -37,6 +37,7 @@ fs.writeFileSync(tempConfigFile, JSON.stringify({
   tools: {
     allowed: [],
     excluded: [],
+    cacheTtlMinutes: 15,
   },
 }), "utf-8");
 
@@ -45,6 +46,7 @@ const { buildMcpHeaders } = await import("../mcp-client.js");
 
 assertEqual(config.llm.apiKey, "test-api-key", "config should resolve llm api key placeholder");
 assertEqual(config.bots[0]?.botId, "test-bot-id", "config should resolve bot id placeholder");
+assertEqual(config.tools.cacheTtlMinutes, 15, "config should parse MCP tools cache TTL");
 
 const resolved = resolveEnvPlaceholders({
   secret: "${TEST_SECRET_VALUE}",

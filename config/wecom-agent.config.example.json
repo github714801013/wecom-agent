@@ -50,6 +50,7 @@
   ],
   "tools": {
     "allowed": [],
-    "excluded": []
+    "excluded": [],
+    "cacheTtlMinutes": 30
   }
 }

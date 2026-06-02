@@ -36,7 +36,8 @@ const agentConfigSchema = z.object({
   tools: z.object({
     allowed: z.array(z.string()).default([]),
     excluded: z.array(z.string()).default([]),
-  }).default({ allowed: [], excluded: [] }),
+    cacheTtlMinutes: z.coerce.number().positive().default(30),
+  }).default({ allowed: [], excluded: [], cacheTtlMinutes: 30 }),
 });
 
 export type McpServerConfig = z.infer<typeof mcpServerSchema>;

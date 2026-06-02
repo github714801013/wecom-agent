@@ -22,6 +22,17 @@ import {
   detectActiveMessageIntent,
   type ConversationContextItem,
 } from "./interaction-control.js";
+import {
+  assertTodoListComplete,
+  blockTodoItem,
+  buildRuntimeTodoTool,
+  completeTodoItem,
+  createRuntimeTodoList,
+  getIncompleteAuditTodoItems,
+  isFinalAnswerReady,
+  startTodoItem,
+  summarizeTodoList,
+} from "./runtime-todolist.js";
 
 interface ActiveTaskState {
   msgid: string;
@@ -433,6 +444,9 @@ export async function startBot(botConfig: BotConfig) {
         : extractTextContent(effectiveParsedContent as any);
       const currentTask: ActiveTaskState = { msgid: body.msgid, cancelled: false, question: currentQuestion };
       activeTasks.set(sessionKey, currentTask);
+const runtimeTodoList = createRuntimeTodoList();
+      startTodoItem(runtimeTodoList, "message_parsed");
+      completeTodoItem(runtimeTodoList, "message_parsed", `msgid=${body.msgid}, type=${body.msgtype}`);
 
       // 发送初始进度卡片
       await bot.replyStreamWithCard(frame, streamId, "AI 正在思考中...", false, {
@@ -499,6 +513,13 @@ export async function startBot(botConfig: BotConfig) {
       // --- Planner Logic Start ---
       let finalContentForPrompt: any = effectiveParsedContent;
       let plannerResult = null;
+      const runtimeTodoInstruction = `系统提示：【运行时 TodoList 工具要求】
+当前回答必须使用工具 runtime_todolist_update 维护审核 TodoList。
+在最终回答前，必须分别调用该工具并将以下 itemId 标记为 done：
+1. project_scope_audited：审核代码包、仓库、项目和用户目标范围一致性；不涉及代码范围时 evidence 写“不适用”及原因。
+2. sql_correctness_audited：审核 SQL 完整性、只读性、表名字段名、dev 执行校验；若 dev 库无对应表，evidence 必须写“dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构”。
+3. evidence_audited：审核核心结论证据、字段语义和查询收敛。
+没有证据时必须调用 runtime_todolist_update 将对应 itemId 标记为 blocked，不得直接输出最终结论。`;
 
       // 提取文本内容进行 Planner 分析
       let textToPlan = "";
@@ -511,9 +532,11 @@ export async function startBot(botConfig: BotConfig) {
 
       if (textToPlan.trim().length > 0) {
         try {
+          startTodoItem(runtimeTodoList, "planner_checked");
           await sendStageProgress("已收到问题，正在识别意图和检索锚点，继续核实中。", true);
           plannerResult = await runPlanner(textToPlan);
           if (plannerResult) {
+            completeTodoItem(runtimeTodoList, "planner_checked", `intent=${plannerResult.intent || "unknown"}`);
             await sendStageProgress("已完成问题规划，正在整理检索词和候选方向，继续核实中。", true);
             const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
@@ -573,16 +596,35 @@ ${hypotheses}
 * 严禁拆分关键词进行多次循环搜索。${smsTemplateEvidenceHint}`;
             
             if (typeof effectiveParsedContent === 'string') {
-              finalContentForPrompt = `${searchPlanHint}\n\n${effectiveParsedContent}`;
+              finalContentForPrompt = `${runtimeTodoInstruction}\n\n${searchPlanHint}\n\n${effectiveParsedContent}`;
             } else if (Array.isArray(effectiveParsedContent)) {
               finalContentForPrompt = [
-                { type: 'text', text: `${searchPlanHint}\n\n` },
+                { type: 'text', text: `${runtimeTodoInstruction}\n\n${searchPlanHint}\n\n` },
                 ...effectiveParsedContent.map(item => item.type === 'text' ? { ...item, text: stripBoundaryMentions(item.text || '') } : item)
               ];
             }
+          } else {
+            completeTodoItem(runtimeTodoList, "planner_checked", "planner returned empty result, fallback to original question");
           }
         } catch (err) {
           console.error("Planner execution failed:", err);
+          completeTodoItem(runtimeTodoList, "planner_checked", `planner failed, fallback to original question: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else {
+        startTodoItem(runtimeTodoList, "planner_checked");
+        completeTodoItem(runtimeTodoList, "planner_checked", "empty text, planner skipped");
+      }
+      if (typeof finalContentForPrompt === 'string') {
+        finalContentForPrompt = finalContentForPrompt.includes("runtime_todolist_update")
+          ? finalContentForPrompt
+          : `${runtimeTodoInstruction}\n\n${finalContentForPrompt}`;
+      } else if (Array.isArray(finalContentForPrompt)) {
+        const hasInstruction = finalContentForPrompt.some(item => item.type === "text" && item.text?.includes("runtime_todolist_update"));
+        if (!hasInstruction) {
+          finalContentForPrompt = [
+            { type: "text", text: `${runtimeTodoInstruction}\n\n` },
+            ...finalContentForPrompt,
+          ];
         }
       }
       // --- Planner Logic End ---
@@ -593,6 +635,7 @@ ${hypotheses}
       let repoHints: string[] = [];
 
       try {
+        startTodoItem(runtimeTodoList, "tools_loaded");
         await sendStageProgress("正在加载 MCP 工具和项目范围，继续核实中。", true);
         const tools = await getAllMcpTools(botConfig);
         const explicitRepoHints = extractExplicitRepoHints(
@@ -600,7 +643,11 @@ ${hypotheses}
           extractMcpProjectCandidates(config.mcpServers)
         );
         repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints);
-        const agentTools = scopeToolsToRepo(tools, repoHints);
+        const agentTools = [
+          ...scopeToolsToRepo(tools, repoHints),
+          buildRuntimeTodoTool(runtimeTodoList),
+        ];
+        completeTodoItem(runtimeTodoList, "tools_loaded", `tools=${agentTools.length}, repoHints=${repoHints.join(",") || "none"}`);
         await sendStageProgress("已加载可用工具，正在判断是否需要预检索，继续核实中。", true);
 
         if (plannerResult && textToPlan.trim().length > 0) {
@@ -624,6 +671,7 @@ ${hypotheses}
           }
         }
 
+        startTodoItem(runtimeTodoList, "analysis_finished");
         await sendStageProgress("正在启动业务分析节点，继续核实中。", true);
         const agent = await initializeAgent(agentTools);
         await sendStageProgress("业务分析节点已启动，正在调用模型和工具核实证据，继续核实中。", true);
@@ -758,9 +806,11 @@ ${hypotheses}
             console.log(`[Tool Call Pending/Final] Name: ${entry.name}, Args: ${entry.args}`);
           }
         }
+        completeTodoItem(runtimeTodoList, "analysis_finished", `contentLength=${fullContent.length}, toolResults=${toolContextRecords.length}`);
 
       } catch (err: any) {
         console.error(`Agent execution error for ${body.msgid}:`, err);
+        blockTodoItem(runtimeTodoList, "analysis_finished", err instanceof Error ? err.message : String(err));
         
         // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
         if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
@@ -784,12 +834,15 @@ ${hypotheses}
 
             const recoveryResponse = await baseModel.invoke(recoveryMessages);
             fullContent = recoveryResponse.content.toString();
+            completeTodoItem(runtimeTodoList, "analysis_finished", `recovery contentLength=${fullContent.length}`);
           } catch (recoveryErr) {
             console.error(`Recovery synthesis failed for ${body.msgid}:`, recoveryErr);
             fullContent = fullContent || "抱歉，由于问题过于复杂且处理达到限制，我暂时无法给出完整回答。您可以尝试缩小查询范围。";
+            completeTodoItem(runtimeTodoList, "analysis_finished", "recovery failed, sent bounded fallback");
           }
         } else {
           fullContent = fullContent || "抱歉，处理您的请求时遇到了意外错误，请稍后重试。";
+          completeTodoItem(runtimeTodoList, "analysis_finished", "agent error, sent bounded fallback");
         }
       }
 
@@ -819,6 +872,25 @@ ${hypotheses}
 
       // 发送最终结果
       fullContent = collapseProgressUpdates(fullContent);
+      const incompleteAuditItems = getIncompleteAuditTodoItems(runtimeTodoList);
+      const auditPassed = incompleteAuditItems.length === 0;
+      if (!auditPassed) {
+        console.error(`[${botConfig.name}] Runtime TodoList audit incomplete for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
+        fullContent = `审核未完成：模型未通过 runtime_todolist_update 工具完成 ${incompleteAuditItems.map(item => item.id).join(", ")}。请缩小问题范围或稍后重试。`;
+      }
+
+      startTodoItem(runtimeTodoList, "final_checked");
+      if (isFinalAnswerReady(fullContent)) {
+        completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}`);
+      } else {
+        console.error(`[${botConfig.name}] Runtime TodoList blocked for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
+        fullContent = "抱歉，本次回答还停留在阶段性处理中，未能形成可发送的最终结论。请缩小问题范围或稍后重试。";
+        completeTodoItem(runtimeTodoList, "final_checked", "sent incomplete-answer fallback");
+      }
+      if (auditPassed) {
+        assertTodoListComplete(runtimeTodoList);
+        console.log(`[${botConfig.name}] Runtime TodoList completed for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
+      }
       if (!shouldStopCurrentTask()) {
         await safeReplyStream(fullContent || "未获取到有效回复", true);
       }

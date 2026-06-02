@@ -32,8 +32,62 @@ export function buildMcpHeaders(server: McpServerConfig, bot?: BotConfig) {
   };
 }
 
-export async function getAllMcpTools(bot?: BotConfig) {
-// ... rest of code unchanged ...
+type McpTool = Awaited<ReturnType<typeof loadMcpTools>>[number];
+
+type McpToolsCacheEntry = {
+  expiresAt: number;
+  tools?: McpTool[];
+  pending?: Promise<McpTool[]>;
+};
+
+export function buildMcpToolsCacheKey(bot?: BotConfig) {
+  return `${bot?.botId || "__default__"}:${JSON.stringify(bot?.mcpHeaders || {})}`;
+}
+
+export function getMcpToolsCacheTtlMs(cacheTtlMinutes = config.tools.cacheTtlMinutes) {
+  return cacheTtlMinutes * 60 * 1000;
+}
+
+export function createMcpToolsCache(ttlMs: number, now = () => Date.now()) {
+  const entries = new Map<string, McpToolsCacheEntry>();
+
+  return {
+    async get(key: string, loader: () => Promise<McpTool[]>) {
+      const current = now();
+      const cached = entries.get(key);
+      if (cached?.tools && cached.expiresAt > current) {
+        console.log(`Using cached MCP tools for ${key}, ttl left ${Math.ceil((cached.expiresAt - current) / 1000)}s.`);
+        return cached.tools;
+      }
+      if (cached?.pending) {
+        return cached.pending;
+      }
+
+      const pending = loader()
+        .then(tools => {
+          entries.set(key, {
+            tools,
+            expiresAt: now() + ttlMs,
+          });
+          return tools;
+        })
+        .catch(error => {
+          entries.delete(key);
+          throw error;
+        });
+
+      entries.set(key, {
+        pending,
+        expiresAt: current + ttlMs,
+      });
+      return pending;
+    },
+  };
+}
+
+const mcpToolsCache = createMcpToolsCache(getMcpToolsCacheTtlMs());
+
+async function loadFreshMcpTools(bot?: BotConfig) {
   const allTools = [];
 
   for (const server of config.mcpServers) {
@@ -90,4 +144,8 @@ export async function getAllMcpTools(bot?: BotConfig) {
   }
 
   return filteredTools;
+}
+
+export async function getAllMcpTools(bot?: BotConfig) {
+  return mcpToolsCache.get(buildMcpToolsCacheKey(bot), () => loadFreshMcpTools(bot));
 }

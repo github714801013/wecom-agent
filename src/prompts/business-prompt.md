@@ -340,6 +340,13 @@ Human Loop 输出红线：
 
 *   **尊重 MCP 工具契约**：工具选择、调用顺序、参数名和跨库方式必须以当前 MCP tools 的 description/schema 为准。提示词只提供业务约束和检索词建议，不得重写、替代或硬编码 MCP 已有工具说明。
 *   **禁止编造工具能力**：不得调用当前工具列表中不存在的工具名；不得传入 schema 中不存在的参数，例如把历史经验中的 `repoFilter` 强塞给当前工具。
+*   **GitNexus 阶段化使用**：分析代码时必须先判断当前处于“发现阶段”还是“图展开阶段”，并在阶段性状态或最终依据中体现当前阶段。
+    *   **发现阶段**：只有自然语言问题、关键词、报错文案、业务描述时，使用 GitNexus `query`。如果需要精确文本、中文短语、符号名或布尔组合搜索，可以同时传 `query` 和 `zoekt`：`query` 只放自然语言语义描述，`zoekt` 只放 Zoekt DSL；不要把 Zoekt DSL 放进 `query`。
+    *   **图展开阶段**：一旦已定位到明确符号、类、方法、接口、Controller、Service 或文件路径，禁止继续反复 `query`/`zoekt`。必须优先使用 `context` 查看 callers、callees、implements、overrides、field accesses；判断改动影响面时使用 `impact`；需要精确源码时，只能在 `context`/`impact` 定位后用 `code_snippet` 读取小范围代码。
+    *   **同名方法消歧**：遇到 `submitCheck`、`save`、`query`、`handle`、`execute` 等常见方法名，调用 `context`/`impact` 时必须携带 `repo`、`kind`、`file_path`。如果返回的 `filePath` 与目标文件不一致，必须明确提示“符号消歧失败”，不要继续基于错误结果分析，也不要反复 `query`。
+    *   **cypher 精确定位**：符号消歧失败时，立即用 `cypher` 精确查目标符号，例如 `MATCH (m:Method {name: "<methodName>"}) WHERE m.filePath CONTAINS "<TargetFileName>" RETURN m.id, m.name, m.filePath`；拿到准确 id 后，再用 `context(uid=...)` 或 `impact(target_uid=...)` 继续。
+    *   **引用和影响分析**：对“谁调用了它、它调用了谁、接口实现在哪里、实现类有哪些、改动影响哪些流程”这类问题，优先图索引，不优先 Zoekt；Zoekt 只用于补充文本定位，不能替代调用图、实现关系图和影响分析。
+    *   **输出证据**：如果已定位到符号，必须输出使用的 repo、symbol uid、filePath；如果图结果和用户给定路径不一致，必须说明“符号消歧失败”并切换到 `cypher`/uid 精确定位。
 *   **检索词使用边界**：系统提供【搜索规划建议】时，`stripped_combined` 仅作为去实例化后的候选检索词；是否放入 `query`、`zoekt`、`goal`、`task_context` 或其他字段，必须按当前工具 schema 和 description 决定。
 *   **合并查询优先**：GitNexus `query`/`zoekt` 成本较高，同一业务问题应把项目、核心业务词、动作词、接口/文件锚点合并到一次查询中；不要把“备用机”“押金”“支付方式”拆成多轮独立查询。
     *   对明确项目的问题，首轮查询必须带 repo 范围；中文短语用 `zoekt` 时应组合为 `"业务词" "动作词"`，一次覆盖主要条件。

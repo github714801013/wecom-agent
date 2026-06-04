@@ -152,6 +152,51 @@ export function summarizeTodoList(todoList: RuntimeTodoList) {
     .join("; ");
 }
 
+function getAuditTodoFailureGuide(item: RuntimeTodoItem) {
+  const baseReason = item.status === "blocked"
+    ? item.evidence || "模型主动标记该审核项阻塞，但未说明原因"
+    : `模型未调用 runtime_todolist_update 将 ${item.id} 标记为 done`;
+
+  if (item.id === "project_scope_audited") {
+    return {
+      title: "代码包/项目范围一致性审核未完成",
+      reason: baseReason,
+      next: "需要明确目标 repo、代码包、模块、接口、页面或入口，并说明命中的代码证据与用户指定范围一致；如果不涉及代码范围，也要通过工具标记“不适用”及原因。",
+    };
+  }
+
+  if (item.id === "sql_correctness_audited") {
+    return {
+      title: "SQL 正确性审核未完成",
+      reason: baseReason,
+      next: "如果问题涉及 SQL，需要补充完整只读 SQL 的 dev 执行校验结果；如果 dev 库没有对应表，需要通过目标项目代码反推表名、字段、Mapper/SQL、实体映射或调用链，并明确标记“dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构”。如果不涉及 SQL，也要通过工具标记“不涉及 SQL”。",
+    };
+  }
+
+  if (item.id === "evidence_audited") {
+    return {
+      title: "结论证据完整性审核未完成",
+      reason: baseReason,
+      next: "需要说明核心结论由哪些用户输入、工具结果、代码片段、数据库结果或业务规则支撑，并确认字段语义和查询已经收敛；证据不足时应触发 Human Loop 或说明最小缺口。",
+    };
+  }
+
+  return {
+    title: `${item.task}未完成`,
+    reason: baseReason,
+    next: "需要补充该审核项的完成证据，或通过工具标记 blocked 并说明阻塞原因。",
+  };
+}
+
+export function buildIncompleteAuditTodoMessage(items: RuntimeTodoItem[]) {
+  const details = items.map((item, index) => {
+    const guide = getAuditTodoFailureGuide(item);
+    return `${index + 1}. ${guide.title}\n原因：${guide.reason}\n下一步：${guide.next}`;
+  }).join("\n\n");
+
+  return `审核未完成，当前回答暂不发送最终结论。\n\n${details}`;
+}
+
 export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {
   return tool(
     async ({ itemId, status, evidence }) => {

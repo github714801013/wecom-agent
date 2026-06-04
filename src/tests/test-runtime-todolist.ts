@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import {
   assertTodoListComplete,
+  buildIncompleteAuditTodoMessage,
   buildRuntimeTodoTool,
   buildProjectScopeAuditEvidence,
   buildSqlAuditEvidence,
+  blockTodoItem,
   completeTodoItem,
   createRuntimeTodoList,
   getIncompleteAuditTodoItems,
@@ -98,5 +100,14 @@ assert.match(
   /不涉及 SQL/,
   "不涉及 SQL 时允许审核项以不适用完成"
 );
+
+const incompleteAuditTodoList = createRuntimeTodoList();
+blockTodoItem(incompleteAuditTodoList, "sql_correctness_audited", "回答包含 SELECT，但没有 dev 校验结果");
+const incompleteAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAuditTodoItems(incompleteAuditTodoList));
+assert.match(incompleteAuditMessage, /SQL 正确性审核未完成/);
+assert.match(incompleteAuditMessage, /原因：回答包含 SELECT，但没有 dev 校验结果/);
+assert.match(incompleteAuditMessage, /下一步：/);
+assert.match(incompleteAuditMessage, /dev 执行校验结果/);
+assert.match(incompleteAuditMessage, /dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构/);
 
 console.log("runtime todolist 验证通过");

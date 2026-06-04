@@ -25,6 +25,7 @@ import {
 import {
   assertTodoListComplete,
   blockTodoItem,
+  buildIncompleteAuditTodoMessage,
   buildRuntimeTodoTool,
   completeTodoItem,
   createRuntimeTodoList,
@@ -876,7 +877,7 @@ ${hypotheses}
       const auditPassed = incompleteAuditItems.length === 0;
       if (!auditPassed) {
         console.error(`[${botConfig.name}] Runtime TodoList audit incomplete for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
-        fullContent = `审核未完成：模型未通过 runtime_todolist_update 工具完成 ${incompleteAuditItems.map(item => item.id).join(", ")}。请缩小问题范围或稍后重试。`;
+        fullContent = buildIncompleteAuditTodoMessage(incompleteAuditItems);
       }
 
       startTodoItem(runtimeTodoList, "final_checked");

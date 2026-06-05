@@ -14,7 +14,7 @@ import {
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
 import { buildProgressStreamContent, collapseProgressUpdates, getProcessingFrame } from "./progress-updates.js";
-import { isStreamExpired, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
+import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 import {
   buildFollowupQuestion,
@@ -39,6 +39,16 @@ interface ActiveTaskState {
   msgid: string;
   cancelled: boolean;
   question: string;
+}
+
+function reconnectBotAfterReplyAckTimeout(bot: WSClient, botName: string, msgid: string) {
+  try {
+    console.warn(`[${botName}] Reply ack timeout for ${msgid}; reconnecting WeCom WebSocket.`);
+    bot.disconnect();
+    bot.connect();
+  } catch (error) {
+    console.error(`[${botName}] Failed to reconnect WeCom WebSocket after reply ack timeout for ${msgid}:`, error);
+  }
 }
 
 /**
@@ -528,6 +538,7 @@ const runtimeTodoList = createRuntimeTodoList();
       const UPDATE_INTERVAL = 2000;
       let expiredStreamFinalSent = false;
       let expiredStreamHistorySaved = false;
+      let replyAckTimeoutReconnectTriggered = false;
       const saveExpiredStreamHistory = async () => {
         if (expiredStreamHistorySaved) return;
         expiredStreamHistorySaved = true;
@@ -562,6 +573,14 @@ const runtimeTodoList = createRuntimeTodoList();
             currentTask.cancelled = true;
             expiredStreamFinalSent = true;
             console.warn(`[${botConfig.name}] WeCom stream expired for ${body.msgid}; stop updating old streamId.`);
+            return false;
+          }
+          if (isWeComReplyAckTimeoutError(error)) {
+            currentTask.cancelled = true;
+            if (!replyAckTimeoutReconnectTriggered) {
+              replyAckTimeoutReconnectTriggered = true;
+              reconnectBotAfterReplyAckTimeout(bot, botConfig.name, body.msgid);
+            }
             return false;
           }
           throw error;

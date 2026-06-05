@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import {
+  isWeComReplyAckTimeoutError,
   isStreamExpired,
   isWeComStreamExpiredError,
   STREAM_EXPIRED_MESSAGE,
@@ -28,6 +29,24 @@ assert.equal(
   isWeComStreamExpiredError(new Error("errmsg: 'stream message update expired (>10 minutes)', more info e=846608")),
   true,
   "WeCom stream expired SDK errors should be detected",
+);
+
+assert.equal(
+  isWeComReplyAckTimeoutError(new Error("Reply ack timeout (5000ms) for reqId: stream_abc")),
+  true,
+  "WeCom reply ack timeout SDK errors should be detected",
+);
+
+assert.equal(
+  isWeComReplyAckTimeoutError(new Error("errmsg: 'stream message update expired (>10 minutes)', more info e=846608")),
+  false,
+  "stream expired SDK errors should not be treated as reply ack timeout",
+);
+
+assert.equal(
+  isWeComReplyAckTimeoutError(new Error("some other wecom error")),
+  false,
+  "unrelated WeCom errors should not be treated as reply ack timeout",
 );
 
 assert.match(

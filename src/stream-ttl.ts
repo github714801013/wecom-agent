@@ -11,3 +11,8 @@ export function isWeComStreamExpiredError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("stream message update expired") || message.includes("846608");
 }
+
+export function isWeComReplyAckTimeoutError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Reply ack timeout");
+}

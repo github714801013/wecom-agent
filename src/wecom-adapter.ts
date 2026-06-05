@@ -162,6 +162,51 @@ export function isClearSessionCommand(text: string): boolean {
   return semanticPatterns.some(pattern => pattern.test(normalized));
 }
 
+export function isHelpCommand(text: string): boolean {
+  const normalized = stripBoundaryMentions(text)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s，。！？!?.]/g, "");
+
+  if (!normalized) return false;
+
+  const exactCommands = new Set([
+    "help",
+    "/help",
+    "帮助",
+    "帮助信息",
+    "使用帮助",
+    "使用手册",
+    "操作手册",
+    "指南",
+    "怎么用",
+    "如何使用",
+  ]);
+
+  return exactCommands.has(normalized);
+}
+
+export function buildHelpReply() {
+  return [
+    "使用帮助",
+    "",
+    "1. 提问方式",
+    "直接描述业务问题、接口、报错、页面路径、项目名或截图。我会优先定位项目范围，再核实代码、SQL 或配置证据。",
+    "",
+    "2. 清理会话",
+    "发送“清理会话”“清空上下文”“重置对话”或 `/new`，可以清除当前会话历史。",
+    "",
+    "3. 清理项目限制",
+    "发送“清理会话”后重新提问，不带历史项目范围；也可以直接说明“不要沿用上个项目，改查 <项目名>”。",
+    "",
+    "4. 继续或停止",
+    "任务处理中发送“继续”可确认继续等待；发送“停止”可取消当前任务。",
+    "",
+    "5. SQL 参数",
+    "如果需要 SQL，我会把需要你填写的参数统一放在 SQL 最前面的变量区，并用一句话列出需要提供的信息。",
+  ].join("\n");
+}
+
 /**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
  */
@@ -323,6 +368,7 @@ export async function startBot(botConfig: BotConfig) {
     const commandText = body.msgtype === MessageType.Text
       ? body.text?.content || ""
       : extractTextContent(parsedContent as any);
+    const isHelp = isHelpCommand(commandText);
     const isHardcodedNew = isClearSessionCommand(commandText);
     const activeTask = activeTasks.get(sessionKey);
     const activeText = stripBoundaryMentions(commandText);
@@ -367,6 +413,23 @@ export async function startBot(botConfig: BotConfig) {
 
       followupQuestion = buildFollowupQuestion(activeTask.question, activeText);
       activeTask.cancelled = true;
+    }
+
+    if (isHelp) {
+      await bot.replyStreamWithCard(
+        frame,
+        body.msgid,
+        buildHelpReply(),
+        true,
+        {
+          templateCard: {
+            card_type: "text_notice",
+            main_title: { title: "使用帮助", desc: "常用指令和提问技巧" },
+            task_id: `task_${body.msgid}`,
+          },
+        }
+      );
+      return;
     }
 
     if (isHardcodedNew) {

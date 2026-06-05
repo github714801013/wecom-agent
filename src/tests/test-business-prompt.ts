@@ -66,6 +66,9 @@ assertNotIncludes(prompt, "影响：", "business prompt should not use verbose o
 assertNotIncludes(prompt, "下一步：", "business prompt should not use verbose operation summary next-step field");
 assertNotIncludes(prompt, "6e6", "business prompt should not hard-code a single permission value regression example");
 assertIncludes(prompt, "SQL 输出前验证", "business prompt should require SQL validation before output");
+assertIncludes(prompt, "SQL 参数前置", "business prompt should require SQL parameters first");
+assertIncludes(prompt, "统一放在 SQL 最前面", "business prompt should put user parameters before SQL body");
+assertIncludes(prompt, "需要你提供/填写：xxx、yyy、zzz", "business prompt should use one unified parameter sentence");
 assertIncludes(prompt, "必须先在 dev 环境对应库执行同一条只读查询", "business prompt should require dev database validation");
 assertIncludes(prompt, "查询不报错后才允许输出给用户", "business prompt should only output SQL after successful validation");
 assertIncludes(prompt, "验证失败时不得输出为已验证 SQL", "business prompt should not claim failed SQL is verified");

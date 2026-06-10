@@ -28,6 +28,37 @@ assert.equal(
 );
 
 assert.equal(
+  collapseProgressUpdates(`<agent_progress>
+已定位到候选入口，继续核实中。
+</agent_progress>
+
+<final_answer>
+结论：当前规则不允许切换。
+</final_answer>`),
+  "结论：当前规则不允许切换。",
+  "final_answer tag should override progress content",
+);
+
+assert.equal(
+  buildProgressStreamContent(`<agent_progress>
+已读取需求，继续核实中。
+</agent_progress>
+
+<agent_progress>
+已定位到 add-mixins.jsx，继续核实中。
+</agent_progress>`, ["> 🔍 正在调用: code_snippet..."]),
+  "已定位到 add-mixins.jsx，继续核实中。\n\n> 🔍 正在调用: code_snippet...",
+  "streaming content should keep latest agent_progress tag and preserve file dots",
+);
+
+assert.equal(
+  collapseProgressUpdates(`<agent_progress>已读取问题，继续核实中。</agent_progress>
+未打最终标签的结论：保留现有兜底。`),
+  "未打最终标签的结论：保留现有兜底。",
+  "fallback content after progress tag should still be available without final_answer",
+);
+
+assert.equal(
   buildProgressStreamContent(
     "已读取问题，当前缺少直接证据，继续核实中。\n\n> 🔍 正在调用: query...\n\n已命中候选入口，继续核实中。",
     ["> 🔍 正在调用: code_snippet..."],

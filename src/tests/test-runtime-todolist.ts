@@ -27,6 +27,10 @@ assert.ok(
   defaultTodoList.items.some(item => item.id === "evidence_audited"),
   "默认 TodoList 必须包含证据完整性审核"
 );
+assert.ok(
+  defaultTodoList.items.some(item => item.id === "final_format_audited"),
+  "默认 TodoList 必须包含最终输出格式审核"
+);
 
 const todoList = createRuntimeTodoList([
   { id: "step_one", task: "第一步" },
@@ -61,7 +65,7 @@ assert.equal(isFinalAnswerReady("结论：已核实接口逻辑，权限值是 6
 
 const toolTodoList = createRuntimeTodoList();
 const runtimeTodoTool = buildRuntimeTodoTool(toolTodoList);
-assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 3);
+assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 4);
 await runtimeTodoTool.invoke({
   itemId: "project_scope_audited",
   status: "done",
@@ -76,6 +80,11 @@ await runtimeTodoTool.invoke({
   itemId: "evidence_audited",
   status: "done",
   evidence: "已有工具证据支撑",
+});
+await runtimeTodoTool.invoke({
+  itemId: "final_format_audited",
+  status: "done",
+  evidence: "已确认过程标签和最终结论分离",
 });
 assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 0);
 
@@ -109,5 +118,13 @@ assert.match(incompleteAuditMessage, /原因：回答包含 SELECT，但没有 d
 assert.match(incompleteAuditMessage, /下一步：/);
 assert.match(incompleteAuditMessage, /dev 执行校验结果/);
 assert.match(incompleteAuditMessage, /dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构/);
+
+const finalFormatAuditTodoList = createRuntimeTodoList();
+completeTodoItem(finalFormatAuditTodoList, "project_scope_audited", "不涉及代码范围");
+completeTodoItem(finalFormatAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
+completeTodoItem(finalFormatAuditTodoList, "evidence_audited", "已有结论证据");
+const finalFormatAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAuditTodoItems(finalFormatAuditTodoList));
+assert.match(finalFormatAuditMessage, /最终输出格式审核未完成/);
+assert.match(finalFormatAuditMessage, /过程标签和最终结论分离/);
 
 console.log("runtime todolist 验证通过");

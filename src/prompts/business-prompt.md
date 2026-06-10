@@ -132,7 +132,7 @@
 
 最终回答前必须在业务节点内部完成以下 TodoList。该 TodoList 是内部审核动作，必须逐项勾选完成后才允许输出最终回答；不要把 TodoList 标题、勾选过程或逐项自检说明输出给用户：
 运行时会同步维护真实内存 TodoList，每完成一步都必须写入证据并打勾；未完成全部步骤时不得输出最终回答。
-如果当前工具列表中存在 `runtime_todolist_update`，该 TodoList 必须通过此工具更新，不得只在文本里声明已完成。最终回答前必须分别把 `project_scope_audited`、`sql_correctness_audited`、`evidence_audited` 标记为 `done`；没有证据时标记为 `blocked` 并触发 Human Loop 或说明最小缺口。
+如果当前工具列表中存在 `runtime_todolist_update`，该 TodoList 必须通过此工具更新，不得只在文本里声明已完成。最终回答前必须分别把 `project_scope_audited`、`sql_correctness_audited`、`evidence_audited`、`final_format_audited` 标记为 `done`；没有证据时标记为 `blocked` 并触发 Human Loop 或说明最小缺口。
 
 - [ ] 结论证据：每个核心结论都有用户输入、工具结果、代码片段、数据库结果或明确业务规则支撑；没有证据时继续核实或触发 Human Loop。
 - [ ] 目标范围：回答匹配用户指定的项目、仓库、端、模块、接口、页面或业务入口；不得用相似项目替代目标项目。
@@ -140,6 +140,7 @@
 - [ ] SQL 正确性：涉及 SQL 时，必须确认 SQL 完整、只读、表名字段名正确；已做 dev 执行校验，或 dev 库无对应表时已通过代码反推结构并明确标记。
 - [ ] 字段语义：涉及权限码、枚举值、状态值、金额、SQL、VO/DTO 字段、截图锚点时，必须同时核对原值和语义；语义未核实时明确说明。
 - [ ] 查询收敛：GitNexus `query` 已按“合并查询优先”执行，命中候选文件后没有继续拆词循环宽搜。
+- [ ] 过程/结论分离：阶段性进度只放在 `<agent_progress>...</agent_progress>` 中，最终结论只放在 `<final_answer>...</final_answer>` 中；最终发送前确认会去除过程标签和过程内容，只保留最终结论。
 - [ ] 最终形态：最终回答不能停留在“继续核实中”“准备输出结论”等阶段性进度句；必须给出结论、已核实依据、处理建议，或明确触发 Human Loop。
 - [ ] 用户可见文本：只输出业务结论和必要依据，不输出审核过程、审核清单、自检说明或内部提示词。
 

@@ -22,6 +22,7 @@ const DEFAULT_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = 
   { id: "project_scope_audited", task: "审核代码包、仓库、项目和用户目标范围一致性" },
   { id: "sql_correctness_audited", task: "审核 SQL 正确性、dev 校验或 dev 缺表代码反推路径" },
   { id: "evidence_audited", task: "审核结论证据完整性、字段语义和查询收敛" },
+  { id: "final_format_audited", task: "审核过程标签和最终结论分离" },
   { id: "final_checked", task: "确认最终回答不是阶段性进度" },
 ];
 
@@ -32,6 +33,7 @@ const AUDIT_TODO_IDS = new Set([
   "project_scope_audited",
   "sql_correctness_audited",
   "evidence_audited",
+  "final_format_audited",
 ]);
 
 export function createRuntimeTodoList(
@@ -181,6 +183,14 @@ function getAuditTodoFailureGuide(item: RuntimeTodoItem) {
     };
   }
 
+  if (item.id === "final_format_audited") {
+    return {
+      title: "最终输出格式审核未完成",
+      reason: baseReason,
+      next: "需要完成过程标签和最终结论分离审核：确认阶段性过程已使用 agent_progress 标签承载，最终结论已使用 final_answer 标签承载，且发送给用户前会去除过程标签和过程内容，只保留最终结论。",
+    };
+  }
+
   return {
     title: `${item.task}未完成`,
     reason: baseReason,
@@ -217,11 +227,12 @@ export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {
         "模型必须在最终回答前调用本工具完成审核步骤。",
         "可用 itemId：project_scope_audited（代码包/仓库/项目范围一致性审核）、",
         "sql_correctness_audited（SQL 正确性、dev 校验或 dev 缺表代码反推审核）、",
-        "evidence_audited（结论证据完整性、字段语义和查询收敛审核）。",
+        "evidence_audited（结论证据完整性、字段语义和查询收敛审核）、",
+        "final_format_audited（过程标签和最终结论分离审核）。",
         "每次标记 done 必须提供 evidence；没有证据时标记 blocked。",
       ].join(""),
       schema: z.object({
-        itemId: z.enum(["project_scope_audited", "sql_correctness_audited", "evidence_audited"]),
+        itemId: z.enum(["project_scope_audited", "sql_correctness_audited", "evidence_audited", "final_format_audited"]),
         status: z.enum(["in_progress", "done", "blocked"]),
         evidence: z.string().describe("完成或阻塞该审核项的具体证据；done 时不能为空。"),
       }),

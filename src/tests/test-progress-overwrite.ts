@@ -52,6 +52,18 @@ assert.equal(
 );
 
 assert.equal(
+  buildProgressStreamContent("<", ["> 🔍 正在调用: query..."]),
+  "> 🔍 正在调用: query...",
+  "single protocol tag prefix should not be shown before content is available",
+);
+
+assert.equal(
+  buildProgressStreamContent("<agent_progress", ["> 🔍 正在调用: query..."], { motionFrame: "⠋" }),
+  "⠋ 处理中\n> 🔍 正在调用: query...",
+  "partial protocol tag prefix should wait instead of showing raw tag text",
+);
+
+assert.equal(
   collapseProgressUpdates(`<agent_progress>已读取问题，继续核实中。</agent_progress>
 未打最终标签的结论：保留现有兜底。`),
   "未打最终标签的结论：保留现有兜底。",

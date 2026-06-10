@@ -12,6 +12,7 @@ function isProgressSentence(sentence: string) {
 
 const FINAL_ANSWER_TAG_PATTERN = /<final_answer>\s*([\s\S]*?)\s*<\/final_answer>/gi;
 const AGENT_PROGRESS_TAG_PATTERN = /<agent_progress>\s*([\s\S]*?)\s*<\/agent_progress>/gi;
+const PROTOCOL_TAG_PREFIXES = ["<agent_progress", "</agent_progress", "<final_answer", "</final_answer"];
 
 function getLastTaggedContent(content: string, pattern: RegExp): string {
   const matches = Array.from(content.matchAll(pattern));
@@ -36,6 +37,13 @@ function extractTaggedDisplayContent(content: string): string {
   return getLastTaggedContent(content, AGENT_PROGRESS_TAG_PATTERN);
 }
 
+function isIncompleteProtocolTagPrefix(content: string): boolean {
+  const trimmed = content.trim();
+  return trimmed.length > 0
+    && !trimmed.includes(">")
+    && PROTOCOL_TAG_PREFIXES.some(prefix => prefix.startsWith(trimmed.toLowerCase()));
+}
+
 const PROCESSING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 export function getProcessingFrame(now = Date.now()) {
@@ -44,6 +52,8 @@ export function getProcessingFrame(now = Date.now()) {
 
 export function collapseProgressUpdates(content: string): string {
   const trimmed = content.trim();
+  if (isIncompleteProtocolTagPrefix(trimmed)) return "";
+
   if (/<\/?(?:agent_progress|final_answer)>/i.test(trimmed)) {
     return extractTaggedDisplayContent(trimmed);
   }

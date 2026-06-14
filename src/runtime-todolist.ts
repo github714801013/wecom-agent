@@ -22,6 +22,7 @@ const DEFAULT_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = 
   { id: "project_scope_audited", task: "审核代码包、仓库、项目和用户目标范围一致性" },
   { id: "sql_correctness_audited", task: "审核 SQL 正确性、dev 校验或 dev 缺表代码反推路径" },
   { id: "evidence_audited", task: "审核结论证据完整性、字段语义和查询收敛" },
+  { id: "owner_contact_audited", task: "审核建议处理是否需要联系相关开发人员" },
   { id: "final_format_audited", task: "审核过程标签和最终结论分离" },
   { id: "final_checked", task: "确认最终回答不是阶段性进度" },
 ];
@@ -33,6 +34,7 @@ const AUDIT_TODO_IDS = new Set([
   "project_scope_audited",
   "sql_correctness_audited",
   "evidence_audited",
+  "owner_contact_audited",
   "final_format_audited",
 ]);
 
@@ -183,6 +185,14 @@ function getAuditTodoFailureGuide(item: RuntimeTodoItem) {
     };
   }
 
+  if (item.id === "owner_contact_audited") {
+    return {
+      title: "开发人员联系建议审核未完成",
+      reason: baseReason,
+      next: "涉及代码缺陷、配置异常、流程实现、历史逻辑归属或需要推动修复时，需要在建议处理中提示联系相关开发人员；如果当前工具列表存在 git_author_trace，应优先结合该工具给出开发人员线索。若不涉及代码或无需推动开发处理，也要标记不适用及原因。",
+    };
+  }
+
   if (item.id === "final_format_audited") {
     return {
       title: "最终输出格式审核未完成",
@@ -228,11 +238,12 @@ export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {
         "可用 itemId：project_scope_audited（代码包/仓库/项目范围一致性审核）、",
         "sql_correctness_audited（SQL 正确性、dev 校验或 dev 缺表代码反推审核）、",
         "evidence_audited（结论证据完整性、字段语义和查询收敛审核）、",
+        "owner_contact_audited（建议处理中的开发人员联系建议审核）、",
         "final_format_audited（过程标签和最终结论分离审核）。",
         "每次标记 done 必须提供 evidence；没有证据时标记 blocked。",
       ].join(""),
       schema: z.object({
-        itemId: z.enum(["project_scope_audited", "sql_correctness_audited", "evidence_audited", "final_format_audited"]),
+        itemId: z.enum(["project_scope_audited", "sql_correctness_audited", "evidence_audited", "owner_contact_audited", "final_format_audited"]),
         status: z.enum(["in_progress", "done", "blocked"]),
         evidence: z.string().describe("完成或阻塞该审核项的具体证据；done 时不能为空。"),
       }),

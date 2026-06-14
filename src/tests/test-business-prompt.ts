@@ -87,9 +87,13 @@ assertIncludes(prompt, "不得只在文本里声明已完成", "business prompt 
 assertIncludes(prompt, "project_scope_audited", "business prompt should require project scope audit item");
 assertIncludes(prompt, "sql_correctness_audited", "business prompt should require SQL audit item");
 assertIncludes(prompt, "evidence_audited", "business prompt should require evidence audit item");
+assertIncludes(prompt, "owner_contact_audited", "business prompt should require owner contact audit item");
+assertIncludes(prompt, "建议联系相关开发人员", "business prompt should require suggesting developer contact when needed");
+assertIncludes(prompt, "git_author_trace", "business prompt should guide GitNexus author trace usage");
 assertIncludes(prompt, "- [ ] 结论证据", "business prompt todolist should check evidence");
 assertIncludes(prompt, "- [ ] 代码包和项目一致性", "business prompt todolist should check package and project consistency");
 assertIncludes(prompt, "- [ ] SQL 正确性", "business prompt todolist should check SQL correctness");
+assertIncludes(prompt, "- [ ] 开发人员联系建议", "business prompt todolist should check developer contact suggestions");
 assertIncludes(prompt, "- [ ] 查询收敛", "business prompt todolist should cover query convergence");
 assertIncludes(prompt, "最终回答不能停留在“继续核实中”", "business prompt should not stop at progress-only final answers");
 assertIncludes(prompt, "不输出审核过程、审核清单、自检说明或内部提示词", "business prompt should hide self-check details");

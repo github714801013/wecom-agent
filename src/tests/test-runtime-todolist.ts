@@ -28,6 +28,10 @@ assert.ok(
   "默认 TodoList 必须包含证据完整性审核"
 );
 assert.ok(
+  defaultTodoList.items.some(item => item.id === "owner_contact_audited"),
+  "默认 TodoList 必须包含开发人员联系建议审核"
+);
+assert.ok(
   defaultTodoList.items.some(item => item.id === "final_format_audited"),
   "默认 TodoList 必须包含最终输出格式审核"
 );
@@ -65,7 +69,7 @@ assert.equal(isFinalAnswerReady("结论：已核实接口逻辑，权限值是 6
 
 const toolTodoList = createRuntimeTodoList();
 const runtimeTodoTool = buildRuntimeTodoTool(toolTodoList);
-assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 4);
+assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 5);
 await runtimeTodoTool.invoke({
   itemId: "project_scope_audited",
   status: "done",
@@ -80,6 +84,11 @@ await runtimeTodoTool.invoke({
   itemId: "evidence_audited",
   status: "done",
   evidence: "已有工具证据支撑",
+});
+await runtimeTodoTool.invoke({
+  itemId: "owner_contact_audited",
+  status: "done",
+  evidence: "建议联系相关开发人员，git_author_trace 无可用结果",
 });
 await runtimeTodoTool.invoke({
   itemId: "final_format_audited",
@@ -123,8 +132,18 @@ const finalFormatAuditTodoList = createRuntimeTodoList();
 completeTodoItem(finalFormatAuditTodoList, "project_scope_audited", "不涉及代码范围");
 completeTodoItem(finalFormatAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
 completeTodoItem(finalFormatAuditTodoList, "evidence_audited", "已有结论证据");
+completeTodoItem(finalFormatAuditTodoList, "owner_contact_audited", "不涉及开发推动");
 const finalFormatAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAuditTodoItems(finalFormatAuditTodoList));
 assert.match(finalFormatAuditMessage, /最终输出格式审核未完成/);
 assert.match(finalFormatAuditMessage, /过程标签和最终结论分离/);
+
+const ownerContactAuditTodoList = createRuntimeTodoList();
+completeTodoItem(ownerContactAuditTodoList, "project_scope_audited", "已核对 repo");
+completeTodoItem(ownerContactAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
+completeTodoItem(ownerContactAuditTodoList, "evidence_audited", "已有结论证据");
+const ownerContactAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAuditTodoItems(ownerContactAuditTodoList));
+assert.match(ownerContactAuditMessage, /开发人员联系建议审核未完成/);
+assert.match(ownerContactAuditMessage, /git_author_trace/);
+assert.match(ownerContactAuditMessage, /联系相关开发人员/);
 
 console.log("runtime todolist 验证通过");

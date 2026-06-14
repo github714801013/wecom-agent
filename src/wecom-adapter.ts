@@ -602,6 +602,8 @@ const runtimeTodoList = createRuntimeTodoList();
 1. project_scope_audited：审核代码包、仓库、项目和用户目标范围一致性；不涉及代码范围时 evidence 写“不适用”及原因。
 2. sql_correctness_audited：审核 SQL 完整性、只读性、表名字段名、dev 执行校验；若 dev 库无对应表，evidence 必须写“dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构”。
 3. evidence_audited：审核核心结论证据、字段语义和查询收敛。
+4. owner_contact_audited：审核建议处理中是否需要提示联系相关开发人员；涉及代码缺陷、配置异常、流程实现、历史逻辑归属或需要推动修复时，必须说明已给出联系开发人员建议；如果工具列表存在 git_author_trace，应优先结合该工具给出开发人员线索。
+5. final_format_audited：审核过程标签和最终结论分离。
 没有证据时必须调用 runtime_todolist_update 将对应 itemId 标记为 blocked，不得直接输出最终结论。`;
 
       // 提取文本内容进行 Planner 分析

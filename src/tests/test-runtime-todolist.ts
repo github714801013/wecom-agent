@@ -145,5 +145,9 @@ const ownerContactAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAu
 assert.match(ownerContactAuditMessage, /开发人员联系建议审核未完成/);
 assert.match(ownerContactAuditMessage, /git_author_trace/);
 assert.match(ownerContactAuditMessage, /联系相关开发人员/);
+assert.match(ownerContactAuditMessage, /最终结论实际引用/);
+assert.match(ownerContactAuditMessage, /最终未引用的候选文件/);
+assert.match(ownerContactAuditMessage, /最相关的修改优先/);
+assert.match(ownerContactAuditMessage, /最新修改优先/);
 
 console.log("runtime todolist 验证通过");

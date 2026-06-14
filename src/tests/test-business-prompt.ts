@@ -90,6 +90,10 @@ assertIncludes(prompt, "evidence_audited", "business prompt should require evide
 assertIncludes(prompt, "owner_contact_audited", "business prompt should require owner contact audit item");
 assertIncludes(prompt, "建议联系相关开发人员", "business prompt should require suggesting developer contact when needed");
 assertIncludes(prompt, "git_author_trace", "business prompt should guide GitNexus author trace usage");
+assertIncludes(prompt, "只能基于最终结论实际引用的代码证据追溯", "business prompt should trace authors only from final cited evidence");
+assertIncludes(prompt, "不得使用曾经检索过但最终未引用的候选文件", "business prompt should forbid unused candidate files for author trace");
+assertIncludes(prompt, "与最终结论最相关的修改人员", "business prompt should prefer the most relevant modifier");
+assertIncludes(prompt, "相关性相同或都相关时，选择最新修改人员", "business prompt should use recency as tie breaker");
 assertIncludes(prompt, "- [ ] 结论证据", "business prompt todolist should check evidence");
 assertIncludes(prompt, "- [ ] 代码包和项目一致性", "business prompt todolist should check package and project consistency");
 assertIncludes(prompt, "- [ ] SQL 正确性", "business prompt todolist should check SQL correctness");

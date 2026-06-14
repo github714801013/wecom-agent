@@ -189,7 +189,7 @@ function getAuditTodoFailureGuide(item: RuntimeTodoItem) {
     return {
       title: "开发人员联系建议审核未完成",
       reason: baseReason,
-      next: "涉及代码缺陷、配置异常、流程实现、历史逻辑归属或需要推动修复时，需要在建议处理中提示联系相关开发人员；如果当前工具列表存在 git_author_trace，应优先结合该工具给出开发人员线索。若不涉及代码或无需推动开发处理，也要标记不适用及原因。",
+      next: "涉及代码缺陷、配置异常、流程实现、历史逻辑归属或需要推动修复时，需要在建议处理中提示联系相关开发人员；如果当前工具列表存在 git_author_trace，只能基于最终结论实际引用的仓库、文件、方法、代码片段、symbol uid 或接口入口追溯联系人，不得使用最终未引用的候选文件；多个线索命中时，按“与最终结论最相关的修改优先、同等相关时最新修改优先”选择开发人员。若不涉及代码或无需推动开发处理，也要标记不适用及原因。",
     };
   }
 
@@ -238,7 +238,7 @@ export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {
         "可用 itemId：project_scope_audited（代码包/仓库/项目范围一致性审核）、",
         "sql_correctness_audited（SQL 正确性、dev 校验或 dev 缺表代码反推审核）、",
         "evidence_audited（结论证据完整性、字段语义和查询收敛审核）、",
-        "owner_contact_audited（建议处理中的开发人员联系建议审核）、",
+        "owner_contact_audited（建议处理中的开发人员联系建议审核；git_author_trace 只能基于最终结论实际引用证据追溯联系人，并按相关性优先、最新修改次之选择开发人员）、",
         "final_format_audited（过程标签和最终结论分离审核）。",
         "每次标记 done 必须提供 evidence；没有证据时标记 blocked。",
       ].join(""),

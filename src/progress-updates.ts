@@ -12,6 +12,7 @@ function isProgressSentence(sentence: string) {
 
 const FINAL_ANSWER_TAG_PATTERN = /<final_answer>\s*([\s\S]*?)\s*<\/final_answer>/gi;
 const AGENT_PROGRESS_TAG_PATTERN = /<agent_progress>\s*([\s\S]*?)\s*<\/agent_progress>/gi;
+const PROTOCOL_TAG_TOKEN_PATTERN = /<\/?(?:agent_progress|final_answer)>/gi;
 const PROTOCOL_TAG_PREFIXES = ["<agent_progress", "</agent_progress", "<final_answer", "</final_answer"];
 
 function getLastTaggedContent(content: string, pattern: RegExp): string {
@@ -27,12 +28,40 @@ function stripTaggedContent(content: string): string {
     .trim();
 }
 
+function stripProtocolTagTokens(content: string): string {
+  return content.replace(PROTOCOL_TAG_TOKEN_PATTERN, "").trim();
+}
+
+function collapsePlainProgressContent(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed.includes("继续核实中")) return content;
+
+  const sentences = splitProgressSentences(trimmed);
+  let lastProgressIndex = -1;
+  for (let index = sentences.length - 1; index >= 0; index -= 1) {
+    const sentence = sentences[index];
+    if (sentence && isProgressSentence(sentence)) {
+      lastProgressIndex = index;
+      break;
+    }
+  }
+  const nonProgressSentencesAfterProgress = sentences
+    .slice(lastProgressIndex + 1)
+    .filter(sentence => !isProgressSentence(sentence));
+
+  if (nonProgressSentencesAfterProgress.length > 0) {
+    return nonProgressSentencesAfterProgress.join("\n\n").trim();
+  }
+
+  return sentences[lastProgressIndex] || trimmed;
+}
+
 function extractTaggedDisplayContent(content: string): string {
   const finalAnswer = getLastTaggedContent(content, FINAL_ANSWER_TAG_PATTERN);
   if (finalAnswer) return finalAnswer;
 
   const remainingContent = stripTaggedContent(content);
-  if (remainingContent) return collapseProgressUpdates(remainingContent);
+  if (remainingContent) return collapsePlainProgressContent(stripProtocolTagTokens(remainingContent));
 
   return getLastTaggedContent(content, AGENT_PROGRESS_TAG_PATTERN);
 }
@@ -58,26 +87,7 @@ export function collapseProgressUpdates(content: string): string {
     return extractTaggedDisplayContent(trimmed);
   }
 
-  if (!trimmed.includes("继续核实中")) return content;
-
-  const sentences = splitProgressSentences(trimmed);
-  let lastProgressIndex = -1;
-  for (let index = sentences.length - 1; index >= 0; index -= 1) {
-    const sentence = sentences[index];
-    if (sentence && isProgressSentence(sentence)) {
-      lastProgressIndex = index;
-      break;
-    }
-  }
-  const nonProgressSentencesAfterProgress = sentences
-    .slice(lastProgressIndex + 1)
-    .filter(sentence => !isProgressSentence(sentence));
-
-  if (nonProgressSentencesAfterProgress.length > 0) {
-    return nonProgressSentencesAfterProgress.join("\n\n").trim();
-  }
-
-  return sentences[lastProgressIndex] || trimmed;
+  return collapsePlainProgressContent(content);
 }
 
 export function buildProgressStreamContent(content: string, activeCalls: string[] = [], options: { motionFrame?: string } = {}) {

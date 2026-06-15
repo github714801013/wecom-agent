@@ -71,6 +71,18 @@ assert.equal(
 );
 
 assert.equal(
+  collapseProgressUpdates("<agent_progress>已读取问题，继续核实中。"),
+  "已读取问题，继续核实中。",
+  "incomplete opening protocol tag should not recurse forever",
+);
+
+assert.equal(
+  collapseProgressUpdates("<agent_progress>已读取问题，继续核实中。\n\n未打最终标签的结论：保留现有兜底。"),
+  "未打最终标签的结论：保留现有兜底。",
+  "fallback content after incomplete progress tag should still be available",
+);
+
+assert.equal(
   buildProgressStreamContent(
     "已读取问题，当前缺少直接证据，继续核实中。\n\n> 🔍 正在调用: query...\n\n已命中候选入口，继续核实中。",
     ["> 🔍 正在调用: code_snippet..."],

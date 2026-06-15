@@ -28,6 +28,10 @@ assert.ok(
   "默认 TodoList 必须包含证据完整性审核"
 );
 assert.ok(
+  defaultTodoList.items.some(item => item.id === "execution_flow_audited"),
+  "默认 TodoList 必须包含执行链完整性审核"
+);
+assert.ok(
   defaultTodoList.items.some(item => item.id === "owner_contact_audited"),
   "默认 TodoList 必须包含开发人员联系建议审核"
 );
@@ -69,7 +73,7 @@ assert.equal(isFinalAnswerReady("结论：已核实接口逻辑，权限值是 6
 
 const toolTodoList = createRuntimeTodoList();
 const runtimeTodoTool = buildRuntimeTodoTool(toolTodoList);
-assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 5);
+assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 6);
 await runtimeTodoTool.invoke({
   itemId: "project_scope_audited",
   status: "done",
@@ -84,6 +88,11 @@ await runtimeTodoTool.invoke({
   itemId: "evidence_audited",
   status: "done",
   evidence: "已有工具证据支撑",
+});
+await runtimeTodoTool.invoke({
+  itemId: "execution_flow_audited",
+  status: "done",
+  evidence: "已核对入口、分发、状态映射、下游发送条件和异常捕获",
 });
 await runtimeTodoTool.invoke({
   itemId: "owner_contact_audited",
@@ -132,6 +141,7 @@ const finalFormatAuditTodoList = createRuntimeTodoList();
 completeTodoItem(finalFormatAuditTodoList, "project_scope_audited", "不涉及代码范围");
 completeTodoItem(finalFormatAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
 completeTodoItem(finalFormatAuditTodoList, "evidence_audited", "已有结论证据");
+completeTodoItem(finalFormatAuditTodoList, "execution_flow_audited", "不涉及接口链路");
 completeTodoItem(finalFormatAuditTodoList, "owner_contact_audited", "不涉及开发推动");
 const finalFormatAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAuditTodoItems(finalFormatAuditTodoList));
 assert.match(finalFormatAuditMessage, /最终输出格式审核未完成/);
@@ -141,6 +151,7 @@ const ownerContactAuditTodoList = createRuntimeTodoList();
 completeTodoItem(ownerContactAuditTodoList, "project_scope_audited", "已核对 repo");
 completeTodoItem(ownerContactAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
 completeTodoItem(ownerContactAuditTodoList, "evidence_audited", "已有结论证据");
+completeTodoItem(ownerContactAuditTodoList, "execution_flow_audited", "已核对完整执行链");
 const ownerContactAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAuditTodoItems(ownerContactAuditTodoList));
 assert.match(ownerContactAuditMessage, /开发人员联系建议审核未完成/);
 assert.match(ownerContactAuditMessage, /git_author_trace/);
@@ -149,5 +160,16 @@ assert.match(ownerContactAuditMessage, /最终结论实际引用/);
 assert.match(ownerContactAuditMessage, /最终未引用的候选文件/);
 assert.match(ownerContactAuditMessage, /最相关的修改优先/);
 assert.match(ownerContactAuditMessage, /最新修改优先/);
+
+const executionFlowAuditTodoList = createRuntimeTodoList();
+completeTodoItem(executionFlowAuditTodoList, "project_scope_audited", "已核对 repo");
+completeTodoItem(executionFlowAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
+completeTodoItem(executionFlowAuditTodoList, "evidence_audited", "已有结论证据");
+const executionFlowAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAuditTodoItems(executionFlowAuditTodoList));
+assert.match(executionFlowAuditMessage, /执行链完整性审核未完成/);
+assert.match(executionFlowAuditMessage, /缺失日志/);
+assert.match(executionFlowAuditMessage, /下游触达条件/);
+assert.match(executionFlowAuditMessage, /前置短路点/);
+assert.match(executionFlowAuditMessage, /不得反过来作为主因/);
 
 console.log("runtime todolist 验证通过");

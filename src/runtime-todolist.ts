@@ -22,6 +22,7 @@ const DEFAULT_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = 
   { id: "project_scope_audited", task: "审核代码包、仓库、项目和用户目标范围一致性" },
   { id: "sql_correctness_audited", task: "审核 SQL 正确性、dev 校验或 dev 缺表代码反推路径" },
   { id: "evidence_audited", task: "审核结论证据完整性、字段语义和查询收敛" },
+  { id: "execution_flow_audited", task: "审核接口链路、缺失日志和下游触达条件的执行链完整性" },
   { id: "owner_contact_audited", task: "审核建议处理是否需要联系相关开发人员" },
   { id: "final_format_audited", task: "审核过程标签和最终结论分离" },
   { id: "final_checked", task: "确认最终回答不是阶段性进度" },
@@ -34,6 +35,7 @@ const AUDIT_TODO_IDS = new Set([
   "project_scope_audited",
   "sql_correctness_audited",
   "evidence_audited",
+  "execution_flow_audited",
   "owner_contact_audited",
   "final_format_audited",
 ]);
@@ -185,6 +187,14 @@ function getAuditTodoFailureGuide(item: RuntimeTodoItem) {
     };
   }
 
+  if (item.id === "execution_flow_audited") {
+    return {
+      title: "执行链完整性审核未完成",
+      reason: baseReason,
+      next: "涉及接口链路、缺失日志、未触达下游、下游触达条件、回调、MQ、外部系统推送或状态流转时，需要沿真实执行路径核对入口、分发、前置查询、状态映射、顺序分支门槛、下游发送条件和异常捕获；如果更靠前的短路条件已由代码和已知入参同时满足，应优先落在前置短路点，后续未执行到的租户规模、域名配置、MQ 等条件不得反过来作为主因。不涉及此类问题时，也要标记不适用及原因。",
+    };
+  }
+
   if (item.id === "owner_contact_audited") {
     return {
       title: "开发人员联系建议审核未完成",
@@ -238,12 +248,13 @@ export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {
         "可用 itemId：project_scope_audited（代码包/仓库/项目范围一致性审核）、",
         "sql_correctness_audited（SQL 正确性、dev 校验或 dev 缺表代码反推审核）、",
         "evidence_audited（结论证据完整性、字段语义和查询收敛审核）、",
+        "execution_flow_audited（接口链路、缺失日志、下游触达条件、回调、MQ、外部系统推送和状态流转的执行链完整性审核）、",
         "owner_contact_audited（建议处理中的开发人员联系建议审核；git_author_trace 只能基于最终结论实际引用证据追溯联系人，并按相关性优先、最新修改次之选择开发人员）、",
         "final_format_audited（过程标签和最终结论分离审核）。",
         "每次标记 done 必须提供 evidence；没有证据时标记 blocked。",
       ].join(""),
       schema: z.object({
-        itemId: z.enum(["project_scope_audited", "sql_correctness_audited", "evidence_audited", "owner_contact_audited", "final_format_audited"]),
+        itemId: z.enum(["project_scope_audited", "sql_correctness_audited", "evidence_audited", "execution_flow_audited", "owner_contact_audited", "final_format_audited"]),
         status: z.enum(["in_progress", "done", "blocked"]),
         evidence: z.string().describe("完成或阻塞该审核项的具体证据；done 时不能为空。"),
       }),

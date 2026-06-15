@@ -97,6 +97,8 @@ assertIncludes(prompt, "相关性相同或都相关时，选择最新修改人�
 assertIncludes(prompt, "- [ ] 结论证据", "business prompt todolist should check evidence");
 assertIncludes(prompt, "- [ ] 代码包和项目一致性", "business prompt todolist should check package and project consistency");
 assertIncludes(prompt, "- [ ] SQL 正确性", "business prompt todolist should check SQL correctness");
+assertIncludes(prompt, "- [ ] 执行链完整性", "business prompt todolist should check execution flow completeness");
+assertIncludes(prompt, "不得跳过已满足的前置短路条件去解释后续未到达分支", "business prompt should forbid skipping satisfied early short-circuit gates");
 assertIncludes(prompt, "- [ ] 开发人员联系建议", "business prompt todolist should check developer contact suggestions");
 assertIncludes(prompt, "- [ ] 查询收敛", "business prompt todolist should cover query convergence");
 assertIncludes(prompt, "最终回答不能停留在“继续核实中”", "business prompt should not stop at progress-only final answers");
@@ -131,5 +133,13 @@ assertIncludes(prompt, "repo、symbol uid、filePath", "business prompt should o
 assertIncludes(prompt, "合并查询优先", "business prompt should prefer merged GitNexus queries");
 assertIncludes(prompt, "同一问题中 GitNexus `query` 原则上不超过 2 次", "business prompt should limit query loops");
 assertIncludes(prompt, "首轮命中候选文件或接口后，优先使用 `code_snippet`、`context`", "business prompt should switch from query to focused reads");
+assertIncludes(prompt, "执行链完整性规则", "business prompt should define execution flow completeness rules");
+assertIncludes(prompt, "只有入口日志、没有下游日志", "business prompt should handle missing downstream log scenarios");
+assertIncludes(prompt, "全部下游发送条件、外部配置读取、异常捕获和最终日志位置", "business prompt should require all downstream gates");
+assertIncludes(prompt, "按代码执行顺序分层判断", "business prompt should require ordered gate analysis");
+assertIncludes(prompt, "结论应优先落在这个前置短路点", "business prompt should prefer satisfied early short-circuit gates");
+assertIncludes(prompt, "后续 tenantScale、xtenant、域名配置、MQ 消费状态等只能标为“未执行到/不适用/需在前置门槛通过后再核实”", "business prompt should not use unreached downstream gates as root cause");
+assertIncludes(prompt, "已核实某个状态能映射时，只能排除“状态无映射”这一项", "business prompt should not skip earlier gates after mapping is verified");
+assertIncludes(prompt, "入参类型不匹配、订单不存在、业务编码为空、状态映射为空、租户规模不满足", "business prompt should enumerate ordered no-downstream gates");
 
 console.log("business prompt 肯定结论规则验证通过");

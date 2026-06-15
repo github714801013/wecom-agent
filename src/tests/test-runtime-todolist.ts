@@ -171,5 +171,7 @@ assert.match(executionFlowAuditMessage, /缺失日志/);
 assert.match(executionFlowAuditMessage, /下游触达条件/);
 assert.match(executionFlowAuditMessage, /前置短路点/);
 assert.match(executionFlowAuditMessage, /不得反过来作为主因/);
+assert.match(executionFlowAuditMessage, /取数验证方式/);
+assert.match(executionFlowAuditMessage, /继续下一层/);
 
 console.log("runtime todolist 验证通过");

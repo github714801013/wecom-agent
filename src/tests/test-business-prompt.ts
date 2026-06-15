@@ -99,6 +99,7 @@ assertIncludes(prompt, "- [ ] 代码包和项目一致性", "business prompt tod
 assertIncludes(prompt, "- [ ] SQL 正确性", "business prompt todolist should check SQL correctness");
 assertIncludes(prompt, "- [ ] 执行链完整性", "business prompt todolist should check execution flow completeness");
 assertIncludes(prompt, "不得跳过已满足的前置短路条件去解释后续未到达分支", "business prompt should forbid skipping satisfied early short-circuit gates");
+assertIncludes(prompt, "需要生产数据才能确认的门槛必须输出可执行取数验证方式", "business prompt should require data validation for production-dependent gates");
 assertIncludes(prompt, "- [ ] 开发人员联系建议", "business prompt todolist should check developer contact suggestions");
 assertIncludes(prompt, "- [ ] 查询收敛", "business prompt todolist should cover query convergence");
 assertIncludes(prompt, "最终回答不能停留在“继续核实中”", "business prompt should not stop at progress-only final answers");
@@ -139,6 +140,11 @@ assertIncludes(prompt, "全部下游发送条件、外部配置读取、异常�
 assertIncludes(prompt, "按代码执行顺序分层判断", "business prompt should require ordered gate analysis");
 assertIncludes(prompt, "结论应优先落在这个前置短路点", "business prompt should prefer satisfied early short-circuit gates");
 assertIncludes(prompt, "后续 tenantScale、xtenant、域名配置、MQ 消费状态等只能标为“未执行到/不适用/需在前置门槛通过后再核实”", "business prompt should not use unreached downstream gates as root cause");
+assertIncludes(prompt, "当前排查假设", "business prompt should frame unverified production gates as hypotheses");
+assertIncludes(prompt, "完整只读 SQL、Redis key 查询方式或日志关键词", "business prompt should request concrete verification data");
+assertIncludes(prompt, "如果用户返回的取数结果否定当前假设", "business prompt should continue to next gate after hypothesis is disproved");
+assertIncludes(prompt, "不得重复询问同一数据，也不得跳回宽泛搜索", "business prompt should avoid repeated data asks and broad search on resume");
+assertIncludes(prompt, "当前排查层级、怀疑条件、验证方式", "business prompt should structure layered troubleshooting output");
 assertIncludes(prompt, "已核实某个状态能映射时，只能排除“状态无映射”这一项", "business prompt should not skip earlier gates after mapping is verified");
 assertIncludes(prompt, "入参类型不匹配、订单不存在、业务编码为空、状态映射为空、租户规模不满足", "business prompt should enumerate ordered no-downstream gates");
 

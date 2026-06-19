@@ -1,5 +1,10 @@
 import { strict as assert } from "node:assert";
-import { buildProgressStreamContent, collapseProgressUpdates, getProcessingFrame } from "../progress-updates.js";
+import {
+  buildProgressStreamContent,
+  buildThinkingHeartbeatContent,
+  collapseProgressUpdates,
+  getProcessingFrame,
+} from "../progress-updates.js";
 
 const longProgress = "已读取问题，当前缺少直接证据，继续核实中。已确认存在多个代码仓库，继续核实中。已获取仓库清单，继续核实中。";
 
@@ -103,6 +108,18 @@ assert.equal(
   buildProgressStreamContent("已完成问题规划，继续核实中。", ["> 🔍 正在调用: query..."], { motionFrame: "⠙" }),
   "⠙ 处理中\n已完成问题规划，继续核实中。\n\n> 🔍 正在调用: query...",
   "streaming content should keep motion frame with active tool calls",
+);
+
+const firstHeartbeat = buildThinkingHeartbeatContent("", [], 0);
+const secondHeartbeat = buildThinkingHeartbeatContent("", [], 1000);
+assert.notEqual(firstHeartbeat, secondHeartbeat, "thinking heartbeat should change over time");
+assert.match(firstHeartbeat, /处理中\n仍在分析中\./, "heartbeat should include dynamic dotted text when no content exists");
+assert.match(secondHeartbeat, /处理中\n仍在核实中\.\./, "heartbeat should rotate text and dots");
+
+assert.equal(
+  buildThinkingHeartbeatContent("已完成问题规划，继续核实中。", [], 0),
+  "⠋ 处理中\n已完成问题规划，继续核实中。",
+  "heartbeat should reuse latest visible progress instead of a fixed thinking sentence",
 );
 
 console.log("progress overwrite 验证通过");

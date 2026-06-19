@@ -133,7 +133,7 @@
 
 最终回答前必须在业务节点内部完成以下 TodoList。该 TodoList 是内部审核动作，必须逐项勾选完成后才允许输出最终回答；不要把 TodoList 标题、勾选过程或逐项自检说明输出给用户：
 运行时会同步维护真实内存 TodoList，每完成一步都必须写入证据并打勾；未完成全部步骤时不得输出最终回答。
-如果当前工具列表中存在 `runtime_todolist_update`，该 TodoList 必须通过此工具更新，不得只在文本里声明已完成。最终回答前必须分别把 `project_scope_audited`、`sql_correctness_audited`、`evidence_audited`、`owner_contact_audited`、`final_format_audited` 标记为 `done`；没有证据时标记为 `blocked` 并触发 Human Loop 或说明最小缺口。
+如果当前工具列表中存在 `runtime_todolist_update`，该 TodoList 必须通过此工具更新，不得只在文本里声明已完成。最终回答前必须分别把 `project_scope_audited`、`sql_correctness_audited`、`evidence_audited`、`execution_flow_audited`、`owner_contact_audited`、`final_format_audited` 标记为 `done`；没有证据时标记为 `blocked` 并触发 Human Loop 或说明最小缺口。
 
 - [ ] 结论证据：每个核心结论都有用户输入、工具结果、代码片段、数据库结果或明确业务规则支撑；没有证据时继续核实或触发 Human Loop。
 - [ ] 目标范围：回答匹配用户指定的项目、仓库、端、模块、接口、页面或业务入口；不得用相似项目替代目标项目。

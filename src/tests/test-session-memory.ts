@@ -86,6 +86,50 @@ async function testSessionLogic() {
     process.exit(1);
   }
   console.log("SUCCESS: Pending human-loop lifecycle works.");
+
+  const cleanupKey = "cleanup-session";
+  await sm.addMessages(cleanupKey, [
+    new HumanMessage("old cleanup question"),
+    new AIMessage("old cleanup answer"),
+  ]);
+  sm.resolveRepoHints(cleanupKey, ["wecom-agent"]);
+  sm.setPendingHumanLoop(cleanupKey, {
+    reason: "clarification_required",
+    question: "请补充需求编号",
+    resumeInstruction: "继续处理",
+    contextSnapshot: {
+      userQuestion: "历史问题",
+      knownFacts: [],
+      missingFacts: ["需求编号"],
+    },
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 30 * 60 * 1000,
+    originalMessageId: "msg-cleanup",
+    resumeCount: 0,
+  });
+
+  sm.clearSession(cleanupKey);
+  const cleanedSession = sm.getOrCreateSession(cleanupKey);
+  if (cleanedSession.messages.length !== 0) {
+    console.log("FAILED: clearSession should remove messages.");
+    process.exit(1);
+  }
+  if (sm.resolveRepoHints(cleanupKey, []).length !== 0) {
+    console.log("FAILED: clearSession should remove repo hints.");
+    process.exit(1);
+  }
+  if (sm.getPendingHumanLoop(cleanupKey)) {
+    console.log("FAILED: clearSession should remove pending human-loop.");
+    process.exit(1);
+  }
+  cleanedSession.messages.push(new HumanMessage("stale after cleanup"));
+  cleanedSession.lastActivity = Date.now() - 31 * 60 * 1000;
+  const expiredAfterCleanup = sm.getOrCreateSession(cleanupKey, true);
+  if (expiredAfterCleanup.messages.length !== 0) {
+    console.log("FAILED: session recreated after clearSession should still expire when requested.");
+    process.exit(1);
+  }
+  console.log("SUCCESS: clearSession removes history state.");
 }
 
 testSessionLogic();

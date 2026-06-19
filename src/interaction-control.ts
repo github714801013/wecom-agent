@@ -4,6 +4,13 @@ export interface ConversationContextItem {
   content: string;
 }
 
+export type HistoryRelevanceDecision = "related" | "independent" | "uncertain";
+
+export interface HistoryRelevanceResult {
+  decision: HistoryRelevanceDecision;
+  reason: string;
+}
+
 const STOP_PATTERNS = [
   /^(停|停止|别查了|不用查了|先停|暂停|中止|终止|取消|算了|不用了|别回答了|不要回答了)$/i,
   /^(kill|kills|stop|cancel|abort)$/i,
@@ -12,6 +19,33 @@ const STOP_PATTERNS = [
 const CONTINUE_PATTERNS = [
   /^(继续|接着|接着查|继续查|继续核实|继续回答|往下查|继续处理)$/i,
   /^(continue|go on|keep going)$/i,
+];
+
+const NEW_TOPIC_PATTERNS = [
+  /^(新问题|另一个问题|另外一个问题|换个问题|重新开始|不要参考上文|不用参考上文)/i,
+  /^(new topic|another question|reset context)/i,
+];
+
+const SHORT_FOLLOWUP_PATTERNS = [
+  /^(怎么验证|如何验证|为什么|那怎么改|怎么改|下一步|继续下一步|怎么处理)$/i,
+  /^(why|how|next|what next)$/i,
+];
+
+const COMPOUND_CONTINUE_PATTERN = /(继续|接着|往下查|继续排查|继续处理|continue|go on|keep going)/i;
+
+const JIRA_KEY_PATTERN = /\b[A-Z][A-Z0-9]+-\d+\b/;
+const WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s，。！？!?,;；：:]+/;
+const POSIX_OR_CODE_PATH_PATTERN = /\b(?:src|config|test|tests)\/[^\s，。！？!?,;；：:]+/;
+const API_PATH_PATTERN = /\/api\/[A-Za-z0-9][A-Za-z0-9/_{}.-]*/i;
+
+const MAINTAINED_REPO_ANCHORS = [
+  "wecom-agent",
+  "GitNexus",
+  "oa-order",
+  "oa-stock",
+  "oa-after",
+  "logistics",
+  "autoTransfer",
 ];
 
 function normalizeActiveMessage(text: string) {
@@ -60,6 +94,72 @@ function compactText(text: string, maxLength: number) {
   const compacted = text.replace(/\s+/g, " ").trim();
   if (compacted.length <= maxLength) return compacted;
   return `${compacted.slice(0, maxLength)}...`;
+}
+
+function collectPatternMatches(text: string, pattern: RegExp) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return Array.from(text.matchAll(new RegExp(pattern.source, flags))).map(match => match[0]);
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function extractStrongAnchors(text: string) {
+  const anchors = [
+    ...collectPatternMatches(text, JIRA_KEY_PATTERN),
+    ...collectPatternMatches(text, WINDOWS_PATH_PATTERN),
+    ...collectPatternMatches(text, POSIX_OR_CODE_PATH_PATTERN),
+    ...collectPatternMatches(text, API_PATH_PATTERN),
+    ...MAINTAINED_REPO_ANCHORS.filter(anchor => text.includes(anchor)),
+  ];
+  return uniqueValues(anchors.map(anchor => anchor.trim()));
+}
+
+function computeAnchorOverlap(history: ConversationContextItem[], currentQuestion: string) {
+  const currentAnchors = extractStrongAnchors(currentQuestion);
+  const historyAnchors = uniqueValues(
+    history.flatMap(item => extractStrongAnchors(normalizeActiveMessage(item.content))),
+  );
+  const hasOverlap = currentAnchors.some(anchor => historyAnchors.includes(anchor));
+  const hasDifference = currentAnchors.length > 0
+    && historyAnchors.length > 0
+    && currentAnchors.some(anchor => !historyAnchors.includes(anchor));
+  return { hasOverlap, hasDifference };
+}
+
+export function classifyHistoryRelevance(
+  history: ConversationContextItem[],
+  currentQuestion: string,
+): HistoryRelevanceResult {
+  const normalized = normalizeActiveMessage(currentQuestion);
+  if (!normalized || history.length === 0) {
+    return { decision: "uncertain", reason: "empty-current-or-history" };
+  }
+
+  if (NEW_TOPIC_PATTERNS.some(pattern => pattern.test(normalized))) {
+    return { decision: "independent", reason: "explicit-new-topic" };
+  }
+
+  if (CONTINUE_PATTERNS.some(pattern => pattern.test(normalized))) {
+    return { decision: "related", reason: "explicit-continue" };
+  }
+
+  const anchorOverlap = computeAnchorOverlap(history, normalized);
+
+  if (COMPOUND_CONTINUE_PATTERN.test(normalized) && anchorOverlap.hasOverlap) {
+    return { decision: "uncertain", reason: "compound-continue-with-overlap" };
+  }
+
+  if (anchorOverlap.hasDifference && !anchorOverlap.hasOverlap) {
+    return { decision: "independent", reason: "different-strong-anchor" };
+  }
+
+  if (SHORT_FOLLOWUP_PATTERNS.some(pattern => pattern.test(normalized))) {
+    return { decision: "related", reason: "short-followup" };
+  }
+
+  return { decision: "uncertain", reason: "no-reliable-signal" };
 }
 
 export function buildQuestionWithHistory(

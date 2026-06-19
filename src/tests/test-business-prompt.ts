@@ -14,6 +14,8 @@ function assertNotIncludes(content: string, unexpected: string, message: string)
 }
 
 const prompt = await readFile(join(process.cwd(), "src/prompts/business-prompt.md"), "utf-8");
+const basePrompt = await readFile(join(process.cwd(), "src/prompts/business-base-prompt.md"), "utf-8");
+const adapterSource = await readFile(join(process.cwd(), "src/wecom-adapter.ts"), "utf-8");
 
 assertIncludes(prompt, "已核实接口逻辑", "business prompt should require definite answers when interface logic is verified");
 assertIncludes(prompt, "不要使用“可能原因”“最可能原因”", "business prompt should avoid weak headings for verified conclusions");
@@ -87,7 +89,11 @@ assertIncludes(prompt, "不得只在文本里声明已完成", "business prompt 
 assertIncludes(prompt, "project_scope_audited", "business prompt should require project scope audit item");
 assertIncludes(prompt, "sql_correctness_audited", "business prompt should require SQL audit item");
 assertIncludes(prompt, "evidence_audited", "business prompt should require evidence audit item");
+assertIncludes(prompt, "execution_flow_audited", "business prompt should require execution flow audit item");
 assertIncludes(prompt, "owner_contact_audited", "business prompt should require owner contact audit item");
+assertIncludes(basePrompt, "execution_flow_audited", "base routed prompt should require execution flow audit item");
+assertIncludes(adapterSource, "execution_flow_audited", "runtime injected TodoList instruction should require execution flow audit item");
+assertIncludes(adapterSource, "不涉及接口链路/下游触达/状态流转", "runtime injected TodoList instruction should tell models how to mark execution flow audit as not applicable");
 assertIncludes(prompt, "建议联系相关开发人员", "business prompt should require suggesting developer contact when needed");
 assertIncludes(prompt, "git_author_trace", "business prompt should guide GitNexus author trace usage");
 assertIncludes(prompt, "只能基于最终结论实际引用的代码证据追溯", "business prompt should trace authors only from final cited evidence");

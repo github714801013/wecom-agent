@@ -53,12 +53,90 @@ export async function getPlannerPrompt() {
   }
 }
 
-export async function getBusinessPrompt() {
+type BusinessPromptPlanner = Pick<PlannerResult, "intent" | "secondary_intents">;
+
+const LEGACY_BUSINESS_PROMPT_FILE = "business-prompt.md";
+const BASE_BUSINESS_PROMPT_FILE = "business-base-prompt.md";
+const GENERAL_CATEGORY_PROMPT_FILE = "categories/general-prompt.md";
+const FLOW_CATEGORY_PROMPT_FILE = "categories/flow-prompt.md";
+const SQL_CATEGORY_PROMPT_FILE = "categories/sql-prompt.md";
+const TROUBLESHOOTING_CATEGORY_PROMPT_FILE = "categories/troubleshooting-prompt.md";
+
+const TROUBLESHOOTING_INTENTS = new Set(["BUG", "API", "CONFIG", "DEPLOY", "PERF"]);
+const DIRECT_INTENT_PROMPT_FILES = new Map([
+  ["SQL", SQL_CATEGORY_PROMPT_FILE],
+  ["FLOW", FLOW_CATEGORY_PROMPT_FILE],
+]);
+const KNOWN_DIRECT_INTENTS = new Set(DIRECT_INTENT_PROMPT_FILES.keys());
+const ALL_KNOWN_INTENTS = new Set([...TROUBLESHOOTING_INTENTS, ...KNOWN_DIRECT_INTENTS]);
+
+function normalizeIntent(intent: string) {
+  return intent.trim().toUpperCase();
+}
+
+function addPromptFile(files: string[], file: string) {
+  if (!files.includes(file)) files.push(file);
+}
+
+function resolveCategoryPromptFile(intent: string) {
+  if (TROUBLESHOOTING_INTENTS.has(intent)) return TROUBLESHOOTING_CATEGORY_PROMPT_FILE;
+  const directPromptFile = DIRECT_INTENT_PROMPT_FILES.get(intent);
+  if (directPromptFile) return directPromptFile;
+  if (!ALL_KNOWN_INTENTS.has(intent)) {
+    console.warn(`[PromptRouter] Unrecognized intent '${intent}', falling back to general prompt`);
+  }
+  return GENERAL_CATEGORY_PROMPT_FILE;
+}
+
+export function resolveBusinessPromptFiles(plannerResult?: BusinessPromptPlanner | null) {
+  if (!plannerResult?.intent) return [LEGACY_BUSINESS_PROMPT_FILE];
+
+  const intents = [
+    plannerResult.intent,
+    ...(plannerResult.secondary_intents || []),
+  ]
+    .filter(Boolean)
+    .map(normalizeIntent)
+    .filter(Boolean);
+
+  if (intents.length === 0) return [LEGACY_BUSINESS_PROMPT_FILE];
+
+  const files = [BASE_BUSINESS_PROMPT_FILE];
+  for (const intent of intents) {
+    addPromptFile(files, resolveCategoryPromptFile(intent));
+  }
+  return files;
+}
+
+async function readBusinessPromptFile(relativePath: string) {
+  return readFile(join(process.cwd(), "src/prompts", relativePath), "utf-8");
+}
+
+export async function getBusinessPrompt(plannerResult?: BusinessPromptPlanner | null) {
+  const promptFiles = resolveBusinessPromptFiles(plannerResult);
+  const results = await Promise.allSettled(promptFiles.map(readBusinessPromptFile));
+  const loadedPrompts: string[] = [];
+
+  for (const [index, result] of results.entries()) {
+    if (result.status === "fulfilled") {
+      loadedPrompts.push(result.value);
+    } else {
+      console.error(`Failed to load business prompt file ${promptFiles[index] || "unknown"}:`, result.reason);
+    }
+  }
+
+  if (loadedPrompts.length > 0) {
+    return loadedPrompts.join("\n\n");
+  }
+
+  if (promptFiles.includes(LEGACY_BUSINESS_PROMPT_FILE)) {
+    return "You are a professional assistant.";
+  }
+
   try {
-    const promptPath = join(process.cwd(), "src/prompts/business-prompt.md");
-    return await readFile(promptPath, "utf-8");
-  } catch (err) {
-    console.error("Failed to load business prompt:", err);
+    console.warn("Routed business prompt files failed to load; falling back to legacy business prompt.");
+    return await readBusinessPromptFile(LEGACY_BUSINESS_PROMPT_FILE);
+  } catch {
     return "You are a professional assistant.";
   }
 }
@@ -869,10 +947,10 @@ export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOption
   };
 }
 
-export async function initializeAgent(tools?: any[]) {
+export async function initializeAgent(tools?: any[], plannerResult?: BusinessPromptPlanner | null) {
   const model = await getBaseModel();
   const agentTools = tools || await getAllMcpTools();
-  const systemPrompt = await getBusinessPrompt();
+  const systemPrompt = await getBusinessPrompt(plannerResult);
 
   const baseAgent = createAgent({
     model: model,

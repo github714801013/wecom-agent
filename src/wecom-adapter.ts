@@ -13,12 +13,13 @@ import {
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
-import { buildProgressStreamContent, collapseProgressUpdates, getProcessingFrame } from "./progress-updates.js";
+import { buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, getProcessingFrame } from "./progress-updates.js";
 import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 import {
   buildFollowupQuestion,
   buildQuestionWithHistory,
+  classifyHistoryRelevance,
   detectActiveMessageIntent,
   type ConversationContextItem,
 } from "./interaction-control.js";
@@ -40,6 +41,8 @@ interface ActiveTaskState {
   cancelled: boolean;
   question: string;
 }
+
+const THINKING_HEARTBEAT_INTERVAL_MS = 15000;
 
 function reconnectBotAfterReplyAckTimeout(bot: WSClient, botName: string, msgid: string) {
   try {
@@ -372,7 +375,7 @@ export async function startBot(botConfig: BotConfig) {
     }
 
     // --- Session Handling Start ---
-    const session = sessionManager.getOrCreateSession(sessionKey, true);
+    let session = sessionManager.getOrCreateSession(sessionKey, true);
 
     // Handle high-priority system commands (Exact match only)
     const commandText = body.msgtype === MessageType.Text
@@ -506,7 +509,14 @@ export async function startBot(botConfig: BotConfig) {
           }
           return { role: "system", content: message.content.toString() };
         });
-      effectiveParsedContent = buildQuestionWithHistory(historyItems, pendingText);
+      const relevance = classifyHistoryRelevance(historyItems, pendingText);
+      if (relevance.decision === "independent") {
+        console.log(`[Session] Auto clearing unrelated history for ${sessionKey}: ${relevance.reason}`);
+        sessionManager.clearSession(sessionKey);
+        session = sessionManager.getOrCreateSession(sessionKey, true);
+      } else {
+        effectiveParsedContent = buildQuestionWithHistory(historyItems, pendingText);
+      }
     }
     // --- Session Handling End ---
 
@@ -539,6 +549,7 @@ const runtimeTodoList = createRuntimeTodoList();
       let expiredStreamFinalSent = false;
       let expiredStreamHistorySaved = false;
       let replyAckTimeoutReconnectTriggered = false;
+      let replyStreamQueue = Promise.resolve();
       const saveExpiredStreamHistory = async () => {
         if (expiredStreamHistorySaved) return;
         expiredStreamHistorySaved = true;
@@ -547,7 +558,7 @@ const runtimeTodoList = createRuntimeTodoList();
           new AIMessage(STREAM_EXPIRED_MESSAGE),
         ]);
       };
-      const safeReplyStream = async (content: string, final = false) => {
+      const safeReplyStreamNow = async (content: string, final = false) => {
         if (shouldStopCurrentTask()) return false;
         if (isStreamExpired(streamStartedAt)) {
           await saveExpiredStreamHistory();
@@ -586,6 +597,14 @@ const runtimeTodoList = createRuntimeTodoList();
           throw error;
         }
       };
+      const safeReplyStream = (content: string, final = false) => {
+        const replyTask = replyStreamQueue.then(
+          () => safeReplyStreamNow(content, final),
+          () => safeReplyStreamNow(content, final),
+        );
+        replyStreamQueue = replyTask.then(() => undefined, () => undefined);
+        return replyTask;
+      };
       const sendStageProgress = async (content: string, force = false) => {
         if (shouldStopCurrentTask()) return;
         if (!force && Date.now() - lastUpdateTime <= 1000) return;
@@ -602,8 +621,9 @@ const runtimeTodoList = createRuntimeTodoList();
 1. project_scope_audited：审核代码包、仓库、项目和用户目标范围一致性；不涉及代码范围时 evidence 写“不适用”及原因。
 2. sql_correctness_audited：审核 SQL 完整性、只读性、表名字段名、dev 执行校验；若 dev 库无对应表，evidence 必须写“dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构”。
 3. evidence_audited：审核核心结论证据、字段语义和查询收敛。
-4. owner_contact_audited：审核建议处理中是否需要提示联系相关开发人员；涉及代码缺陷、配置异常、流程实现、历史逻辑归属或需要推动修复时，必须说明已给出联系开发人员建议；如果工具列表存在 git_author_trace，只能基于最终结论实际引用的仓库、文件、方法、代码片段、symbol uid 或接口入口追溯联系人，不得使用最终未引用的候选文件，并按“与最终结论最相关的修改优先、同等相关时最新修改优先”选择开发人员线索。
-5. final_format_audited：审核过程标签和最终结论分离。
+4. execution_flow_audited：审核接口链路、缺失日志、未触达下游、回调、MQ、外部系统推送或状态流转的执行链完整性；不涉及此类问题时 evidence 写“不涉及接口链路/下游触达/状态流转”及原因。
+5. owner_contact_audited：审核建议处理中是否需要提示联系相关开发人员；涉及代码缺陷、配置异常、流程实现、历史逻辑归属或需要推动修复时，必须说明已给出联系开发人员建议；如果工具列表存在 git_author_trace，只能基于最终结论实际引用的仓库、文件、方法、代码片段、symbol uid 或接口入口追溯联系人，不得使用最终未引用的候选文件，并按“与最终结论最相关的修改优先、同等相关时最新修改优先”选择开发人员线索。
+6. final_format_audited：审核过程标签和最终结论分离。
 没有证据时必须调用 runtime_todolist_update 将对应 itemId 标记为 blocked，不得直接输出最终结论。`;
 
       // 提取文本内容进行 Planner 分析
@@ -758,7 +778,7 @@ ${hypotheses}
 
         startTodoItem(runtimeTodoList, "analysis_finished");
         await sendStageProgress("正在启动业务分析节点，继续核实中。", true);
-        const agent = await initializeAgent(agentTools);
+        const agent = await initializeAgent(agentTools, plannerResult);
         await sendStageProgress("业务分析节点已启动，正在调用模型和工具核实证据，继续核实中。", true);
         const stream = await agent.stream({
           messages: buildMessagesForCurrentTurn({
@@ -773,116 +793,140 @@ ${hypotheses}
 
         // 工具调用累加器：用于聚合流式的 tool_call_chunks
         const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
-        for await (const [message, metadata] of stream) {
-          if (shouldStopCurrentTask()) {
-            fullContent = "";
-            break;
-          }
-          if ((metadata as any)?.answerReview?.resetContent) {
-            fullContent = "";
-          }
-          if ((metadata as any)?.answerReview?.progress) {
-            await sendStageProgress(message.content.toString(), true);
-            continue;
-          }
-          const msg = message as BaseMessage;
-          intermediateMessages.push(msg); // 记录中间过程
-          
-          const type = (msg as any)._getType?.() || msg.constructor.name;
-          
-          // 处理工具执行结果：记录完整调用日志
-          if (type === "tool" || type === "ToolMessage") {
-            const toolMsg = msg as any;
-            const id = toolMsg.tool_call_id;
-            const entry = toolCallMap.get(id);
-            if (entry) {
-              entry.completed = true;
-              const toolRecord = {
-                id,
-                name: entry.name || "unknown_tool",
-                args: entry.args,
-                content: String(toolMsg.content),
-              };
-              toolContextRecords.push(toolRecord);
-              toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
-              console.log(`[Tool Call Success] Name: ${entry.name}, Args: ${entry.args}, Result Size: ${String(toolMsg.content).length}`);
+        const getActiveToolCalls = () => Array.from(toolCallMap.values())
+          .filter(c => c.name && !c.completed)
+          .map(c => `> 🔍 正在调用: ${getToolDisplay(c.name, c.args)}...`);
+        let heartbeatInFlight = false;
+        let lastHeartbeatTime = 0;
+        const heartbeatTimer = setInterval(() => {
+          if (heartbeatInFlight || shouldStopCurrentTask()) return;
+          const now = Date.now();
+          if (now - lastUpdateTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
+          if (now - lastHeartbeatTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
+          heartbeatInFlight = true;
+          void safeReplyStream(
+            buildThinkingHeartbeatContent(fullContent, getActiveToolCalls(), now),
+            false,
+          ).then(sent => {
+            if (sent) lastHeartbeatTime = Date.now();
+          }).catch(error => {
+            console.error(`[${botConfig.name}] Thinking heartbeat failed for ${body.msgid}:`, error);
+          }).finally(() => {
+            heartbeatInFlight = false;
+          });
+        }, THINKING_HEARTBEAT_INTERVAL_MS);
+        try {
+          for await (const [message, metadata] of stream) {
+            if (shouldStopCurrentTask()) {
+              fullContent = "";
+              break;
             }
-            continue;
-          }
+            if ((metadata as any)?.answerReview?.resetContent) {
+              fullContent = "";
+            }
+            if ((metadata as any)?.answerReview?.progress) {
+              await sendStageProgress(message.content.toString(), true);
+              continue;
+            }
+            const msg = message as BaseMessage;
+            intermediateMessages.push(msg); // 记录中间过程
 
-          if (type === "ai" || type === "AIMessage" || type === "AIMessageChunk") {
-            const aiMsg = msg as any; // Cast to any to handle both AIMessage and AIMessageChunk
-            
-            // 处理工具调用：记录日志并发送状态反馈给企微
-            if (aiMsg.tool_call_chunks && aiMsg.tool_call_chunks.length > 0) {
-              for (const chunk of aiMsg.tool_call_chunks) {
-                const id = chunk.id;
-                if (!id) continue;
-                if (!toolCallMap.has(id)) {
-                  toolCallMap.set(id, { name: "", args: "", notified: false, completed: false });
+            const type = (msg as any)._getType?.() || msg.constructor.name;
+
+            // 处理工具执行结果：记录完整调用日志
+            if (type === "tool" || type === "ToolMessage") {
+              const toolMsg = msg as any;
+              const id = toolMsg.tool_call_id;
+              const entry = toolCallMap.get(id);
+              if (entry) {
+                entry.completed = true;
+                const toolRecord = {
+                  id,
+                  name: entry.name || "unknown_tool",
+                  args: entry.args,
+                  content: String(toolMsg.content),
+                };
+                toolContextRecords.push(toolRecord);
+                toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
+                console.log(`[Tool Call Success] Name: ${entry.name}, Args: ${entry.args}, Result Size: ${String(toolMsg.content).length}`);
+              }
+              continue;
+            }
+
+            if (type === "ai" || type === "AIMessage" || type === "AIMessageChunk") {
+              const aiMsg = msg as any; // Cast to any to handle both AIMessage and AIMessageChunk
+
+              // 处理工具调用：记录日志并发送状态反馈给企微
+              if (aiMsg.tool_call_chunks && aiMsg.tool_call_chunks.length > 0) {
+                for (const chunk of aiMsg.tool_call_chunks) {
+                  const id = chunk.id;
+                  if (!id) continue;
+                  if (!toolCallMap.has(id)) {
+                    toolCallMap.set(id, { name: "", args: "", notified: false, completed: false });
+                  }
+                  const entry = toolCallMap.get(id)!;
+                  if (chunk.name) entry.name = chunk.name;
+                  if (chunk.args) entry.args += chunk.args;
+
+                  // 聚合当前所有正在活跃的调用（名字已知且未完成）
+                  const activeCalls = getActiveToolCalls();
+
+                  if (activeCalls.length > 0) {
+                    const statusMsg = buildProgressStreamContent(fullContent, activeCalls, { motionFrame: getProcessingFrame() });
+
+                    // 节流推送：避免高频更新导致前端闪烁
+                    if (Date.now() - lastUpdateTime > 1000) {
+                      if (!shouldStopCurrentTask()) {
+                        await safeReplyStream(statusMsg, false);
+                      }
+                      lastUpdateTime = Date.now();
+                    }
+                  }
                 }
-                const entry = toolCallMap.get(id)!;
-                if (chunk.name) entry.name = chunk.name;
-                if (chunk.args) entry.args += chunk.args;
-
-                // 聚合当前所有正在活跃的调用（名字已知且未完成）
-                const activeCalls = Array.from(toolCallMap.values())
-                  .filter(c => c.name && !c.completed)
-                  .map(c => `> 🔍 正在调用: ${getToolDisplay(c.name, c.args)}...`);
-                
-                if (activeCalls.length > 0) {
-                  const statusMsg = buildProgressStreamContent(fullContent, activeCalls, { motionFrame: getProcessingFrame() });
-                  
-                  // 节流推送：避免高频更新导致前端闪烁
-                  if (Date.now() - lastUpdateTime > 1000) { 
+                continue;
+              } else if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
+                  // 回退逻辑：如果模型非流式返回，直接使用 tool_calls
+                  for (const tool of aiMsg.tool_calls) {
+                    if (!tool.name) continue;
+                    const id = tool.id || `${tool.name}-${Date.now()}`;
+                    toolCallMap.set(id, {
+                      name: tool.name,
+                      args: JSON.stringify(tool.args || {}),
+                      notified: true,
+                      completed: false,
+                    });
+                    console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
+                    const statusMsg = buildProgressStreamContent(fullContent, [
+                      `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
+                    ], { motionFrame: getProcessingFrame() });
                     if (!shouldStopCurrentTask()) {
                       await safeReplyStream(statusMsg, false);
+                    }
+                  }
+                  continue;
+              }
+
+              if (aiMsg.content) {
+                const delta = aiMsg.content.toString();
+                if (delta.length > 0) {
+                  if (fullContent && delta.startsWith(fullContent)) {
+                      fullContent = delta;
+                  } else {
+                      fullContent += delta;
+                  }
+
+                  if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
+                    if (!shouldStopCurrentTask()) {
+                      await safeReplyStream(collapseProgressUpdates(fullContent), false);
                     }
                     lastUpdateTime = Date.now();
                   }
                 }
               }
-              continue;
-            } else if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
-                // 回退逻辑：如果模型非流式返回，直接使用 tool_calls
-                for (const tool of aiMsg.tool_calls) {
-                  if (!tool.name) continue;
-                  const id = tool.id || `${tool.name}-${Date.now()}`;
-                  toolCallMap.set(id, {
-                    name: tool.name,
-                    args: JSON.stringify(tool.args || {}),
-                    notified: true,
-                    completed: false,
-                  });
-                  console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
-                  const statusMsg = buildProgressStreamContent(fullContent, [
-                    `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
-                  ], { motionFrame: getProcessingFrame() });
-                  if (!shouldStopCurrentTask()) {
-                    await safeReplyStream(statusMsg, false);
-                  }
-                }
-                continue;
-            }
-
-            if (aiMsg.content) {
-              const delta = aiMsg.content.toString();
-              if (delta.length > 0) {
-                if (fullContent && delta.startsWith(fullContent)) {
-                    fullContent = delta;
-                } else {
-                    fullContent += delta;
-                }
-
-                if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-                  if (!shouldStopCurrentTask()) {
-                    await safeReplyStream(collapseProgressUpdates(fullContent), false);
-                  }
-                  lastUpdateTime = Date.now();
-                }
-              }
             }
           }
+        } finally {
+          clearInterval(heartbeatTimer);
         }
 
         // 最终检查：记录那些可能未返回 ToolMessage 的调用
@@ -902,7 +946,7 @@ ${hypotheses}
           try {
             console.log(`[${botConfig.name}] [Recovery] Recursion limit reached for ${body.msgid}, attempting fallback synthesis...`);
             const baseModel = await getBaseModel();
-            const businessPrompt = await getBusinessPrompt();
+            const businessPrompt = await getBusinessPrompt(plannerResult);
 
             // 构造恢复提示词：将已有的所有中间历史（包括工具调用和结果）发给不带 tools 的大模型进行总结
             const recoveryMessages = [

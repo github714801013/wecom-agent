@@ -74,6 +74,12 @@ function isIncompleteProtocolTagPrefix(content: string): boolean {
 }
 
 const PROCESSING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const THINKING_HEARTBEAT_TEXTS = [
+  "仍在分析中",
+  "仍在核实中",
+  "仍在整理证据中",
+  "仍在等待模型响应",
+];
 
 export function getProcessingFrame(now = Date.now()) {
   return PROCESSING_FRAMES[Math.floor(now / 500) % PROCESSING_FRAMES.length] || PROCESSING_FRAMES[0]!;
@@ -104,4 +110,15 @@ export function buildProgressStreamContent(content: string, activeCalls: string[
     return motionPrefix;
   }
   return body;
+}
+
+export function buildThinkingHeartbeatContent(content: string, activeCalls: string[] = [], now = Date.now()) {
+  const hasVisibleContent = collapseProgressUpdates(content).length > 0;
+  const heartbeatText = THINKING_HEARTBEAT_TEXTS[Math.floor(now / 1000) % THINKING_HEARTBEAT_TEXTS.length]!;
+  const dots = ".".repeat((Math.floor(now / 1000) % 3) + 1);
+  return buildProgressStreamContent(
+    hasVisibleContent ? content : `${heartbeatText}${dots}`,
+    activeCalls,
+    { motionFrame: getProcessingFrame(now) },
+  );
 }

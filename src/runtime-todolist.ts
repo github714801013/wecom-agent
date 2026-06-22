@@ -1,5 +1,6 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { parseArgs, type ToolContextRecord } from "./tool-context-filter.js";
 
 export type RuntimeTodoStatus = "pending" | "in_progress" | "done" | "blocked";
 
@@ -29,8 +30,28 @@ const DEFAULT_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = 
 ];
 
 const PROGRESS_ONLY_PATTERN = /(?:继续核实中|继续读取|继续确认|准备输出结论)[。.!！\s]*$/u;
-const SQL_SIGNAL_PATTERN = /\b(select|show|explain|from|where|join|mapper|sql)\b|生产\s*SQL|prod_sql_required|数据库|数据表|表名|字段名|dev\s*库|dev\s*环境/iu;
+const SQL_INTENT_PATTERN = /(?:查询|输出|生成|执行|校验|验证|检查|写|给|补充).{0,12}SQL|SQL.{0,12}(?:查询|语句|执行|校验|验证|正确性|只读)|生产\s*SQL|prod_sql_required/iu;
+const DEV_SQL_VALIDATION_CLAIM_PATTERN = /dev\s*(环境|库).*(验证|校验)|已验证\s*dev|查询不报错/u;
+const SQL_NOT_APPLICABLE_CLAIM_PATTERN = /不涉及\s*SQL|没有输出.{0,8}SQL|未输出.{0,8}SQL|不需要.{0,8}SQL|无需.{0,8}SQL|不用.{0,8}SQL|不(?:给|写|补充|输出).{0,8}SQL|暂时不(?:给|写|补充|输出).{0,8}SQL/iu;
+const DEV_SQL_VALIDATION_TOOL_PATTERN = /(?:^|[_-])(?:read_query|export_query)$/iu;
+const SQL_QUERY_PATTERN = /\b(select|show|explain)\b/iu;
+const SQL_STATEMENT_LIKENESS_PATTERN = /\bselect\b[\s\S]{0,500}\bfrom\b|\bshow\b[\s\S]{0,120}\b(?:tables|columns|databases|create|index|indexes|variables|status)\b|\bexplain\b[\s\S]{0,500}\bselect\b/iu;
+const SQL_VALIDATION_FAILURE_PATTERN = /sqlsyntaxerror|syntax\s+error|unknown\s+(column|table)|does\s+not\s+exist|doesn't\s+exist|ER_[A-Z0-9_]+|\berror\s*[:：]|\bexception\s*[:：]|(?:错误|异常|报错)\s*[:：]|(?:表|字段|列|数据库|权限).{0,12}(?:不存在|无权限)|(?:不存在|无权限).{0,12}(?:表|字段|列|数据库|权限)/iu;
+const SQL_CODE_BLOCK_PATTERN = /```sql\s*([\s\S]*?)```/giu;
+const SQL_INLINE_PATTERN = /\b(?:select|show|explain)\b[\s\S]*?(?:;|$)/gimu;
 const CODE_SCOPE_PATTERN = /项目|仓库|代码包|模块|接口|页面|入口|类名|方法名|controller|service|mapper|repo|package|GitNexus/iu;
+const SQL_AUDIT_NOT_APPLICABLE = "不涉及 SQL，SQL 正确性审核不适用";
+const SQL_AUDIT_DEV_SCHEMA_MISSING = "涉及 SQL，dev 缺表，已标记代码反推结构路径";
+const SQL_AUDIT_DEV_VALIDATED = "涉及 SQL，已有真实 dev 查询工具结果支撑执行校验路径";
+const SQL_AUDIT_MISSING_SAME_SQL_TOOL_RESULT = "涉及 SQL，回答声明 dev 校验，但缺少同一条 SQL 的真实 dev 查询工具结果";
+const SQL_AUDIT_MISSING_TOOL_RESULT = "涉及 SQL，回答声明 dev 校验，但缺少真实 dev 查询工具结果";
+const SQL_AUDIT_MISSING_VALIDATION_PATH = "涉及 SQL，需在最终回答中说明 dev 校验或 dev 缺表代码反推路径";
+const DEV_SCHEMA_MISSING_MARKER = "dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构";
+const SQL_AUDIT_BLOCKING_EVIDENCE = new Set([
+  SQL_AUDIT_MISSING_SAME_SQL_TOOL_RESULT,
+  SQL_AUDIT_MISSING_TOOL_RESULT,
+  SQL_AUDIT_MISSING_VALIDATION_PATH,
+]);
 const AUDIT_TODO_IDS = new Set([
   "project_scope_audited",
   "sql_correctness_audited",
@@ -124,21 +145,198 @@ export function buildProjectScopeAuditEvidence(question: string, answer: string,
   return "已审核回答中的项目、仓库、入口或接口锚点，未检测到显式 repoHint";
 }
 
-export function buildSqlAuditEvidence(question: string, answer: string) {
-  const combined = `${question}\n${answer}`;
-  if (!SQL_SIGNAL_PATTERN.test(combined)) {
-    return "不涉及 SQL，SQL 正确性审核不适用";
+function isEscapedAt(text: string, index: number) {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
+}
+
+type SqlQuote = "'" | "\"" | "`";
+
+function advanceSqlQuote(sql: string, index: number, quote: SqlQuote | null) {
+  const char = sql[index]!;
+  const next = index + 1 < sql.length ? sql[index + 1] : "";
+
+  if ((char === "'" || char === "\"" || char === "`") && (char === "`" || !isEscapedAt(sql, index))) {
+    if (quote === char && next === char) {
+      return { quote, escapedPair: true };
+    }
+    return { quote: quote === char ? null : quote || char, escapedPair: false };
   }
 
-  if (answer.includes("dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构")) {
-    return "涉及 SQL，dev 缺表，已标记代码反推结构路径";
+  return { quote, escapedPair: false };
+}
+
+function stripSqlComments(sql: string) {
+  let stripped = "";
+  let quote: SqlQuote | null = null;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]!;
+    const next = index + 1 < sql.length ? sql[index + 1] : "";
+
+    if (!quote && char === "/" && next === "*") {
+      const end = sql.indexOf("*/", index + 2);
+      index = end === -1 ? sql.length : end + 1;
+      stripped += " ";
+      continue;
+    }
+
+    if (!quote && char === "-" && next === "-") {
+      while (index + 1 < sql.length && !/[\r\n]/u.test(sql[index + 1]!)) {
+        index += 1;
+      }
+      stripped += " ";
+      continue;
+    }
+
+    if (!quote && char === "#") {
+      while (index + 1 < sql.length && !/[\r\n]/u.test(sql[index + 1]!)) {
+        index += 1;
+      }
+      stripped += " ";
+      continue;
+    }
+
+    const quoteState = advanceSqlQuote(sql, index, quote);
+    if (quoteState.escapedPair) {
+        stripped += char + next;
+        index += 1;
+        continue;
+    }
+    quote = quoteState.quote;
+
+    stripped += char;
   }
 
-  if (/dev\s*(环境|库).*(验证|校验)|已验证\s*dev|查询不报错/u.test(answer)) {
-    return "涉及 SQL，已标记 dev 执行校验路径";
+  return stripped;
+}
+
+function normalizeSql(sql: string) {
+  return stripSqlComments(sql)
+    .replace(/```sql|```/giu, "")
+    .replace(/`([^`]*)`/gu, "$1")
+    .replace(/\s+/g, " ")
+    .replace(/;+\s*$/u, "")
+    .trim()
+    .toLowerCase();
+}
+
+function splitSqlStatements(sql: string) {
+  const statements: string[] = [];
+  let current = "";
+  let quote: SqlQuote | null = null;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]!;
+
+    const quoteState = advanceSqlQuote(sql, index, quote);
+    if (quoteState.escapedPair) {
+      current += char + sql[index + 1];
+      index += 1;
+      continue;
+    }
+    quote = quoteState.quote;
+
+    if (char === ";" && !quote) {
+      statements.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
   }
 
-  return "涉及 SQL，需在最终回答中说明 dev 校验或 dev 缺表代码反推路径";
+  if (current.trim()) {
+    statements.push(current);
+  }
+
+  return statements;
+}
+
+function extractSqlStatements(text: string) {
+  const codeBlockSql = Array.from(text.matchAll(SQL_CODE_BLOCK_PATTERN))
+    .map(match => match[1] || "");
+  const inlineSql = Array.from(text.matchAll(SQL_INLINE_PATTERN))
+    .map(match => match[0] || "");
+
+  return Array.from(new Set([...codeBlockSql, ...inlineSql]
+    .flatMap(sql => splitSqlStatements(stripSqlComments(sql)))
+    .filter(sql => SQL_STATEMENT_LIKENESS_PATTERN.test(sql))
+    .map(normalizeSql)
+    .filter(Boolean)));
+}
+
+function getToolQuery(record: ToolContextRecord) {
+  const args = parseArgs(record.args || "");
+  if (typeof args.query === "string") return args.query;
+  return typeof args.sql === "string" ? args.sql : "";
+}
+
+function analyzeDevSqlValidationToolResults(toolRecords: ToolContextRecord[] = [], answerSqlStatements: string[] = []) {
+  let hasDevSqlQuery = false;
+  let hasSuccessfulMatchingQuery = false;
+
+  for (const record of toolRecords) {
+    if (!DEV_SQL_VALIDATION_TOOL_PATTERN.test(record.name)) continue;
+
+    const query = getToolQuery(record);
+    if (!SQL_QUERY_PATTERN.test(query)) continue;
+
+    hasDevSqlQuery = true;
+    const normalizedQuery = normalizeSql(query);
+    const matchesFinalSql = answerSqlStatements.some(sql => normalizedQuery === sql);
+    if (matchesFinalSql && !SQL_VALIDATION_FAILURE_PATTERN.test(record.content || "")) {
+      hasSuccessfulMatchingQuery = true;
+    }
+  }
+
+  return { hasDevSqlQuery, hasSuccessfulMatchingQuery };
+}
+
+export function buildSqlAuditEvidence(answer: string, toolRecords: ToolContextRecord[] = []) {
+  if (answer.includes(DEV_SCHEMA_MISSING_MARKER)) {
+    return SQL_AUDIT_DEV_SCHEMA_MISSING;
+  }
+
+  const answerSqlStatements = extractSqlStatements(answer);
+  const hasSqlStatement = answerSqlStatements.length > 0;
+  if (!hasSqlStatement && SQL_NOT_APPLICABLE_CLAIM_PATTERN.test(answer)) {
+    return SQL_AUDIT_NOT_APPLICABLE;
+  }
+
+  const hasSqlAuditIntent = SQL_INTENT_PATTERN.test(answer) || DEV_SQL_VALIDATION_CLAIM_PATTERN.test(answer);
+
+  if (!hasSqlStatement && !hasSqlAuditIntent) {
+    return SQL_AUDIT_NOT_APPLICABLE;
+  }
+
+  if (DEV_SQL_VALIDATION_CLAIM_PATTERN.test(answer)) {
+    // 命中 dev 校验声明但未提取到 SQL 时，必须按缺少真实工具证据处理。
+    const devSqlValidation = analyzeDevSqlValidationToolResults(toolRecords, answerSqlStatements);
+    if (devSqlValidation.hasSuccessfulMatchingQuery) {
+      return SQL_AUDIT_DEV_VALIDATED;
+    }
+    if (devSqlValidation.hasDevSqlQuery) {
+      return SQL_AUDIT_MISSING_SAME_SQL_TOOL_RESULT;
+    }
+    return SQL_AUDIT_MISSING_TOOL_RESULT;
+  }
+
+  return SQL_AUDIT_MISSING_VALIDATION_PATH;
+}
+
+export function isSqlAuditEvidenceBlocking(evidence: string) {
+  return SQL_AUDIT_BLOCKING_EVIDENCE.has(evidence);
+}
+
+export function applySqlAuditEvidence(todoList: RuntimeTodoList, evidence: string) {
+  if (isSqlAuditEvidenceBlocking(evidence)) {
+    blockTodoItem(todoList, "sql_correctness_audited", evidence);
+  } else {
+    completeTodoItem(todoList, "sql_correctness_audited", evidence);
+  }
 }
 
 export function buildEvidenceAuditEvidence(answer: string, toolResultCount = 0) {

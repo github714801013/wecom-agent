@@ -63,9 +63,9 @@ assert.equal(
 );
 
 assert.equal(
-  buildProgressStreamContent("<agent_progress", ["> 🔍 正在调用: query..."], { motionFrame: "⠋" }),
-  "⠋ 处理中\n> 🔍 正在调用: query...",
-  "partial protocol tag prefix should wait instead of showing raw tag text",
+  buildProgressStreamContent("<agent_progress", ["> 🔍 正在调用: query..."]),
+  "> 🔍 正在调用: query...",
+  "non-heartbeat progress should not show processing state when only a tool call is visible",
 );
 
 assert.equal(
@@ -99,15 +99,15 @@ assert.equal(
 assert.equal(getProcessingFrame(0), "⠋", "processing frame should be deterministic by timestamp");
 
 assert.equal(
-  buildProgressStreamContent("已完成问题规划，继续核实中。", [], { motionFrame: "⠋" }),
-  "⠋ 处理中\n已完成问题规划，继续核实中。",
-  "streaming content should include a lightweight processing motion frame",
+  buildProgressStreamContent("已完成问题规划，继续核实中。"),
+  "已完成问题规划，继续核实中。",
+  "non-heartbeat progress should not include processing state",
 );
 
 assert.equal(
-  buildProgressStreamContent("已完成问题规划，继续核实中。", ["> 🔍 正在调用: query..."], { motionFrame: "⠙" }),
-  "⠙ 处理中\n已完成问题规划，继续核实中。\n\n> 🔍 正在调用: query...",
-  "streaming content should keep motion frame with active tool calls",
+  buildProgressStreamContent("已完成问题规划，继续核实中。", ["> 🔍 正在调用: query..."]),
+  "已完成问题规划，继续核实中。\n\n> 🔍 正在调用: query...",
+  "non-heartbeat progress with active tool calls should not include processing state",
 );
 
 const firstHeartbeat = buildThinkingHeartbeatContent("", [], 0);
@@ -118,8 +118,8 @@ assert.match(secondHeartbeat, /处理中\n仍在核实中\.\./, "heartbeat shoul
 
 assert.equal(
   buildThinkingHeartbeatContent("已完成问题规划，继续核实中。", [], 0),
-  "⠋ 处理中\n已完成问题规划，继续核实中。",
-  "heartbeat should reuse latest visible progress instead of a fixed thinking sentence",
+  "⠋ 处理中\n已完成问题规划，继续核实中。\n\n仍在分析中.",
+  "heartbeat should keep latest visible progress and add a dynamic thinking line",
 );
 
 console.log("progress overwrite 验证通过");

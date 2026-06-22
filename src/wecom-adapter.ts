@@ -13,7 +13,7 @@ import {
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
-import { buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, getProcessingFrame } from "./progress-updates.js";
+import { buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates } from "./progress-updates.js";
 import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 import {
@@ -24,10 +24,12 @@ import {
   type ConversationContextItem,
 } from "./interaction-control.js";
 import {
+  applySqlAuditEvidence,
   assertTodoListComplete,
   blockTodoItem,
   buildIncompleteAuditTodoMessage,
   buildRuntimeTodoTool,
+  buildSqlAuditEvidence,
   completeTodoItem,
   createRuntimeTodoList,
   getIncompleteAuditTodoItems,
@@ -608,7 +610,7 @@ const runtimeTodoList = createRuntimeTodoList();
       const sendStageProgress = async (content: string, force = false) => {
         if (shouldStopCurrentTask()) return;
         if (!force && Date.now() - lastUpdateTime <= 1000) return;
-        await safeReplyStream(buildProgressStreamContent(content, [], { motionFrame: getProcessingFrame() }), false);
+        await safeReplyStream(buildProgressStreamContent(content), false);
         lastUpdateTime = Date.now();
       };
 
@@ -872,7 +874,7 @@ ${hypotheses}
                   const activeCalls = getActiveToolCalls();
 
                   if (activeCalls.length > 0) {
-                    const statusMsg = buildProgressStreamContent(fullContent, activeCalls, { motionFrame: getProcessingFrame() });
+                    const statusMsg = buildProgressStreamContent(fullContent, activeCalls);
 
                     // 节流推送：避免高频更新导致前端闪烁
                     if (Date.now() - lastUpdateTime > 1000) {
@@ -898,7 +900,7 @@ ${hypotheses}
                     console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
                     const statusMsg = buildProgressStreamContent(fullContent, [
                       `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
-                    ], { motionFrame: getProcessingFrame() });
+                    ]);
                     if (!shouldStopCurrentTask()) {
                       await safeReplyStream(statusMsg, false);
                     }
@@ -1001,6 +1003,8 @@ ${hypotheses}
 
       // 发送最终结果
       fullContent = collapseProgressUpdates(fullContent);
+      const sqlAuditEvidence = buildSqlAuditEvidence(fullContent, toolContextRecords);
+      applySqlAuditEvidence(runtimeTodoList, sqlAuditEvidence);
       const incompleteAuditItems = getIncompleteAuditTodoItems(runtimeTodoList);
       const auditPassed = incompleteAuditItems.length === 0;
       if (!auditPassed) {

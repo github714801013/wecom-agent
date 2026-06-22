@@ -96,29 +96,24 @@ export function collapseProgressUpdates(content: string): string {
   return collapsePlainProgressContent(content);
 }
 
-export function buildProgressStreamContent(content: string, activeCalls: string[] = [], options: { motionFrame?: string } = {}) {
+export function buildProgressStreamContent(content: string, activeCalls: string[] = []) {
   const displayContent = collapseProgressUpdates(content);
-  const motionPrefix = options.motionFrame ? `${options.motionFrame} 处理中` : "";
   const body = displayContent && activeCalls.length > 0
     ? `${displayContent}\n\n${activeCalls.join("\n")}`
     : displayContent || activeCalls.join("\n");
 
-  if (motionPrefix && body) {
-    return `${motionPrefix}\n${body}`;
-  }
-  if (motionPrefix) {
-    return motionPrefix;
-  }
   return body;
 }
 
 export function buildThinkingHeartbeatContent(content: string, activeCalls: string[] = [], now = Date.now()) {
-  const hasVisibleContent = collapseProgressUpdates(content).length > 0;
-  const heartbeatText = THINKING_HEARTBEAT_TEXTS[Math.floor(now / 1000) % THINKING_HEARTBEAT_TEXTS.length]!;
-  const dots = ".".repeat((Math.floor(now / 1000) % 3) + 1);
-  return buildProgressStreamContent(
-    hasVisibleContent ? content : `${heartbeatText}${dots}`,
-    activeCalls,
-    { motionFrame: getProcessingFrame(now) },
-  );
+  const displayContent = collapseProgressUpdates(content);
+  const timeBucket = Math.floor(now / 1000);
+  const heartbeatText = THINKING_HEARTBEAT_TEXTS[timeBucket % THINKING_HEARTBEAT_TEXTS.length]!;
+  const dots = ".".repeat((timeBucket % 3) + 1);
+  const heartbeatLine = `${heartbeatText}${dots}`;
+  const bodyContent = displayContent ? `${displayContent}\n\n${heartbeatLine}` : heartbeatLine;
+  const body = activeCalls.length > 0
+    ? `${bodyContent}\n\n${activeCalls.join("\n")}`
+    : bodyContent;
+  return `${getProcessingFrame(now)} 处理中\n${body}`;
 }

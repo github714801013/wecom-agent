@@ -22,7 +22,7 @@ function truncateText(text: string, maxLength: number) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
 }
 
-function parseArgs(args: string) {
+export function parseArgs(args: string) {
   try {
     const parsed = JSON.parse(args);
     return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};

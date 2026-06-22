@@ -81,19 +81,42 @@ const THINKING_HEARTBEAT_TEXTS = [
   "仍在等待模型响应",
 ];
 
+const HEARTBEAT_FRAME_PREFIXES = PROCESSING_FRAMES.map(frame => `${frame} 处理中`);
+const HEARTBEAT_FRAME_PATTERN = PROCESSING_FRAMES.join("|");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const HEARTBEAT_TEXT_PATTERN = THINKING_HEARTBEAT_TEXTS.map(escapeRegExp).join("|");
+const HEARTBEAT_FRAMED_PATTERN = new RegExp(`^(?:${HEARTBEAT_FRAME_PATTERN}) 处理中：(?:${HEARTBEAT_TEXT_PATTERN})\\.{1,3}$`, "u");
+const HEARTBEAT_PLAIN_PATTERN = new RegExp(`^(?:${HEARTBEAT_TEXT_PATTERN})\\.{1,3}$`, "u");
+
+function isThinkingHeartbeatLine(line: string) {
+  const trimmed = line.trim();
+  if (HEARTBEAT_FRAME_PREFIXES.includes(trimmed)) return true;
+
+  return HEARTBEAT_FRAMED_PATTERN.test(trimmed) || HEARTBEAT_PLAIN_PATTERN.test(trimmed);
+}
+
+function stripThinkingHeartbeatContent(content: string) {
+  return content
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter(line => !isThinkingHeartbeatLine(line))
+    .join("\n")
+    .trim();
+}
+
 export function getProcessingFrame(now = Date.now()) {
   return PROCESSING_FRAMES[Math.floor(now / 500) % PROCESSING_FRAMES.length] || PROCESSING_FRAMES[0]!;
 }
 
 export function collapseProgressUpdates(content: string): string {
-  const trimmed = content.trim();
+  const trimmed = stripThinkingHeartbeatContent(content);
   if (isIncompleteProtocolTagPrefix(trimmed)) return "";
 
   if (/<\/?(?:agent_progress|final_answer)>/i.test(trimmed)) {
     return extractTaggedDisplayContent(trimmed);
   }
 
-  return collapsePlainProgressContent(content);
+  return collapsePlainProgressContent(trimmed);
 }
 
 export function buildProgressStreamContent(content: string, activeCalls: string[] = []) {
@@ -110,10 +133,10 @@ export function buildThinkingHeartbeatContent(content: string, activeCalls: stri
   const timeBucket = Math.floor(now / 1000);
   const heartbeatText = THINKING_HEARTBEAT_TEXTS[timeBucket % THINKING_HEARTBEAT_TEXTS.length]!;
   const dots = ".".repeat((timeBucket % 3) + 1);
-  const heartbeatLine = `${heartbeatText}${dots}`;
+  const heartbeatLine = `${getProcessingFrame(now)} 处理中：${heartbeatText}${dots}`;
   const bodyContent = displayContent ? `${displayContent}\n\n${heartbeatLine}` : heartbeatLine;
   const body = activeCalls.length > 0
     ? `${bodyContent}\n\n${activeCalls.join("\n")}`
     : bodyContent;
-  return `${getProcessingFrame(now)} 处理中\n${body}`;
+  return body;
 }

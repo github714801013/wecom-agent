@@ -113,13 +113,25 @@ assert.equal(
 const firstHeartbeat = buildThinkingHeartbeatContent("", [], 0);
 const secondHeartbeat = buildThinkingHeartbeatContent("", [], 1000);
 assert.notEqual(firstHeartbeat, secondHeartbeat, "thinking heartbeat should change over time");
-assert.match(firstHeartbeat, /处理中\n仍在分析中\./, "heartbeat should include dynamic dotted text when no content exists");
-assert.match(secondHeartbeat, /处理中\n仍在核实中\.\./, "heartbeat should rotate text and dots");
+assert.equal(firstHeartbeat, "⠋ 处理中：仍在分析中.", "heartbeat should include dynamic dotted text when no content exists");
+assert.equal(secondHeartbeat, "⠹ 处理中：仍在核实中..", "heartbeat should rotate text and dots");
 
 assert.equal(
   buildThinkingHeartbeatContent("已完成问题规划，继续核实中。", [], 0),
-  "⠋ 处理中\n已完成问题规划，继续核实中。\n\n仍在分析中.",
-  "heartbeat should keep latest visible progress and add a dynamic thinking line",
+  "已完成问题规划，继续核实中。\n\n⠋ 处理中：仍在分析中.",
+  "heartbeat should append dynamic thinking line after latest visible progress",
+);
+
+assert.equal(
+  buildProgressStreamContent("已完成问题规划，继续核实中。\n\n⠋ 处理中：仍在分析中.\n\n结论：可以取消。"),
+  "结论：可以取消。",
+  "real content should overwrite previous heartbeat dynamic text",
+);
+
+assert.equal(
+  buildProgressStreamContent("已完成问题规划，继续核实中。\n\n⠋ 处理中\n仍在分析中.\n\n结论：可以取消。"),
+  "结论：可以取消。",
+  "real content should overwrite previous legacy heartbeat dynamic text",
 );
 
 console.log("progress overwrite 验证通过");

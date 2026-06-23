@@ -6,6 +6,12 @@
     "recursionLimit": 25,
     "contextWindow": 0
   },
+  "vision": {
+    "enabled": true,
+    "apiKey": "${LLM_API_KEY}",
+    "baseUrl": "${LLM_BASE_URL}",
+    "modelName": "gemini-3.1-pro-preview"
+  },
   "mcpServers": [
     {
       "name": "gitnexus",
@@ -51,6 +57,7 @@
   "tools": {
     "allowed": [],
     "excluded": [],
-    "cacheTtlMinutes": 30
+    "cacheTtlMinutes": 30,
+    "maxAgentToolResultsPerTurn": 64
   }
 }

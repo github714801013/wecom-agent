@@ -1,5 +1,10 @@
 import { strict as assert } from "node:assert";
-import { buildFollowupQuestion, buildQuestionWithHistory, detectActiveMessageIntent } from "../interaction-control.js";
+import {
+  buildFollowupQuestion,
+  buildQuestionWithHistory,
+  detectActiveMessageIntent,
+  extractConfirmedAnchorsFromHistory,
+} from "../interaction-control.js";
 
 assert.equal(detectActiveMessageIntent("kill"), "stop");
 assert.equal(detectActiveMessageIntent("停止"), "stop");
@@ -41,5 +46,34 @@ assert.match(anchoredFollowup, /项目：oa-stock/);
 assert.match(anchoredFollowup, /保存接口：\/add-or-update\/v1/);
 assert.match(anchoredFollowup, /符号：AddOrUpdateV1/);
 assert.match(anchoredFollowup, /已确认锚点必须优先继承/);
+
+const longHistoricalEvidence = [
+  { role: "user" as const, content: "保护膜详情，点立即购买提示已超过复购时间，帮我看后端接口" },
+  {
+    role: "system" as const,
+    content: `【本轮工具上下文摘要】 有效工具证据: ${"无关摘要 ".repeat(90)}
+code_snippet repo=oa-api filePath=oaapi-service/src/main/java/com/jiuji/oaapi/service/impl/SubServiceImpl.java method=checkYearPackageRepurchase`,
+  },
+  {
+    role: "assistant" as const,
+    content: `${"已读取候选文件，继续核实中。".repeat(60)}
+第二次检索命中了关键线索：oa-after 仓库 SmallproFilmCardServiceImpl.java 中的 repurchaseBuyTime（743行）和 repurchaseBuyExpireMsg（760行），提示文案为“贴膜 年包服务 1年2次 已超过复购时间！”。`,
+  },
+];
+const confirmedAnchors = extractConfirmedAnchorsFromHistory(longHistoricalEvidence);
+assert.ok(confirmedAnchors.includes("oa-after"));
+assert.ok(confirmedAnchors.includes("oa-api"));
+assert.ok(confirmedAnchors.includes("SmallproFilmCardServiceImpl.java"));
+assert.ok(confirmedAnchors.includes("SubServiceImpl.java"));
+assert.ok(confirmedAnchors.includes("repurchaseBuyTime"));
+assert.ok(confirmedAnchors.includes("repurchaseBuyExpireMsg"));
+assert.ok(confirmedAnchors.some(anchor => anchor.includes("已超过复购时间")));
+
+const filmFollowup = buildQuestionWithHistory(longHistoricalEvidence, "点 立即购买按钮 提示的 重点看这个后端接口");
+assert.match(filmFollowup, /已确认锚点清单/);
+assert.match(filmFollowup, /SmallproFilmCardServiceImpl\.java/);
+assert.match(filmFollowup, /repurchaseBuyTime/);
+assert.match(filmFollowup, /repurchaseBuyExpireMsg/);
+assert.match(filmFollowup, /已超过复购时间/);
 
 console.log("interaction control 验证通过");

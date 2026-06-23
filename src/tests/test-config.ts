@@ -47,6 +47,9 @@ const { buildMcpHeaders } = await import("../mcp-client.js");
 assertEqual(config.llm.apiKey, "test-api-key", "config should resolve llm api key placeholder");
 assertEqual(config.bots[0]?.botId, "test-bot-id", "config should resolve bot id placeholder");
 assertEqual(config.tools.cacheTtlMinutes, 15, "config should parse MCP tools cache TTL");
+assertEqual(config.tools.maxAgentToolResultsPerTurn, 64, "config should default max agent tool results per turn to 64");
+assertEqual(config.vision.enabled, true, "config should enable image vision analysis by default");
+assertEqual(config.vision.modelName, "gemini-3.1-pro-preview", "config should default image vision model");
 
 const resolved = resolveEnvPlaceholders({
   secret: "${TEST_SECRET_VALUE}",

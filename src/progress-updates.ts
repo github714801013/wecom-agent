@@ -14,6 +14,11 @@ const FINAL_ANSWER_TAG_PATTERN = /<final_answer>\s*([\s\S]*?)\s*<\/final_answer>
 const AGENT_PROGRESS_TAG_PATTERN = /<agent_progress>\s*([\s\S]*?)\s*<\/agent_progress>/gi;
 const PROTOCOL_TAG_TOKEN_PATTERN = /<\/?(?:agent_progress|final_answer)>/gi;
 const PROTOCOL_TAG_PREFIXES = ["<agent_progress", "</agent_progress", "<final_answer", "</final_answer"];
+const EMPTY_PROTOCOL_CONTENT_PATTERN = /\[System: Empty message content sanitised to satisfy protocol\]/g;
+
+export function stripProtocolNoise(content: string): string {
+  return content.replace(EMPTY_PROTOCOL_CONTENT_PATTERN, "");
+}
 
 function getLastTaggedContent(content: string, pattern: RegExp): string {
   const matches = Array.from(content.matchAll(pattern));
@@ -109,7 +114,7 @@ export function getProcessingFrame(now = Date.now()) {
 }
 
 export function collapseProgressUpdates(content: string): string {
-  const trimmed = stripThinkingHeartbeatContent(content);
+  const trimmed = stripThinkingHeartbeatContent(stripProtocolNoise(content));
   if (isIncompleteProtocolTagPrefix(trimmed)) return "";
 
   if (/<\/?(?:agent_progress|final_answer)>/i.test(trimmed)) {

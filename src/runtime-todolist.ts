@@ -117,6 +117,15 @@ export function getIncompleteAuditTodoItems(todoList: RuntimeTodoList) {
   return todoList.items.filter(item => AUDIT_TODO_IDS.has(item.id) && item.status !== "done");
 }
 
+export function completeSkippedAuditItems(todoList: RuntimeTodoList, itemIds: string[]) {
+  for (const itemId of itemIds) {
+    if (itemId === "sql_correctness_audited" || !AUDIT_TODO_IDS.has(itemId)) continue;
+    const item = todoList.items.find(todo => todo.id === itemId);
+    if (!item || item.status === "done" || item.status === "blocked") continue;
+    completeTodoItem(todoList, itemId, `flow_control: 上游明确声明跳过 ${itemId} 节点`);
+  }
+}
+
 export function assertTodoListComplete(todoList: RuntimeTodoList) {
   const incomplete = getIncompleteTodoItems(todoList);
   if (incomplete.length > 0) {
@@ -347,6 +356,47 @@ export function buildEvidenceAuditEvidence(answer: string, toolResultCount = 0) 
   return `已审核结论证据和查询收敛，toolResults=${toolResultCount}`;
 }
 
+function completeAuditItemIfOpen(todoList: RuntimeTodoList, id: string, evidence: string) {
+  const item = todoList.items.find(todo => todo.id === id);
+  if (!item || item.status === "done" || item.status === "blocked") return;
+  completeTodoItem(todoList, id, evidence);
+}
+
+export function completeRecoveryAuditItems(todoList: RuntimeTodoList, input: {
+  question: string;
+  answer: string;
+  repoHints?: string[];
+  toolResultCount?: number;
+  reason: string;
+}) {
+  const reason = input.reason.trim() || "恢复总结路径";
+  completeAuditItemIfOpen(
+    todoList,
+    "project_scope_audited",
+    `${reason}；${buildProjectScopeAuditEvidence(input.question, input.answer, input.repoHints || [])}`,
+  );
+  completeAuditItemIfOpen(
+    todoList,
+    "evidence_audited",
+    `${reason}；${buildEvidenceAuditEvidence(input.answer, input.toolResultCount || 0)}`,
+  );
+  completeAuditItemIfOpen(
+    todoList,
+    "execution_flow_audited",
+    `${reason}；恢复回答已基于现有工具证据输出阶段性结论或最小缺口；未继续执行无进展工具循环`,
+  );
+  completeAuditItemIfOpen(
+    todoList,
+    "owner_contact_audited",
+    `${reason}；未执行 git_author_trace，恢复回答如涉及代码缺陷或配置异常应提示联系对应模块开发人员`,
+  );
+  completeAuditItemIfOpen(
+    todoList,
+    "final_format_audited",
+    `${reason}；发送前会执行进度折叠和 flow_control 剥离，仅保留最终可见内容`,
+  );
+}
+
 export function summarizeTodoList(todoList: RuntimeTodoList) {
   return todoList.items
     .map(item => {
@@ -423,6 +473,27 @@ export function buildIncompleteAuditTodoMessage(items: RuntimeTodoItem[]) {
   }).join("\n\n");
 
   return `审核未完成，当前回答暂不发送最终结论。\n\n${details}`;
+}
+
+function hasAuditItem(items: RuntimeTodoItem[], id: string) {
+  return items.some(item => item.id === id);
+}
+
+export function buildUserFacingAuditFallbackMessage(question: string, items: RuntimeTodoItem[]) {
+  const normalizedQuestion = question.trim();
+  const prefix = normalizedQuestion
+    ? `针对“${normalizedQuestion}”，当前还没有足够证据直接下结论。`
+    : "当前还没有足够证据直接下结论。";
+
+  if (hasAuditItem(items, "project_scope_audited") || hasAuditItem(items, "evidence_audited")) {
+    return `${prefix}\n\n请补充以下任一信息后我继续查：\n1. 所在系统、项目、页面、菜单路径或接口地址。\n2. 截图中的完整文字、URL、字段名或按钮/表格列名。\n3. 你说的“这里”具体指页面上的哪个字段或区域。`;
+  }
+
+  if (hasAuditItem(items, "sql_correctness_audited")) {
+    return `${prefix}\n\n当前涉及 SQL 或数据核实时，还缺少 dev 校验结果或表结构证据。请补充目标系统/页面/字段，或确认是否需要我继续按代码反推表名和字段。`;
+  }
+
+  return `${prefix}\n\n请补充系统、项目、页面、接口或截图文字，我会基于补充信息继续核实。`;
 }
 
 export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {

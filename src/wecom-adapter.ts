@@ -4,6 +4,7 @@ import { config, type BotConfig } from "./config.js";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 import { sessionManager } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
+import { analyzeImageForQuestion, type VisionImageAnalyzer } from "./vision-analyzer.js";
 import { getAllMcpTools } from "./mcp-client.js";
 import {
   buildHumanLoopReply,
@@ -13,9 +14,19 @@ import {
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
-import { buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates } from "./progress-updates.js";
+import { buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, stripProtocolNoise } from "./progress-updates.js";
+import {
+  consumeFlowControlDelta,
+  createDefaultFlowControl,
+  createFlowControlStreamState,
+  extractFlowControl,
+  type FlowControlPatch,
+  mergeFlowControl,
+} from "./flow-control.js";
+import { createAgentProgressGuard, createAgentProgressLimitError } from "./agent-progress-guard.js";
 import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
+import { buildProgressLimitRecoverySystemPrompt, ensureRecoverySqlAuditMarker } from "./recovery-synthesis.js";
 import {
   buildFollowupQuestion,
   buildQuestionWithHistory,
@@ -28,12 +39,16 @@ import {
   assertTodoListComplete,
   blockTodoItem,
   buildIncompleteAuditTodoMessage,
+  buildUserFacingAuditFallbackMessage,
   buildRuntimeTodoTool,
   buildSqlAuditEvidence,
+  completeRecoveryAuditItems,
+  completeSkippedAuditItems,
   completeTodoItem,
   createRuntimeTodoList,
   getIncompleteAuditTodoItems,
   isFinalAnswerReady,
+  isSqlAuditEvidenceBlocking,
   startTodoItem,
   summarizeTodoList,
 } from "./runtime-todolist.js";
@@ -44,7 +59,26 @@ interface ActiveTaskState {
   question: string;
 }
 
+interface AgentStreamMetadata {
+  answerReview?: {
+    resetContent?: boolean;
+    progress?: boolean;
+  };
+  flowControl?: FlowControlPatch;
+}
+
 const THINKING_HEARTBEAT_INTERVAL_MS = 15000;
+
+function stripEmptyProtocolContent(content: string) {
+  return stripProtocolNoise(content);
+}
+
+function getMaxAgentToolResultsPerTurn() {
+  const parsed = Number(process.env.AGENT_MAX_TOOL_RESULTS_PER_TURN);
+  return Number.isInteger(parsed) && parsed > 0
+    ? parsed
+    : config.tools.maxAgentToolResultsPerTurn;
+}
 
 function reconnectBotAfterReplyAckTimeout(bot: WSClient, botName: string, msgid: string) {
   try {
@@ -118,6 +152,61 @@ export function extractTextContent(content: string | { type: string; text?: stri
     .map(item => stripBoundaryMentions(item.text || ""))
     .filter(Boolean)
     .join("\n");
+}
+
+type ParsedWeComContentItem = { type: string; text?: string; image_url?: { url: string } | string };
+
+function collectPayloadText(payload: any): string[] {
+  if (!payload) return [];
+  if (payload.msgtype === MessageType.Text || payload.msgtype === "text") {
+    return [payload.text?.content].filter(Boolean);
+  }
+  if (payload.msgtype === "mixed") {
+    return (payload.mixed?.msg_item || [])
+      .filter((item: any) => item.msgtype === "text")
+      .map((item: any) => item.text?.content)
+      .filter(Boolean);
+  }
+  if (payload.msgtype === MessageType.Voice) {
+    return [payload.voice?.recognition].filter(Boolean);
+  }
+  return [];
+}
+
+function buildImageQuestionContext(body: any): string {
+  return [
+    ...collectPayloadText(body),
+    ...collectPayloadText(body?.quote),
+  ]
+    .map(text => stripBoundaryMentions(String(text)))
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function appendImageWithAnalysis(
+  items: ParsedWeComContentItem[],
+  bot: WSClient,
+  image: { url?: string; aeskey?: string } | undefined,
+  question: string,
+  contextLabel: string,
+  imageAnalyzer: VisionImageAnalyzer,
+) {
+  const imageUrl = await fetchImageAsBase64(bot, image?.url || "", image?.aeskey);
+  try {
+    const analysis = await imageAnalyzer({
+      question,
+      imageUrl,
+      contextLabel,
+    });
+    if (analysis.trim()) {
+      items.push({ type: "text", text: analysis.trim() });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Image analysis failed for ${contextLabel}:`, error);
+    items.push({ type: "text", text: `【图片识别结果】\n图片识别失败：${message}。已保留原图供主模型参考。` });
+  }
+  items.push({ type: "image_url", image_url: { url: imageUrl } });
 }
 
 export function isClearSessionCommand(text: string): boolean {
@@ -225,12 +314,17 @@ export function buildHelpReply() {
 /**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
  */
-export async function parseWeComMessage(body: any, bot: WSClient): Promise<string | { type: string; text?: string; image_url?: { url: string } | string }[]> {
+export async function parseWeComMessage(
+  body: any,
+  bot: WSClient,
+  imageAnalyzer: VisionImageAnalyzer = analyzeImageForQuestion,
+): Promise<string | ParsedWeComContentItem[]> {
   const msgType = body.msgtype;
   const fromUser = body.from?.userid || "unknown";
+  const imageQuestionContext = buildImageQuestionContext(body);
   
   // 1. 解析主消息内容
-  let mainItems: any[] = [];
+  let mainItems: ParsedWeComContentItem[] = [];
   switch (msgType) {
     case MessageType.Text:
       mainItems.push({ type: "text", text: body.text.content });
@@ -238,8 +332,7 @@ export async function parseWeComMessage(body: any, bot: WSClient): Promise<strin
 
     case MessageType.Image:
       mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一张图片]` });
-      const b64Image = await fetchImageAsBase64(bot, body.image?.url, body.image?.aeskey);
-      mainItems.push({ type: "image_url", image_url: { url: b64Image } });
+      await appendImageWithAnalysis(mainItems, bot, body.image, imageQuestionContext, "主消息图片", imageAnalyzer);
       break;
 
     case MessageType.Voice:
@@ -265,12 +358,11 @@ export async function parseWeComMessage(body: any, bot: WSClient): Promise<strin
     case "mixed":
       // 图文混排
       const items = body.mixed?.msg_item || [];
-      for (const item of items) {
+      for (const [index, item] of items.entries()) {
         if (item.msgtype === "text") {
           mainItems.push({ type: "text", text: item.text?.content });
         } else if (item.msgtype === "image") {
-          const b64 = await fetchImageAsBase64(bot, item.image?.url, item.image?.aeskey);
-          mainItems.push({ type: "image_url", image_url: { url: b64 } });
+          await appendImageWithAnalysis(mainItems, bot, item.image, imageQuestionContext, `主消息图文混排第${index + 1}项`, imageAnalyzer);
         }
       }
       break;
@@ -281,22 +373,20 @@ export async function parseWeComMessage(body: any, bot: WSClient): Promise<strin
   }
 
   // 2. 解析引用内容 (Quote)
-  let quoteItems: any[] = [];
+  let quoteItems: ParsedWeComContentItem[] = [];
   if (body.quote) {
     const qType = body.quote.msgtype;
     if (qType === "text") {
       quoteItems.push({ type: "text", text: body.quote.text?.content });
     } else if (qType === "image") {
-      const b64QuoteImg = await fetchImageAsBase64(bot, body.quote.image?.url, body.quote.image?.aeskey);
-      quoteItems.push({ type: "image_url", image_url: { url: b64QuoteImg } });
+      await appendImageWithAnalysis(quoteItems, bot, body.quote.image, imageQuestionContext, "引用图片", imageAnalyzer);
     } else if (qType === "mixed") {
       const qMixedItems = body.quote.mixed?.msg_item || [];
-      for (const item of qMixedItems) {
+      for (const [index, item] of qMixedItems.entries()) {
         if (item.msgtype === "text") {
           quoteItems.push({ type: "text", text: item.text?.content });
         } else if (item.msgtype === "image") {
-          const b64QuoteMixedImg = await fetchImageAsBase64(bot, item.image?.url, item.image?.aeskey);
-          quoteItems.push({ type: "image_url", image_url: { url: b64QuoteMixedImg } });
+          await appendImageWithAnalysis(quoteItems, bot, item.image, imageQuestionContext, `引用图文混排第${index + 1}项`, imageAnalyzer);
         }
       }
     } else {
@@ -546,6 +636,15 @@ const runtimeTodoList = createRuntimeTodoList();
       const shouldStopCurrentTask = () => activeTasks.get(sessionKey) !== currentTask || currentTask.cancelled;
 
       let fullContent = "";
+      let flowControl = createDefaultFlowControl();
+      const flowControlStreamState = createFlowControlStreamState();
+      let coverNextVisibleContent = false;
+      const applyFlowControlPatch = (patch: FlowControlPatch) => {
+        flowControl = mergeFlowControl(flowControl, patch);
+        if (patch.stream?.coverPrevious || patch.stream?.mode === "replace") {
+          coverNextVisibleContent = true;
+        }
+      };
       let lastUpdateTime = 0;
       const UPDATE_INTERVAL = 2000;
       let expiredStreamFinalSent = false;
@@ -562,6 +661,9 @@ const runtimeTodoList = createRuntimeTodoList();
       };
       const safeReplyStreamNow = async (content: string, final = false) => {
         if (shouldStopCurrentTask()) return false;
+        const safeContent = stripEmptyProtocolContent(content).trim();
+        if (!safeContent && !final) return false;
+        const replyContent = safeContent || "未获取到有效回复";
         if (isStreamExpired(streamStartedAt)) {
           await saveExpiredStreamHistory();
           currentTask.cancelled = true;
@@ -578,7 +680,7 @@ const runtimeTodoList = createRuntimeTodoList();
         }
 
         try {
-          await bot.replyStream(frame, streamId, content, final);
+          await bot.replyStream(frame, streamId, replyContent, final);
           return true;
         } catch (error) {
           if (isWeComStreamExpiredError(error)) {
@@ -627,6 +729,15 @@ const runtimeTodoList = createRuntimeTodoList();
 5. owner_contact_audited：审核建议处理中是否需要提示联系相关开发人员；涉及代码缺陷、配置异常、流程实现、历史逻辑归属或需要推动修复时，必须说明已给出联系开发人员建议；如果工具列表存在 git_author_trace，只能基于最终结论实际引用的仓库、文件、方法、代码片段、symbol uid 或接口入口追溯联系人，不得使用最终未引用的候选文件，并按“与最终结论最相关的修改优先、同等相关时最新修改优先”选择开发人员线索。
 6. final_format_audited：审核过程标签和最终结论分离。
 没有证据时必须调用 runtime_todolist_update 将对应 itemId 标记为 blocked，不得直接输出最终结论。`;
+      const flowControlInstruction = `系统提示：【流程控制 JSON 协议】
+当你已经能确定下游节点是否需要继续执行某个步骤时，可以输出流程控制协议。协议必须单独放在 <flow_control>...</flow_control> 中，运行时会剥离，用户不可见。
+格式：
+<flow_control>{"next":{"runSqlAudit":false,"skipAuditItems":["execution_flow_audited","owner_contact_audited"]},"stream":{"coverPrevious":true}}</flow_control>
+字段含义：
+- next.runSqlAudit=false：当前最终回答不涉及 SQL 输出或 SQL 审核不适用，下游跳过 SQL 正确性审核；不确定时不要输出该字段，默认继续审核。
+- next.skipAuditItems：当上游已经明确判断某些后续审核节点不需要处理时，列出要跳过的 itemId；运行时会将这些节点标记为已跳过。可选值：project_scope_audited、sql_correctness_audited、evidence_audited、execution_flow_audited、owner_contact_audited、final_format_audited。只有明确不适用时才输出；如果最终回答包含 SQL 或声明 dev 校验，不能用 skipAuditItems 跳过 sql_correctness_audited。
+- stream.coverPrevious=true：下一段真实可见内容应覆盖前面已展示的阶段性流式内容；不确定时不要输出该字段，默认追加。
+只输出明确需要改变默认行为的字段，不要把 flow_control 写进最终业务结论。`;
 
       // 提取文本内容进行 Planner 分析
       let textToPlan = "";
@@ -703,10 +814,10 @@ ${hypotheses}
 * 严禁拆分关键词进行多次循环搜索。${smsTemplateEvidenceHint}`;
             
             if (typeof effectiveParsedContent === 'string') {
-              finalContentForPrompt = `${runtimeTodoInstruction}\n\n${searchPlanHint}\n\n${effectiveParsedContent}`;
+              finalContentForPrompt = `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${searchPlanHint}\n\n${effectiveParsedContent}`;
             } else if (Array.isArray(effectiveParsedContent)) {
               finalContentForPrompt = [
-                { type: 'text', text: `${runtimeTodoInstruction}\n\n${searchPlanHint}\n\n` },
+                { type: 'text', text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${searchPlanHint}\n\n` },
                 ...effectiveParsedContent.map(item => item.type === 'text' ? { ...item, text: stripBoundaryMentions(item.text || '') } : item)
               ];
             }
@@ -724,12 +835,12 @@ ${hypotheses}
       if (typeof finalContentForPrompt === 'string') {
         finalContentForPrompt = finalContentForPrompt.includes("runtime_todolist_update")
           ? finalContentForPrompt
-          : `${runtimeTodoInstruction}\n\n${finalContentForPrompt}`;
+          : `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${finalContentForPrompt}`;
       } else if (Array.isArray(finalContentForPrompt)) {
         const hasInstruction = finalContentForPrompt.some(item => item.type === "text" && item.text?.includes("runtime_todolist_update"));
         if (!hasInstruction) {
           finalContentForPrompt = [
-            { type: "text", text: `${runtimeTodoInstruction}\n\n` },
+            { type: "text", text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n` },
             ...finalContentForPrompt,
           ];
         }
@@ -740,6 +851,7 @@ ${hypotheses}
       let intermediateMessages: BaseMessage[] = [];
       const toolContextRecords: ToolContextRecord[] = [];
       let repoHints: string[] = [];
+      let recoveryAuditReason = "";
 
       try {
         startTodoItem(runtimeTodoList, "tools_loaded");
@@ -750,8 +862,9 @@ ${hypotheses}
           extractMcpProjectCandidates(config.mcpServers)
         );
         repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints);
+        const scopedEvidenceTools = scopeToolsToRepo(tools, repoHints);
         const agentTools = [
-          ...scopeToolsToRepo(tools, repoHints),
+          ...scopedEvidenceTools,
           buildRuntimeTodoTool(runtimeTodoList),
         ];
         completeTodoItem(runtimeTodoList, "tools_loaded", `tools=${agentTools.length}, repoHints=${repoHints.join(",") || "none"}`);
@@ -762,7 +875,7 @@ ${hypotheses}
           const prelude = await runSearchLoopPrelude({
             userQuestion: textToPlan,
             plannerResult,
-            tools,
+            tools: scopedEvidenceTools,
             repoHint: repoHints,
           });
 
@@ -795,6 +908,9 @@ ${hypotheses}
 
         // 工具调用累加器：用于聚合流式的 tool_call_chunks
         const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
+        const agentProgressGuard = createAgentProgressGuard({
+          maxToolResults: getMaxAgentToolResultsPerTurn(),
+        });
         const getActiveToolCalls = () => Array.from(toolCallMap.values())
           .filter(c => c.name && !c.completed)
           .map(c => `> 🔍 正在调用: ${getToolDisplay(c.name, c.args)}...`);
@@ -819,14 +935,18 @@ ${hypotheses}
         }, THINKING_HEARTBEAT_INTERVAL_MS);
         try {
           for await (const [message, metadata] of stream) {
+            const streamMetadata = metadata as AgentStreamMetadata | undefined;
             if (shouldStopCurrentTask()) {
               fullContent = "";
               break;
             }
-            if ((metadata as any)?.answerReview?.resetContent) {
+            if (streamMetadata?.answerReview?.resetContent) {
               fullContent = "";
             }
-            if ((metadata as any)?.answerReview?.progress) {
+            if (streamMetadata?.flowControl) {
+              applyFlowControlPatch(streamMetadata.flowControl);
+            }
+            if (streamMetadata?.answerReview?.progress) {
               await sendStageProgress(message.content.toString(), true);
               continue;
             }
@@ -851,6 +971,10 @@ ${hypotheses}
                 toolContextRecords.push(toolRecord);
                 toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
                 console.log(`[Tool Call Success] Name: ${entry.name}, Args: ${entry.args}, Result Size: ${String(toolMsg.content).length}`);
+                const guardDecision = agentProgressGuard.recordToolResult(toolRecord);
+                if (guardDecision.shouldStop) {
+                  throw createAgentProgressLimitError(guardDecision.reason);
+                }
               }
               continue;
             }
@@ -909,12 +1033,19 @@ ${hypotheses}
               }
 
               if (aiMsg.content) {
-                const delta = aiMsg.content.toString();
-                if (delta.length > 0) {
-                  if (fullContent && delta.startsWith(fullContent)) {
-                      fullContent = delta;
+                const extractedDelta = consumeFlowControlDelta(stripEmptyProtocolContent(aiMsg.content.toString()), flowControlStreamState);
+                if (extractedDelta.hasControl) {
+                  applyFlowControlPatch(extractedDelta.control);
+                }
+                const delta = extractedDelta.content;
+                if (delta.trim().length > 0) {
+                  if (coverNextVisibleContent) {
+                    fullContent = delta;
+                    coverNextVisibleContent = false;
+                  } else if (fullContent && delta.startsWith(fullContent)) {
+                    fullContent = delta;
                   } else {
-                      fullContent += delta;
+                    fullContent += delta;
                   }
 
                   if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
@@ -944,15 +1075,15 @@ ${hypotheses}
         blockTodoItem(runtimeTodoList, "analysis_finished", err instanceof Error ? err.message : String(err));
         
         // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
-        if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.message?.includes('Recursion limit')) {
+        if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.lc_error_code === 'AGENT_TOOL_PROGRESS_LIMIT' || err.message?.includes('Recursion limit')) {
           try {
-            console.log(`[${botConfig.name}] [Recovery] Recursion limit reached for ${body.msgid}, attempting fallback synthesis...`);
+            console.log(`[${botConfig.name}] [Recovery] Agent progress limit reached for ${body.msgid}, attempting fallback synthesis...`);
             const baseModel = await getBaseModel();
             const businessPrompt = await getBusinessPrompt(plannerResult);
 
             // 构造恢复提示词：将已有的所有中间历史（包括工具调用和结果）发给不带 tools 的大模型进行总结
             const recoveryMessages = [
-              new SystemMessage(`${businessPrompt}\n\n注意：当前任务由于逻辑过于复杂已达到执行上限。请根据下述已有的中间查询结果（包括已调用的工具返回），尽可能为用户提供一个阶段性的总结回答。如果关键信息不足，请明确告知已查到的部分，并指引用户如何提供更精确的信息以继续。`),
+              new SystemMessage(buildProgressLimitRecoverySystemPrompt(businessPrompt)),
               ...buildMessagesForCurrentTurn({
                 sessionMessages: session.messages,
                 userContent: finalContentForPrompt,
@@ -964,7 +1095,10 @@ ${hypotheses}
             ];
 
             const recoveryResponse = await baseModel.invoke(recoveryMessages);
-            fullContent = recoveryResponse.content.toString();
+            fullContent = ensureRecoverySqlAuditMarker(recoveryResponse.content.toString());
+            recoveryAuditReason = err.lc_error_code === "AGENT_TOOL_PROGRESS_LIMIT"
+              ? "工具调用达到进展守卫上限后的恢复总结"
+              : "LangGraph 递归上限后的恢复总结";
             completeTodoItem(runtimeTodoList, "analysis_finished", `recovery contentLength=${fullContent.length}`);
           } catch (recoveryErr) {
             console.error(`Recovery synthesis failed for ${body.msgid}:`, recoveryErr);
@@ -978,6 +1112,14 @@ ${hypotheses}
       }
 
       // --- Update Session History ---
+      if (fullContent) {
+        const extractedFullContent = extractFlowControl(stripEmptyProtocolContent(fullContent));
+        fullContent = extractedFullContent.content;
+        if (extractedFullContent.hasControl) {
+          flowControl = mergeFlowControl(flowControl, extractedFullContent.control);
+        }
+      }
+
       if (shouldStopCurrentTask()) {
         fullContent = "";
       }
@@ -1002,14 +1144,32 @@ ${hypotheses}
       }
 
       // 发送最终结果
-      fullContent = collapseProgressUpdates(fullContent);
+      fullContent = collapseProgressUpdates(stripEmptyProtocolContent(fullContent));
       const sqlAuditEvidence = buildSqlAuditEvidence(fullContent, toolContextRecords);
-      applySqlAuditEvidence(runtimeTodoList, sqlAuditEvidence);
+      const skipAuditItems = new Set(flowControl.next.skipAuditItems);
+      const shouldSkipSqlAudit = !flowControl.next.runSqlAudit || skipAuditItems.has("sql_correctness_audited");
+      if (shouldSkipSqlAudit && !isSqlAuditEvidenceBlocking(sqlAuditEvidence)) {
+        console.log(`[${botConfig.name}] FlowControl skipped SQL audit for ${body.msgid}: ${sqlAuditEvidence}`);
+        completeTodoItem(runtimeTodoList, "sql_correctness_audited", `flow_control: 上游声明不需要 SQL 审核；${sqlAuditEvidence}`);
+      } else {
+        applySqlAuditEvidence(runtimeTodoList, sqlAuditEvidence);
+      }
+      completeSkippedAuditItems(runtimeTodoList, flowControl.next.skipAuditItems);
+      if (recoveryAuditReason) {
+        completeRecoveryAuditItems(runtimeTodoList, {
+          question: currentQuestion,
+          answer: fullContent,
+          repoHints,
+          toolResultCount: toolContextRecords.length,
+          reason: recoveryAuditReason,
+        });
+      }
       const incompleteAuditItems = getIncompleteAuditTodoItems(runtimeTodoList);
       const auditPassed = incompleteAuditItems.length === 0;
       if (!auditPassed) {
-        console.error(`[${botConfig.name}] Runtime TodoList audit incomplete for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
-        fullContent = buildIncompleteAuditTodoMessage(incompleteAuditItems);
+        const auditFailureMessage = buildIncompleteAuditTodoMessage(incompleteAuditItems);
+        console.error(`[${botConfig.name}] Runtime TodoList audit incomplete for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}\n${auditFailureMessage}`);
+        fullContent = buildUserFacingAuditFallbackMessage(currentQuestion, incompleteAuditItems);
       }
 
       startTodoItem(runtimeTodoList, "final_checked");

@@ -41,12 +41,20 @@ const API_PATH_PATTERN = /\/api\/[A-Za-z0-9][A-Za-z0-9/_{}.-]*/i;
 const MAINTAINED_REPO_ANCHORS = [
   "wecom-agent",
   "GitNexus",
+  "oa-api",
   "oa-order",
   "oa-stock",
   "oa-after",
+  "web",
   "logistics",
   "autoTransfer",
 ];
+
+const JAVA_FILE_PATTERN = /\b[A-Z][A-Za-z0-9_$]*(?:Controller|ServiceImpl|Service|Mapper|Dao|Repository|Client|Cloud|BO|DTO|VO)?\.java\b/;
+const CAMEL_METHOD_PATTERN = /\b[a-z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+\b/;
+const CODE_SPAN_PATTERN = /`([^`\n]{2,120})`/;
+const CONFIRMED_EVIDENCE_PATTERN = /(命中|确认|入口|方法|类名|文件|接口|仓库|repo|有效工具证据|code_snippet)/;
+const BUSINESS_MESSAGE_PATTERN = /[\u4e00-\u9fa5A-Za-z0-9 ]{0,20}(?:已超过|失败|异常|错误|提示|拦截|不允许|不能|无法)[\u4e00-\u9fa5A-Za-z0-9 ]{0,20}/;
 
 function normalizeActiveMessage(text: string) {
   return text
@@ -111,9 +119,36 @@ function extractStrongAnchors(text: string) {
     ...collectPatternMatches(text, WINDOWS_PATH_PATTERN),
     ...collectPatternMatches(text, POSIX_OR_CODE_PATH_PATTERN),
     ...collectPatternMatches(text, API_PATH_PATTERN),
+    ...collectPatternMatches(text, JAVA_FILE_PATTERN),
+    ...collectPatternMatches(text, CAMEL_METHOD_PATTERN)
+      .filter(anchor => anchor.length >= 6),
     ...MAINTAINED_REPO_ANCHORS.filter(anchor => text.includes(anchor)),
   ];
   return uniqueValues(anchors.map(anchor => anchor.trim()));
+}
+
+function extractBusinessMessageAnchors(text: string) {
+  return collectPatternMatches(text, BUSINESS_MESSAGE_PATTERN)
+    .map(anchor => anchor.replace(/^[，。！？!?,;；：:\s]+|[，。！？!?,;；：:\s]+$/g, "").trim())
+    .filter(anchor => anchor.length >= 4 && anchor.length <= 60);
+}
+
+export function extractConfirmedAnchorsFromHistory(history: ConversationContextItem[]) {
+  const anchorCandidates = history.flatMap(item => {
+    const normalized = normalizeActiveMessage(item.content);
+    const codeSpanAnchors = collectPatternMatches(normalized, CODE_SPAN_PATTERN).map(match => match.replace(/^`|`$/g, ""));
+    const evidenceAnchors = CONFIRMED_EVIDENCE_PATTERN.test(normalized)
+      ? [
+        ...extractStrongAnchors(normalized),
+        ...extractBusinessMessageAnchors(normalized),
+      ]
+      : [];
+    return [...codeSpanAnchors, ...evidenceAnchors];
+  });
+
+  return uniqueValues(anchorCandidates)
+    .filter(anchor => anchor.length >= 2 && anchor.length <= 120)
+    .slice(0, 32);
 }
 
 function computeAnchorOverlap(history: ConversationContextItem[], currentQuestion: string) {
@@ -180,9 +215,14 @@ export function buildQuestionWithHistory(
 
   if (!relevantHistory) return current;
 
+  const confirmedAnchors = extractConfirmedAnchorsFromHistory(history);
+  const confirmedAnchorBlock = confirmedAnchors.length > 0
+    ? `\n\n已确认锚点清单（必须优先继承，禁止因历史摘要截断而丢弃）：\n${confirmedAnchors.map(anchor => `- ${anchor}`).join("\n")}`
+    : "";
+
   return `【历史上下文整合】
 相关历史：
-${relevantHistory}
+${relevantHistory}${confirmedAnchorBlock}
 
 当前问题：
 ${current}

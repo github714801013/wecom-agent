@@ -28,6 +28,7 @@
 | `mcpServers[]` | MCP 服务器列表 | `{"name":"gitnexus","url":"http://ip:1348/sse"}` |
 | `bots[]` | 企业微信机器人列表 | `{"name":"robot-a","botId":"${WECOM_ROBOT_A_BOT_ID}"}` |
 | `bots[].mcpHeaders` | 指定机器人对指定 MCP server 注入的 headers | `{"gitnexus":{"x-project":"project-a"}}` |
+| `tools.maxAgentToolResultsPerTurn` | 每轮 Agent 允许的证据工具结果上限，仍可用环境变量 `AGENT_MAX_TOOL_RESULTS_PER_TURN` 临时覆盖 | `64` |
 
 MCP header 合并规则：
 

@@ -3,10 +3,13 @@ import {
   applySqlAuditEvidence,
   assertTodoListComplete,
   buildIncompleteAuditTodoMessage,
+  buildUserFacingAuditFallbackMessage,
   buildProjectScopeAuditEvidence,
   buildRuntimeTodoTool,
   buildSqlAuditEvidence,
   blockTodoItem,
+  completeRecoveryAuditItems,
+  completeSkippedAuditItems,
   completeTodoItem,
   createRuntimeTodoList,
   getIncompleteAuditTodoItems,
@@ -40,6 +43,29 @@ assert.ok(
 assert.ok(
   defaultTodoList.items.some(item => item.id === "final_format_audited"),
   "默认 TodoList 必须包含最终输出格式审核"
+);
+
+const skippedAuditTodoList = createRuntimeTodoList();
+completeSkippedAuditItems(skippedAuditTodoList, [
+  "execution_flow_audited",
+  "owner_contact_audited",
+  "sql_correctness_audited",
+  "not_a_real_item",
+]);
+assert.equal(
+  skippedAuditTodoList.items.find(item => item.id === "execution_flow_audited")?.status,
+  "done",
+  "flow_control 明确跳过 execution_flow_audited 时应程序化完成该节点",
+);
+assert.equal(
+  skippedAuditTodoList.items.find(item => item.id === "owner_contact_audited")?.status,
+  "done",
+  "flow_control 明确跳过 owner_contact_audited 时应程序化完成该节点",
+);
+assert.equal(
+  skippedAuditTodoList.items.find(item => item.id === "sql_correctness_audited")?.status,
+  "pending",
+  "SQL 审核不能由通用跳过函数完成，必须走确定性 SQL 审核保护",
 );
 
 const todoList = createRuntimeTodoList([
@@ -386,6 +412,16 @@ assert.match(incompleteAuditMessage, /下一步：/);
 assert.match(incompleteAuditMessage, /dev 执行校验结果/);
 assert.match(incompleteAuditMessage, /dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构/);
 
+const userFacingScopeFallback = buildUserFacingAuditFallbackMessage(
+  "常用资产历史价显示这里的取值逻辑帮我看看",
+  getIncompleteAuditTodoItems(incompleteAuditTodoList),
+);
+assert.doesNotMatch(userFacingScopeFallback, /审核未完成/);
+assert.doesNotMatch(userFacingScopeFallback, /project_scope_audited|sql_correctness_audited|runtime_todolist_update/);
+assert.match(userFacingScopeFallback, /常用资产历史价/);
+assert.match(userFacingScopeFallback, /系统|项目|页面|菜单|截图/);
+assert.match(userFacingScopeFallback, /请补充/);
+
 const finalFormatAuditTodoList = createRuntimeTodoList();
 completeTodoItem(finalFormatAuditTodoList, "project_scope_audited", "不涉及代码范围");
 completeTodoItem(finalFormatAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
@@ -422,5 +458,39 @@ assert.match(executionFlowAuditMessage, /前置短路点/);
 assert.match(executionFlowAuditMessage, /不得反过来作为主因/);
 assert.match(executionFlowAuditMessage, /取数验证方式/);
 assert.match(executionFlowAuditMessage, /继续下一层/);
+
+const recoveryAuditTodoList = createRuntimeTodoList();
+completeTodoItem(recoveryAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
+completeRecoveryAuditItems(recoveryAuditTodoList, {
+  question: "九机物流单详情，什么情况下显示作废按钮",
+  answer: "结论：已命中 oa-pc 物流单详情页面和作废按钮判断逻辑，当前恢复总结基于已有工具证据输出。",
+  repoHints: ["oa-pc"],
+  toolResultCount: 3,
+  reason: "工具调用达到进展守卫上限后的恢复总结",
+});
+assert.equal(
+  getIncompleteAuditTodoItems(recoveryAuditTodoList).length,
+  0,
+  "恢复总结路径必须程序化补齐非 SQL 审核项，避免再次返回审核未完成",
+);
+
+const recoveryWithBlockedSqlTodoList = createRuntimeTodoList();
+blockTodoItem(
+  recoveryWithBlockedSqlTodoList,
+  "sql_correctness_audited",
+  "涉及 SQL，回答声明 dev 校验，但缺少同一条 SQL 的真实 dev 查询工具结果",
+);
+completeRecoveryAuditItems(recoveryWithBlockedSqlTodoList, {
+  question: "查询物流单 SQL",
+  answer: "已在 dev 环境对应库执行，查询不报错。\n\n```sql\nSELECT * FROM order_info LIMIT 20;\n```",
+  repoHints: ["oa-pc"],
+  toolResultCount: 0,
+  reason: "LangGraph 递归上限后的恢复总结",
+});
+assert.equal(
+  recoveryWithBlockedSqlTodoList.items.find(item => item.id === "sql_correctness_audited")?.status,
+  "blocked",
+  "恢复总结路径不能覆盖 SQL 审核阻塞项",
+);
 
 console.log("runtime todolist 验证通过");

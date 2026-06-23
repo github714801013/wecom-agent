@@ -16,14 +16,16 @@ const mockBody = {
 };
 
 const mockBot = { downloadFile: async () => ({ buffer: Buffer.from('') }) } as any;
+const mockAnalyzer = async () => "【图片识别结果】\n图片标题：美团国补订单";
 
-const result = await parseWeComMessage(mockBody, mockBot);
+const result = await parseWeComMessage(mockBody, mockBot, mockAnalyzer);
 console.log("Parsed content:", JSON.stringify(result, null, 2));
 
 const hasText = JSON.stringify(result).includes("美团国补订单");
 const hasImage = JSON.stringify(result).includes("data:image/jpeg;base64,");
+const hasVisionText = JSON.stringify(result).includes("【图片识别结果】");
 
-if (hasText && hasImage) {
+if (hasText && hasImage && hasVisionText) {
   console.log("Test PASSED");
 } else {
   console.log("Test FAILED: Mixed quote content missing parts");

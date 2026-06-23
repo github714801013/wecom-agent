@@ -7,6 +7,13 @@ import { z } from "zod";
 export const DEFAULT_CONFIG_FILE = path.resolve(process.cwd(), "config", "wecom-agent.config.json");
 
 const headerSchema = z.record(z.string(), z.string());
+const booleanConfigSchema = z.preprocess(value => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  return value;
+}, z.boolean());
 
 export const mcpServerSchema = z.object({
   name: z.string(),
@@ -31,13 +38,20 @@ const agentConfigSchema = z.object({
     recursionLimit: z.coerce.number().default(25),
     contextWindow: z.coerce.number().default(0),
   }),
+  vision: z.object({
+    enabled: booleanConfigSchema.default(true),
+    apiKey: z.string().optional(),
+    baseUrl: z.string().optional(),
+    modelName: z.string().default("gemini-3.1-pro-preview"),
+  }).default({ enabled: true, modelName: "gemini-3.1-pro-preview" }),
   mcpServers: z.array(mcpServerSchema).default([]),
   bots: z.array(botSchema).min(1),
   tools: z.object({
     allowed: z.array(z.string()).default([]),
     excluded: z.array(z.string()).default([]),
     cacheTtlMinutes: z.coerce.number().positive().default(30),
-  }).default({ allowed: [], excluded: [], cacheTtlMinutes: 30 }),
+    maxAgentToolResultsPerTurn: z.coerce.number().int().positive().default(64),
+  }).default({ allowed: [], excluded: [], cacheTtlMinutes: 30, maxAgentToolResultsPerTurn: 64 }),
 });
 
 export type McpServerConfig = z.infer<typeof mcpServerSchema>;

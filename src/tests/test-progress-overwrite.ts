@@ -134,4 +134,24 @@ assert.equal(
   "real content should overwrite previous legacy heartbeat dynamic text",
 );
 
+const emptyProtocolMarker = "[System: Empty message content sanitised to satisfy protocol]";
+
+assert.equal(
+  collapseProgressUpdates(`${emptyProtocolMarker}${emptyProtocolMarker}结论：可以取消。`),
+  "结论：可以取消。",
+  "empty protocol marker should be removed from collapsed content",
+);
+
+assert.equal(
+  buildProgressStreamContent(`${emptyProtocolMarker}${emptyProtocolMarker}`, ["> 🔍 正在调用: query..."]),
+  "> 🔍 正在调用: query...",
+  "streaming progress should not expose empty protocol marker",
+);
+
+assert.equal(
+  buildThinkingHeartbeatContent(emptyProtocolMarker, [], 0),
+  "⠋ 处理中：仍在分析中.",
+  "thinking heartbeat should not expose empty protocol marker",
+);
+
 console.log("progress overwrite 验证通过");

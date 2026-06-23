@@ -262,7 +262,7 @@ async function runTest() {
     }),
   });
 
-  assert.deepEqual(schemaWithoutRepoCalls, [{ query: "sms template" }]);
+  assert.deepEqual(schemaWithoutRepoCalls, [{ query: "sms template", repo: "oa-order" }]);
   assert.equal(extractExplicitRepoHint("只查 oa-order 短信模板来源", ["oa-order"]), "oa-order");
   assert.equal(extractExplicitRepoHint("只查 OA-ORDER 短信模板来源", ["oa-order"]), "oa-order");
   assert.equal(extractExplicitRepoHint("查询 sms template"), null);

@@ -87,6 +87,11 @@ assert.match(bugPrompt, /把自己当成程序，按代码执行顺序逐层判�
 assert.match(bugPrompt, /只输出下一跳必要取数语句/, "BUG prompt should request only next-step data query");
 assert.doesNotMatch(bugPrompt, /严格禁止输出/, "routed prompt should not load the legacy full business prompt");
 
+const flowPrompt = await getBusinessPrompt(planner("FLOW"));
+assert.match(flowPrompt, /工具调用前后的“我先查找、继续搜索、我再读取”等过程说明不要作为普通正文输出/, "base prompt should hide tool process narration");
+assert.match(flowPrompt, /页面按钮、菜单、入口显示条件类问题/, "FLOW prompt should constrain button visibility questions");
+assert.match(flowPrompt, /不要在前端文件已命中后继续跨仓库宽泛搜索/, "FLOW prompt should stop broad search after frontend file hit");
+
 const fallbackPrompt = await getBusinessPrompt();
 assert.match(fallbackPrompt, /严格禁止输出/, "unclassified fallback should keep legacy full prompt");
 

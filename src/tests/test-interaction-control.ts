@@ -56,7 +56,8 @@ code_snippet repo=oa-api filePath=oaapi-service/src/main/java/com/jiuji/oaapi/se
   },
   {
     role: "assistant" as const,
-    content: `${"已读取候选文件，继续核实中。".repeat(60)}
+    content: `已读取 checkYearPackageRepurchase 和 getYearPackageInfo 源码，但这两个方法分别处理复购提醒和商品匹配，并非"已超过复购时间"提示的直接来源。
+${"已读取候选文件，继续核实中。".repeat(60)}
 第二次检索命中了关键线索：oa-after 仓库 SmallproFilmCardServiceImpl.java 中的 repurchaseBuyTime（743行）和 repurchaseBuyExpireMsg（760行），提示文案为“贴膜 年包服务 1年2次 已超过复购时间！”。`,
   },
 ];
@@ -71,9 +72,44 @@ assert.ok(confirmedAnchors.some(anchor => anchor.includes("已超过复购时间
 
 const filmFollowup = buildQuestionWithHistory(longHistoricalEvidence, "点 立即购买按钮 提示的 重点看这个后端接口");
 assert.match(filmFollowup, /已确认锚点清单/);
+assert.match(filmFollowup, /优先锚点/);
+assert.match(filmFollowup, /旁证\/已排除锚点/);
 assert.match(filmFollowup, /SmallproFilmCardServiceImpl\.java/);
 assert.match(filmFollowup, /repurchaseBuyTime/);
 assert.match(filmFollowup, /repurchaseBuyExpireMsg/);
 assert.match(filmFollowup, /已超过复购时间/);
+assert.match(filmFollowup, /历史里标记为“关键线索、确切来源、直接来源、重点看”的内容视为本轮有效证据/);
+assert.match(filmFollowup, /不得作为主结论/);
+
+const wuliuCurlQuestion = `curl 'https://oawcf2.ch999.cn/kcApi/doSendWuLiu' \\
+ -H 'Content-Type: application/x-www-form-urlencoded' \\
+ --data-raw 'wlcount=1&pwd=B9BA924BFCBFDA49850372CA35FDC100&area=YNws3&ch999id=2761&wlCompany=shunfeng&nextAreaId=0&boxNumber=&expressCategory=&parcelValue=&wlIds=42836554&wlNum=&clientNo=' \\
+ --compressed`;
+const wuliuFollowup = buildQuestionWithHistory(
+  [
+    { role: "user", content: wuliuCurlQuestion },
+    { role: "assistant", content: "已确认接口路径和请求参数，需要继续查 doSendWuLiu 的默认顺丰产品类型。" },
+  ],
+  "这个提交顺丰物流单，默认是标快还是特快",
+);
+const wuliuAnchors = extractConfirmedAnchorsFromHistory([
+  { role: "user", content: wuliuCurlQuestion },
+  { role: "assistant", content: "已确认接口路径 https://oawcf2.ch999.cn/kcApi/doSendWuLiu 和参数 wlCompany=shunfeng、expressCategory=。" },
+]);
+assert.ok(
+  wuliuAnchors.includes("https://oawcf2.ch999.cn/kcApi/doSendWuLiu"),
+  "curl 完整 URL 必须进入强锚点",
+);
+assert.ok(
+  wuliuAnchors.includes("/kcApi/doSendWuLiu") || wuliuAnchors.includes("kcApi/doSendWuLiu"),
+  "curl URL 路径必须进入强锚点",
+);
+assert.ok(wuliuAnchors.includes("wlCompany=shunfeng"), "关键 form 参数 wlCompany 必须进入强锚点");
+assert.ok(wuliuAnchors.includes("expressCategory="), "空值 form 参数 expressCategory 必须进入强锚点");
+assert.ok(wuliuAnchors.includes("wlIds=42836554"), "物流单 ID 参数必须进入强锚点");
+assert.ok(!wuliuAnchors.some(anchor => anchor.startsWith("pwd=")), "敏感参数 pwd 不应进入强锚点");
+assert.match(wuliuFollowup, /kcApi\/doSendWuLiu/);
+assert.match(wuliuFollowup, /wlCompany=shunfeng/);
+assert.match(wuliuFollowup, /expressCategory=/);
 
 console.log("interaction control 验证通过");

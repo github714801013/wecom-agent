@@ -1,5 +1,6 @@
 import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
 import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt, extractExplicitRepoHints, extractMcpProjectCandidates, buildMessagesForCurrentTurn, scopeToolsToRepo } from "./graph.js";
+import { getMissingPriorityAnswerAnchors, repairAnswerForMissingPriorityAnchors } from "./answer-anchor-guard.js";
 import { config, type BotConfig } from "./config.js";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 import { sessionManager } from "./session-manager.js";
@@ -39,7 +40,7 @@ import {
   assertTodoListComplete,
   blockTodoItem,
   buildIncompleteAuditTodoMessage,
-  buildUserFacingAuditFallbackMessage,
+  generateUserFacingAuditFallbackMessage,
   buildRuntimeTodoTool,
   buildSqlAuditEvidence,
   completeRecoveryAuditItems,
@@ -311,6 +312,16 @@ export function buildHelpReply() {
   ].join("\n");
 }
 
+export function shouldStartEarlyProgressBeforeParse(body: any) {
+  const hasImageInMixed = (items: any[] = []) => items.some(item => item?.msgtype === "image");
+  return body?.msgtype === MessageType.Image
+    || body?.msgtype === MessageType.Video
+    || body?.msgtype === MessageType.File
+    || (body?.msgtype === "mixed" && hasImageInMixed(body?.mixed?.msg_item || []))
+    || body?.quote?.msgtype === "image"
+    || (body?.quote?.msgtype === "mixed" && hasImageInMixed(body?.quote?.mixed?.msg_item || []));
+}
+
 /**
  * 将企业微信消息解析为智能体可理解的文本描述或多模态内容
  */
@@ -451,7 +462,42 @@ export async function startBot(botConfig: BotConfig) {
       if (first) processedMsgs.delete(first);
     }
 
-    const parsedContent = await parseWeComMessage(body, bot);
+    const streamId = generateReqId("stream");
+    const streamStartedAt = Date.now();
+    const startEarlyProgress = shouldStartEarlyProgressBeforeParse(body);
+    let earlyProgressQueue = Promise.resolve();
+    let earlyProgressTimer: NodeJS.Timeout | undefined;
+    const sendEarlyProgress = (content: string) => {
+      const task = earlyProgressQueue.then(
+        () => bot.replyStream(frame, streamId, content, false),
+        () => bot.replyStream(frame, streamId, content, false),
+      ).catch(error => {
+        console.error(`[${botConfig.name}] Early progress update failed for ${body.msgid}:`, error);
+      });
+      earlyProgressQueue = task.then(() => undefined, () => undefined);
+      return task;
+    };
+
+    if (startEarlyProgress) {
+      await bot.replyStreamWithCard(frame, streamId, buildThinkingHeartbeatContent("", [], Date.now()), false, {
+        templateCard: {
+          card_type: 'text_notice',
+          main_title: { title: '任务处理中', desc: 'AI 助手正在读取消息内容...' },
+          task_id: `task_${body.msgid}`,
+        }
+      });
+      earlyProgressTimer = setInterval(() => {
+        void sendEarlyProgress(buildThinkingHeartbeatContent("", [], Date.now()));
+      }, THINKING_HEARTBEAT_INTERVAL_MS);
+    }
+
+    let parsedContent: Awaited<ReturnType<typeof parseWeComMessage>>;
+    try {
+      parsedContent = await parseWeComMessage(body, bot);
+    } finally {
+      if (earlyProgressTimer) clearInterval(earlyProgressTimer);
+      await earlyProgressQueue;
+    }
     const chatType = body.chattype; // 'single' 或 'group'
     const fromUser = body.from?.userid;
     const chatId = body.chatid;
@@ -613,8 +659,6 @@ export async function startBot(botConfig: BotConfig) {
     // --- Session Handling End ---
 
     try {
-      const streamId = generateReqId("stream");
-      const streamStartedAt = Date.now();
       const currentQuestion = typeof effectiveParsedContent === "string"
         ? stripBoundaryMentions(effectiveParsedContent)
         : extractTextContent(effectiveParsedContent as any);
@@ -624,14 +668,16 @@ const runtimeTodoList = createRuntimeTodoList();
       startTodoItem(runtimeTodoList, "message_parsed");
       completeTodoItem(runtimeTodoList, "message_parsed", `msgid=${body.msgid}, type=${body.msgtype}`);
 
-      // 发送初始进度卡片
-      await bot.replyStreamWithCard(frame, streamId, "AI 正在思考中...", false, {
-        templateCard: {
-          card_type: 'text_notice',
-          main_title: { title: '任务处理中', desc: 'AI 助手正在分析您的请求...' },
-          task_id: `task_${body.msgid}`,
-        }
-      });
+      if (!startEarlyProgress) {
+        // 发送初始进度卡片
+        await bot.replyStreamWithCard(frame, streamId, "AI 正在思考中...", false, {
+          templateCard: {
+            card_type: 'text_notice',
+            main_title: { title: '任务处理中', desc: 'AI 助手正在分析您的请求...' },
+            task_id: `task_${body.msgid}`,
+          }
+        });
+      }
 
       const shouldStopCurrentTask = () => activeTasks.get(sessionKey) !== currentTask || currentTask.cancelled;
 
@@ -1125,6 +1171,23 @@ ${hypotheses}
       }
 
       if (fullContent) {
+        const missingPriorityAnchors = typeof finalContentForPrompt === "string"
+          ? getMissingPriorityAnswerAnchors(finalContentForPrompt, fullContent)
+          : [];
+        if (missingPriorityAnchors.length > 0) {
+          try {
+            const baseModel = await getBaseModel();
+            fullContent = await repairAnswerForMissingPriorityAnchors({
+              model: baseModel,
+              questionWithHistory: finalContentForPrompt,
+              answer: fullContent,
+            });
+            completeTodoItem(runtimeTodoList, "evidence_audited", `已补齐历史优先锚点覆盖：${missingPriorityAnchors.join(", ")}`);
+          } catch (anchorRepairError) {
+            console.error(`[${botConfig.name}] Failed to repair answer priority anchors for ${body.msgid}:`, anchorRepairError);
+          }
+        }
+
         const humanLoopRequest = detectHumanLoopRequest(fullContent);
         if (humanLoopRequest) {
           const storedRequest = toStoredHumanLoopRequest(humanLoopRequest, body.msgid);
@@ -1169,7 +1232,12 @@ ${hypotheses}
       if (!auditPassed) {
         const auditFailureMessage = buildIncompleteAuditTodoMessage(incompleteAuditItems);
         console.error(`[${botConfig.name}] Runtime TodoList audit incomplete for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}\n${auditFailureMessage}`);
-        fullContent = buildUserFacingAuditFallbackMessage(currentQuestion, incompleteAuditItems);
+        const auditFallbackModel = await getBaseModel();
+        fullContent = await generateUserFacingAuditFallbackMessage({
+          question: currentQuestion,
+          items: incompleteAuditItems,
+          model: auditFallbackModel,
+        });
       }
 
       startTodoItem(runtimeTodoList, "final_checked");

@@ -12,6 +12,7 @@ import {
   completeSkippedAuditItems,
   completeTodoItem,
   createRuntimeTodoList,
+  generateUserFacingAuditFallbackMessage,
   getIncompleteAuditTodoItems,
   getIncompleteTodoItems,
   isFinalAnswerReady,
@@ -421,6 +422,60 @@ assert.doesNotMatch(userFacingScopeFallback, /project_scope_audited|sql_correctn
 assert.match(userFacingScopeFallback, /常用资产历史价/);
 assert.match(userFacingScopeFallback, /系统|项目|页面|菜单|截图/);
 assert.match(userFacingScopeFallback, /请补充/);
+assert.match(userFacingScopeFallback, /你说的“这里”具体指页面上的哪个字段、按钮、区域或截图标注/);
+
+const noDeicticScopeFallback = buildUserFacingAuditFallbackMessage(
+  "你用了哪些模型",
+  getIncompleteAuditTodoItems(incompleteAuditTodoList),
+);
+assert.match(noDeicticScopeFallback, /你用了哪些模型/);
+assert.match(noDeicticScopeFallback, /请补充以下任一信息后我继续查/);
+assert.doesNotMatch(noDeicticScopeFallback, /你说的“这里”/);
+assert.doesNotMatch(noDeicticScopeFallback, /具体指页面上的哪个字段或区域/);
+assert.match(noDeicticScopeFallback, /要核实的对象、系统、助手、项目或配置范围/);
+
+const auditFallbackModelCalls: string[] = [];
+const llmGeneratedFallback = await generateUserFacingAuditFallbackMessage({
+  question: "你用了哪些模型",
+  items: getIncompleteAuditTodoItems(incompleteAuditTodoList),
+  model: {
+    async invoke(messages) {
+      auditFallbackModelCalls.push(messages.map(message => String(message.content)).join("\n\n"));
+      return { content: "我需要确认你问的是哪个助手、哪次会话或哪个时间范围内的模型调用记录。" };
+    },
+  },
+});
+assert.equal(
+  llmGeneratedFallback,
+  "我需要确认你问的是哪个助手、哪次会话或哪个时间范围内的模型调用记录。",
+  "主路径应采用 LLM 生成的补充引导，而不是程序固定模板",
+);
+assert.equal(auditFallbackModelCalls.length, 1, "生成用户补充引导时必须调用 LLM");
+assert.match(auditFallbackModelCalls[0]!, /不使用固定模板/);
+assert.match(auditFallbackModelCalls[0]!, /不要说“你说的这里”/);
+assert.match(auditFallbackModelCalls[0]!, /你用了哪些模型/);
+
+const failedLlmGeneratedFallback = await generateUserFacingAuditFallbackMessage({
+  question: "你用了哪些模型",
+  items: getIncompleteAuditTodoItems(incompleteAuditTodoList),
+  model: {
+    async invoke() {
+      throw new Error("llm unavailable");
+    },
+  },
+});
+assert.match(failedLlmGeneratedFallback, /要核实的对象、系统、助手、项目或配置范围/);
+assert.doesNotMatch(failedLlmGeneratedFallback, /你说的“这里”/);
+
+const curlScopeFallback = buildUserFacingAuditFallbackMessage(
+  `curl 'https://oawcf2.ch999.cn/kcApi/doSendWuLiu' --data-raw 'wlCompany=shunfeng&expressCategory=&wlIds=42836554'
+这个提交顺丰物流单，默认是标快还是特快`,
+  getIncompleteAuditTodoItems(incompleteAuditTodoList),
+);
+assert.doesNotMatch(curlScopeFallback, /请补充以下任一信息/);
+assert.doesNotMatch(curlScopeFallback, /所在系统、项目、页面、菜单路径或接口地址/);
+assert.match(curlScopeFallback, /已识别到用户提供的接口地址、接口路径或请求参数锚点/);
+assert.match(curlScopeFallback, /继续围绕这些锚点检索代码入口、参数映射和下游调用/);
 
 const finalFormatAuditTodoList = createRuntimeTodoList();
 completeTodoItem(finalFormatAuditTodoList, "project_scope_audited", "不涉及代码范围");

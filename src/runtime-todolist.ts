@@ -1,4 +1,5 @@
 import { tool } from "@langchain/core/tools";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { z } from "zod";
 import { parseArgs, type ToolContextRecord } from "./tool-context-filter.js";
 
@@ -13,6 +14,10 @@ export interface RuntimeTodoItem {
 
 export interface RuntimeTodoList {
   items: RuntimeTodoItem[];
+}
+
+export interface AuditFallbackModel {
+  invoke(messages: Array<SystemMessage | HumanMessage>): Promise<{ content: unknown }>;
 }
 
 const DEFAULT_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = [
@@ -40,6 +45,8 @@ const SQL_VALIDATION_FAILURE_PATTERN = /sqlsyntaxerror|syntax\s+error|unknown\s+
 const SQL_CODE_BLOCK_PATTERN = /```sql\s*([\s\S]*?)```/giu;
 const SQL_INLINE_PATTERN = /\b(?:select|show|explain)\b[\s\S]*?(?:;|$)/gimu;
 const CODE_SCOPE_PATTERN = /项目|仓库|代码包|模块|接口|页面|入口|类名|方法名|controller|service|mapper|repo|package|GitNexus/iu;
+const CONCRETE_SCOPE_ANCHOR_PATTERN = /\bhttps?:\/\/|(?:^|[\s'"`(（])\/?(?:api|[A-Za-z][A-Za-z0-9_-]*Api)\/[A-Za-z0-9][A-Za-z0-9/_{}.-]*|(?:^|[?&\s'"`])(?:wlCompany|expressCategory|wlIds|area|ch999id|source|status|orderId|subId|id)=/iu;
+const DEICTIC_REFERENCE_PATTERN = /(?:这里|这儿|这边|这个|这个字段|该字段|该按钮|截图|图片|圈出|圈选|标注|红圈|上面|下面)/iu;
 const SQL_AUDIT_NOT_APPLICABLE = "不涉及 SQL，SQL 正确性审核不适用";
 const SQL_AUDIT_DEV_SCHEMA_MISSING = "涉及 SQL，dev 缺表，已标记代码反推结构路径";
 const SQL_AUDIT_DEV_VALIDATED = "涉及 SQL，已有真实 dev 查询工具结果支撑执行校验路径";
@@ -60,6 +67,17 @@ const AUDIT_TODO_IDS = new Set([
   "owner_contact_audited",
   "final_format_audited",
 ]);
+
+const AUDIT_FALLBACK_SYSTEM_PROMPT = `你是用户补充信息引导器，只负责把内部审核缺口转成自然、具体、最小化的用户追问。
+
+要求：
+1. 只输出发送给用户看的中文，不输出 JSON、Markdown 标题或内部审核项。
+2. 不使用固定模板；必须根据用户原问题、已知锚点和缺口生成 1 到 3 条最小补充问题。
+3. 不要出现 runtime_todolist、project_scope_audited、evidence_audited、审核未完成等内部实现词。
+4. 用户已经提供 URL、接口路径、请求参数、截图文字、字段名或日志时，不要重复要求用户再提供同类信息。
+5. 不要说“你说的这里”，除非用户问题本身确实存在需要消解的指代、截图标注或页面区域。
+6. 对“你用了哪些模型”这类问题，应优先引导确认是哪个助手、哪个环境、哪次会话、哪个时间范围或哪类调用记录，而不是询问页面字段。
+7. 如果缺口可以继续由工具自行核实，直接说明会继续围绕已给锚点核实；只有真的缺少用户侧信息时才请求补充。`;
 
 export function createRuntimeTodoList(
   items: Array<Pick<RuntimeTodoItem, "id" | "task">> = DEFAULT_RUNTIME_TODO_ITEMS
@@ -479,14 +497,46 @@ function hasAuditItem(items: RuntimeTodoItem[], id: string) {
   return items.some(item => item.id === id);
 }
 
+function buildProjectScopeFallbackRequest(question: string) {
+  const lines = [
+    "1. 要核实的对象、系统、助手、项目或配置范围。",
+    "2. 相关页面、菜单路径、接口地址、配置文件、字段名或日志关键词。",
+  ];
+  if (DEICTIC_REFERENCE_PATTERN.test(question)) {
+    lines.push("3. 你说的“这里”具体指页面上的哪个字段、按钮、区域或截图标注。");
+  } else {
+    lines.push("3. 如果问题来自截图、页面或聊天记录，请补充可见文字、URL、字段名或按钮名。");
+  }
+  return `请补充以下任一信息后我继续查：\n${lines.join("\n")}`;
+}
+
+function formatAuditFallbackItems(items: RuntimeTodoItem[]) {
+  return items.map(item => ({
+    task: item.task,
+    status: item.status,
+    evidence: item.evidence || "",
+  }));
+}
+
+function sanitizeLlmAuditFallback(content: unknown) {
+  return String(content || "")
+    .replace(/```(?:json|markdown)?/giu, "")
+    .replace(/```/gu, "")
+    .trim();
+}
+
 export function buildUserFacingAuditFallbackMessage(question: string, items: RuntimeTodoItem[]) {
   const normalizedQuestion = question.trim();
   const prefix = normalizedQuestion
     ? `针对“${normalizedQuestion}”，当前还没有足够证据直接下结论。`
     : "当前还没有足够证据直接下结论。";
+  const hasConcreteScopeAnchor = CONCRETE_SCOPE_ANCHOR_PATTERN.test(normalizedQuestion);
 
   if (hasAuditItem(items, "project_scope_audited") || hasAuditItem(items, "evidence_audited")) {
-    return `${prefix}\n\n请补充以下任一信息后我继续查：\n1. 所在系统、项目、页面、菜单路径或接口地址。\n2. 截图中的完整文字、URL、字段名或按钮/表格列名。\n3. 你说的“这里”具体指页面上的哪个字段或区域。`;
+    if (hasConcreteScopeAnchor) {
+      return `${prefix}\n\n已识别到用户提供的接口地址、接口路径或请求参数锚点，当前缺口不是“缺少接口地址”，应继续围绕这些锚点检索代码入口、参数映射和下游调用；如仍无法命中，只需要补充目标仓库或系统名。`;
+    }
+    return `${prefix}\n\n${buildProjectScopeFallbackRequest(normalizedQuestion)}`;
   }
 
   if (hasAuditItem(items, "sql_correctness_audited")) {
@@ -494,6 +544,32 @@ export function buildUserFacingAuditFallbackMessage(question: string, items: Run
   }
 
   return `${prefix}\n\n请补充系统、项目、页面、接口或截图文字，我会基于补充信息继续核实。`;
+}
+
+export async function generateUserFacingAuditFallbackMessage(input: {
+  question: string;
+  items: RuntimeTodoItem[];
+  model?: AuditFallbackModel;
+}) {
+  if (!input.model) {
+    return buildUserFacingAuditFallbackMessage(input.question, input.items);
+  }
+
+  try {
+    const response = await input.model.invoke([
+      new SystemMessage(AUDIT_FALLBACK_SYSTEM_PROMPT),
+      new HumanMessage(JSON.stringify({
+        user_question: input.question,
+        blocked_audit_items: formatAuditFallbackItems(input.items),
+        output_goal: "生成面向用户的补充信息引导，不能套固定模板。",
+      })),
+    ]);
+    const generated = sanitizeLlmAuditFallback(response.content);
+    return generated || buildUserFacingAuditFallbackMessage(input.question, input.items);
+  } catch (error) {
+    console.error("Failed to generate audit fallback with LLM:", error);
+    return buildUserFacingAuditFallbackMessage(input.question, input.items);
+  }
 }
 
 export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {

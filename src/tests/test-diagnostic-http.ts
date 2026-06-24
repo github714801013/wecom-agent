@@ -42,6 +42,19 @@ try {
   const overwrite = await overwriteResponse.json() as any;
   assert.equal(overwrite.streamContent, "已命中入口，继续核实中。\n\n> 🔍 正在调用: code_snippet...");
 
+  const thinkNoiseResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case: "progress",
+      content: "</think></think></think>已读取第 510-570 行，继续核实中。",
+    }),
+  });
+  assert.equal(thinkNoiseResponse.status, 200, "think noise evaluate endpoint should be callable");
+  const thinkNoise = await thinkNoiseResponse.json() as any;
+  assert.equal(thinkNoise.collapsed, "已读取第 510-570 行，继续核实中。");
+  assert.doesNotMatch(thinkNoise.streamContent, /<\/?think/i);
+
   const auditFallbackResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -56,8 +69,58 @@ try {
   assert.equal(auditFallback.case, "audit-fallback");
   assert.match(auditFallback.reply, /常用资产历史价/);
   assert.match(auditFallback.reply, /请补充/);
+  assert.match(auditFallback.reply, /你说的“这里”/);
   assert.doesNotMatch(auditFallback.reply, /审核未完成/);
   assert.doesNotMatch(auditFallback.reply, /project_scope_audited|runtime_todolist_update/);
+
+  const modelFallbackResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case: "audit-fallback",
+      question: "你用了哪些模型",
+      itemIds: ["project_scope_audited", "evidence_audited"],
+    }),
+  });
+  assert.equal(modelFallbackResponse.status, 200, "model fallback evaluate endpoint should be callable");
+  const modelFallback = await modelFallbackResponse.json() as any;
+  assert.match(modelFallback.reply, /你用了哪些模型/);
+  assert.match(modelFallback.reply, /要核实的对象、系统、助手、项目或配置范围/);
+  assert.doesNotMatch(modelFallback.reply, /你说的“这里”/);
+  assert.doesNotMatch(modelFallback.reply, /具体指页面上的哪个字段或区域/);
+
+  const llmModelFallbackResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case: "audit-fallback",
+      question: "你用了哪些模型",
+      itemIds: ["project_scope_audited", "evidence_audited"],
+      llmReply: "我需要确认你问的是哪个助手、哪次会话或哪个时间范围内的模型调用记录。",
+    }),
+  });
+  assert.equal(llmModelFallbackResponse.status, 200, "llm audit fallback endpoint should be callable");
+  const llmModelFallback = await llmModelFallbackResponse.json() as any;
+  assert.equal(
+    llmModelFallback.reply,
+    "我需要确认你问的是哪个助手、哪次会话或哪个时间范围内的模型调用记录。",
+    "debug audit fallback should support LLM-generated guidance",
+  );
+
+  const curlAuditFallbackResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case: "audit-fallback",
+      question: "curl 'https://oawcf2.ch999.cn/kcApi/doSendWuLiu' --data-raw 'wlCompany=shunfeng&expressCategory=&wlIds=42836554'\n这个提交顺丰物流单，默认是标快还是特快",
+      itemIds: ["project_scope_audited", "evidence_audited"],
+    }),
+  });
+  assert.equal(curlAuditFallbackResponse.status, 200, "curl audit fallback endpoint should be callable");
+  const curlAuditFallback = await curlAuditFallbackResponse.json() as any;
+  assert.match(curlAuditFallback.reply, /已识别到用户提供的接口地址、接口路径或请求参数锚点/);
+  assert.doesNotMatch(curlAuditFallback.reply, /请补充以下任一信息/);
+  assert.doesNotMatch(curlAuditFallback.reply, /所在系统、项目、页面、菜单路径或接口地址/);
 
   const questionHistoryResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
     method: "POST",
@@ -91,6 +154,30 @@ repo=oa-api filePath=oaapi-service/src/main/java/com/jiuji/oaapi/service/impl/Su
   assert.match(questionHistory.question, /repurchaseBuyTime/);
   assert.match(questionHistory.question, /repurchaseBuyExpireMsg/);
   assert.match(questionHistory.question, /立即购买按钮/);
+
+  const curlQuestionHistoryResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case: "question-history",
+      question: "这个提交顺丰物流单，默认是标快还是特快",
+      history: [
+        {
+          role: "user",
+          content: "curl 'https://oawcf2.ch999.cn/kcApi/doSendWuLiu' --data-raw 'wlCompany=shunfeng&expressCategory=&wlIds=42836554'",
+        },
+      ],
+    }),
+  });
+  assert.equal(curlQuestionHistoryResponse.status, 200, "curl question history endpoint should be callable");
+  const curlQuestionHistory = await curlQuestionHistoryResponse.json() as any;
+  assert.match(curlQuestionHistory.question, /已确认锚点清单/);
+  assert.match(curlQuestionHistory.question, /https:\/\/oawcf2\.ch999\.cn\/kcApi\/doSendWuLiu/);
+  assert.match(curlQuestionHistory.question, /kcApi\/doSendWuLiu/);
+  assert.match(curlQuestionHistory.question, /wlCompany=shunfeng/);
+  assert.match(curlQuestionHistory.question, /expressCategory=/);
+  assert.match(curlQuestionHistory.question, /wlIds=42836554/);
+  assert.doesNotMatch(curlQuestionHistory.question, /pwd=/);
 
   const askValidationResponse = await fetch("http://127.0.0.1:3011/__debug/ask", {
     method: "POST",

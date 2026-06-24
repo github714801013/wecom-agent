@@ -36,7 +36,10 @@ const COMPOUND_CONTINUE_PATTERN = /(继续|接着|往下查|继续排查|继续�
 const JIRA_KEY_PATTERN = /\b[A-Z][A-Z0-9]+-\d+\b/;
 const WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s，。！？!?,;；：:]+/;
 const POSIX_OR_CODE_PATH_PATTERN = /\b(?:src|config|test|tests)\/[^\s，。！？!?,;；：:]+/;
-const API_PATH_PATTERN = /\/api\/[A-Za-z0-9][A-Za-z0-9/_{}.-]*/i;
+const HTTP_URL_PATTERN = /\bhttps?:\/\/[^\s'"`<>，。！？!?,;；]+/i;
+const API_PATH_PATTERN = /(?:^|[\s'"`(（])((?:\/)?(?:api|[A-Za-z][A-Za-z0-9_-]*Api)\/[A-Za-z0-9][A-Za-z0-9/_{}.-]*)/i;
+const REQUEST_PARAM_PATTERN = /(?:^|[?&\s'"`，。、])([A-Za-z][A-Za-z0-9_]{1,40}=[^&\s'"`，。、]*)/i;
+const SENSITIVE_REQUEST_PARAM_PATTERN = /^(?:pwd|password|pass|token|access_token|refresh_token|secret|sign|signature|app_uuid|appidentifier)$/i;
 
 const MAINTAINED_REPO_ANCHORS = [
   "wecom-agent",
@@ -54,6 +57,9 @@ const JAVA_FILE_PATTERN = /\b[A-Z][A-Za-z0-9_$]*(?:Controller|ServiceImpl|Servic
 const CAMEL_METHOD_PATTERN = /\b[a-z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+\b/;
 const CODE_SPAN_PATTERN = /`([^`\n]{2,120})`/;
 const CONFIRMED_EVIDENCE_PATTERN = /(命中|确认|入口|方法|类名|文件|接口|仓库|repo|有效工具证据|code_snippet)/;
+const USER_REQUEST_ANCHOR_PATTERN = /(curl|https?:\/\/|--data-raw|application\/x-www-form-urlencoded)/i;
+const PRIORITY_EVIDENCE_PATTERN = /(关键线索|确切来源|直接来源|重点看|重点|最终命中|真正来源)/;
+const EXCLUDED_EVIDENCE_PATTERN = /(并非|不是|非.*直接来源|不是.*来源|已排除|无需再看|不用再看)/;
 const BUSINESS_MESSAGE_PATTERN = /[\u4e00-\u9fa5A-Za-z0-9 ]{0,20}(?:已超过|失败|异常|错误|提示|拦截|不允许|不能|无法)[\u4e00-\u9fa5A-Za-z0-9 ]{0,20}/;
 
 function normalizeActiveMessage(text: string) {
@@ -106,11 +112,35 @@ function compactText(text: string, maxLength: number) {
 
 function collectPatternMatches(text: string, pattern: RegExp) {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
-  return Array.from(text.matchAll(new RegExp(pattern.source, flags))).map(match => match[0]);
+  return Array.from(text.matchAll(new RegExp(pattern.source, flags))).map(match => match[1] ?? match[0]);
 }
 
 function uniqueValues(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function extractUrlAnchors(text: string) {
+  return collectPatternMatches(text, HTTP_URL_PATTERN).flatMap(rawUrl => {
+    try {
+      const parsedUrl = new URL(rawUrl);
+      const normalizedPath = parsedUrl.pathname.replace(/^\/+/, "");
+      return [
+        rawUrl,
+        parsedUrl.pathname,
+        normalizedPath,
+      ].filter(Boolean);
+    } catch {
+      return [rawUrl];
+    }
+  });
+}
+
+function extractRequestParamAnchors(text: string) {
+  return collectPatternMatches(text, REQUEST_PARAM_PATTERN)
+    .filter(param => {
+      const [name = ""] = param.split("=", 1);
+      return name.length > 0 && !SENSITIVE_REQUEST_PARAM_PATTERN.test(name);
+    });
 }
 
 function extractStrongAnchors(text: string) {
@@ -118,7 +148,9 @@ function extractStrongAnchors(text: string) {
     ...collectPatternMatches(text, JIRA_KEY_PATTERN),
     ...collectPatternMatches(text, WINDOWS_PATH_PATTERN),
     ...collectPatternMatches(text, POSIX_OR_CODE_PATH_PATTERN),
+    ...extractUrlAnchors(text),
     ...collectPatternMatches(text, API_PATH_PATTERN),
+    ...extractRequestParamAnchors(text),
     ...collectPatternMatches(text, JAVA_FILE_PATTERN),
     ...collectPatternMatches(text, CAMEL_METHOD_PATTERN)
       .filter(anchor => anchor.length >= 6),
@@ -133,15 +165,26 @@ function extractBusinessMessageAnchors(text: string) {
     .filter(anchor => anchor.length >= 4 && anchor.length <= 60);
 }
 
+function splitEvidenceSentences(text: string) {
+  return text
+    .split(/(?<=[。！？!?])|[\r\n]+/)
+    .map(sentence => sentence.trim())
+    .filter(Boolean);
+}
+
+function extractEvidenceAnchors(text: string) {
+  return [
+    ...extractStrongAnchors(text),
+    ...extractBusinessMessageAnchors(text),
+  ];
+}
+
 export function extractConfirmedAnchorsFromHistory(history: ConversationContextItem[]) {
   const anchorCandidates = history.flatMap(item => {
     const normalized = normalizeActiveMessage(item.content);
     const codeSpanAnchors = collectPatternMatches(normalized, CODE_SPAN_PATTERN).map(match => match.replace(/^`|`$/g, ""));
-    const evidenceAnchors = CONFIRMED_EVIDENCE_PATTERN.test(normalized)
-      ? [
-        ...extractStrongAnchors(normalized),
-        ...extractBusinessMessageAnchors(normalized),
-      ]
+    const evidenceAnchors = CONFIRMED_EVIDENCE_PATTERN.test(normalized) || USER_REQUEST_ANCHOR_PATTERN.test(normalized)
+      ? extractEvidenceAnchors(normalized)
       : [];
     return [...codeSpanAnchors, ...evidenceAnchors];
   });
@@ -149,6 +192,36 @@ export function extractConfirmedAnchorsFromHistory(history: ConversationContextI
   return uniqueValues(anchorCandidates)
     .filter(anchor => anchor.length >= 2 && anchor.length <= 120)
     .slice(0, 32);
+}
+
+function extractAnchorsBySentence(history: ConversationContextItem[], pattern: RegExp) {
+  return uniqueValues(
+    history.flatMap(item => splitEvidenceSentences(normalizeActiveMessage(item.content))
+      .filter(sentence => pattern.test(sentence))
+      .flatMap(sentence => extractEvidenceAnchors(sentence))),
+  ).slice(0, 16);
+}
+
+function buildConfirmedAnchorBlock(history: ConversationContextItem[]) {
+  const priorityAnchors = extractAnchorsBySentence(history, PRIORITY_EVIDENCE_PATTERN);
+  const excludedAnchors = extractAnchorsBySentence(history, EXCLUDED_EVIDENCE_PATTERN);
+  const confirmedAnchors = extractConfirmedAnchorsFromHistory(history)
+    .filter(anchor => !priorityAnchors.includes(anchor) && !excludedAnchors.includes(anchor));
+
+  const sections = [
+    priorityAnchors.length > 0
+      ? `优先锚点（历史已标记为关键线索，当前追问必须先看）：\n${priorityAnchors.map(anchor => `- ${anchor}`).join("\n")}`
+      : "",
+    excludedAnchors.length > 0
+      ? `旁证/已排除锚点（历史已说明不是直接来源，不得作为主结论）：\n${excludedAnchors.map(anchor => `- ${anchor}`).join("\n")}`
+      : "",
+    confirmedAnchors.length > 0
+      ? `其他已确认锚点：\n${confirmedAnchors.map(anchor => `- ${anchor}`).join("\n")}`
+      : "",
+  ].filter(Boolean);
+
+  if (sections.length === 0) return "";
+  return `\n\n已确认锚点清单（必须优先继承，禁止因历史摘要截断而丢弃）：\n${sections.join("\n")}`;
 }
 
 function computeAnchorOverlap(history: ConversationContextItem[], currentQuestion: string) {
@@ -215,10 +288,7 @@ export function buildQuestionWithHistory(
 
   if (!relevantHistory) return current;
 
-  const confirmedAnchors = extractConfirmedAnchorsFromHistory(history);
-  const confirmedAnchorBlock = confirmedAnchors.length > 0
-    ? `\n\n已确认锚点清单（必须优先继承，禁止因历史摘要截断而丢弃）：\n${confirmedAnchors.map(anchor => `- ${anchor}`).join("\n")}`
-    : "";
+  const confirmedAnchorBlock = buildConfirmedAnchorBlock(history);
 
   return `【历史上下文整合】
 相关历史：
@@ -229,5 +299,6 @@ ${current}
 
 处理要求：
 请先结合“相关历史”和“当前问题”整合成一个明确问题，再继续回答；如果当前问题明显是全新问题，只保留当前问题并忽略无关历史。
-已确认锚点必须优先继承：如果相关历史里已经确认项目、仓库、接口路径、入口文件、入口方法、类名、方法名、符号、表名或字段名，继续检索时必须优先带着这些锚点查；不要重新放宽到其它项目、其它技术栈或宽泛业务词。`;
+已确认锚点必须优先继承：如果相关历史里已经确认项目、仓库、接口路径、入口文件、入口方法、类名、方法名、符号、表名或字段名，继续检索时必须优先带着这些锚点查；不要重新放宽到其它项目、其它技术栈或宽泛业务词。
+历史里标记为“关键线索、确切来源、直接来源、重点看”的内容视为本轮有效证据，最终回答必须优先围绕这些锚点组织；历史里明确“并非直接来源、已排除”的候选只能作为旁证或排除项，不得作为主结论，除非本轮新工具证据直接证明历史判断错误。`;
 }

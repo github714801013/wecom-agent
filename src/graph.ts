@@ -389,7 +389,7 @@ function sortQueriesByKeywordPriority(queries: SearchQuery[]) {
     const leftKeywordRank = /keyword|lex|exact/i.test(left.type) ? 0 : 1;
     const rightKeywordRank = /keyword|lex|exact/i.test(right.type) ? 0 : 1;
 
-    return leftKeywordRank - rightKeywordRank || left.priority - right.priority;
+    return left.priority - right.priority || leftKeywordRank - rightKeywordRank;
   });
 }
 
@@ -782,7 +782,101 @@ export function buildMessagesForCurrentTurn(input: {
   userContent: any;
   repoHint?: string | string[] | undefined;
 }) {
-  return [...input.sessionMessages, new HumanMessage({ content: input.userContent })];
+  return [
+    ...compactSessionMessagesForGoal(input.sessionMessages, stringifyMessageContent(input.userContent), input.repoHint),
+    new HumanMessage({ content: input.userContent }),
+  ];
+}
+
+const MAX_GOAL_RELEVANT_SESSION_MESSAGES = 8;
+const MAX_COMPACT_SESSION_MESSAGE_LENGTH = 1200;
+const STRONG_GOAL_TOKEN_PATTERN = /[A-Za-z][A-Za-z0-9_$]{2,}|[\u4e00-\u9fa5]{2,}|\/[A-Za-z0-9/_{}.-]+/g;
+const NOISY_SESSION_MARKERS = [
+  "继续核实中",
+  "正在调用",
+  "处理中",
+  "已读取第",
+  "已定位候选",
+];
+const GENERIC_GOAL_TOKENS = new Set([
+  "只查",
+  "方法",
+  "调用",
+  "链路",
+  "调用链路",
+  "来源",
+  "逻辑",
+  "这个",
+  "问题",
+  "当前",
+  "分析",
+  "查看",
+  "查询",
+]);
+
+function truncateForGoalContext(text: string) {
+  const compacted = text.replace(/\s+/g, " ").trim();
+  if (compacted.length <= MAX_COMPACT_SESSION_MESSAGE_LENGTH) return compacted;
+  return `${compacted.slice(0, MAX_COMPACT_SESSION_MESSAGE_LENGTH)}...`;
+}
+
+function extractGoalTokens(text: string, repoHint?: string | string[]) {
+  const repoHints = Array.isArray(repoHint) ? repoHint : repoHint ? [repoHint] : [];
+  const tokens = [
+    ...repoHints,
+    ...Array.from(text.matchAll(STRONG_GOAL_TOKEN_PATTERN)).map(match => match[0]),
+  ]
+    .map(token => token.trim())
+    .filter(token => token.length >= 2)
+    .filter(token => !GENERIC_GOAL_TOKENS.has(token))
+    .filter(token => !NOISY_SESSION_MARKERS.some(marker => token.includes(marker)));
+
+  return Array.from(new Set(tokens)).slice(0, 80);
+}
+
+function isGoalRelevantSessionMessage(message: BaseMessage, goalTokens: string[]) {
+  const type = (message as any)._getType?.() || message.constructor.name;
+  const content = stringifyMessageContent(message.content);
+  if (!content.trim()) return false;
+  if (content.includes("【历史上下文自动压缩】") || content.includes("已确认锚点清单")) return true;
+  return goalTokens.some(token => content.includes(token));
+}
+
+export function compactSessionMessagesForGoal(
+  sessionMessages: BaseMessage[],
+  userContent: string,
+  repoHint?: string | string[] | undefined,
+) {
+  if (sessionMessages.length === 0) return [];
+
+  const goalTokens = extractGoalTokens(userContent, repoHint);
+  const selected = new Set<BaseMessage>();
+  for (const message of sessionMessages) {
+    if (isGoalRelevantSessionMessage(message, goalTokens)) {
+      selected.add(message);
+    }
+  }
+
+  const compacted = sessionMessages
+    .filter(message => selected.has(message))
+    .slice(-MAX_GOAL_RELEVANT_SESSION_MESSAGES)
+    .map(message => {
+      const content = stringifyMessageContent(message.content);
+      if (content.length <= MAX_COMPACT_SESSION_MESSAGE_LENGTH) return message;
+      if (message instanceof HumanMessage) return new HumanMessage({ content: truncateForGoalContext(content) });
+      if (message instanceof AIMessage) return new AIMessage(truncateForGoalContext(content));
+      return new SystemMessage(truncateForGoalContext(content));
+    });
+
+  if (compacted.length < sessionMessages.length) {
+    const removed = sessionMessages.length - compacted.length;
+    return [
+      new SystemMessage(`【当前目标上下文精简】已剔除 ${removed} 条与当前目标弱相关的历史消息，仅保留当前目标、最近对话、历史压缩摘要和命中锚点相关内容。后续分析必须围绕当前问题继续收敛。`),
+      ...compacted,
+    ];
+  }
+
+  return compacted;
 }
 
 function getConfiguredMaxReviewRounds() {

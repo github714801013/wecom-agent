@@ -15,9 +15,14 @@ const AGENT_PROGRESS_TAG_PATTERN = /<agent_progress>\s*([\s\S]*?)\s*<\/agent_pro
 const PROTOCOL_TAG_TOKEN_PATTERN = /<\/?(?:agent_progress|final_answer)>/gi;
 const PROTOCOL_TAG_PREFIXES = ["<agent_progress", "</agent_progress", "<final_answer", "</final_answer"];
 const EMPTY_PROTOCOL_CONTENT_PATTERN = /\[System: Empty message content sanitised to satisfy protocol\]/g;
+const THINK_BLOCK_PATTERN = /<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi;
+const THINK_TAG_TOKEN_PATTERN = /<\/?think(?:ing)?\b[^>]*>/gi;
 
 export function stripProtocolNoise(content: string): string {
-  return content.replace(EMPTY_PROTOCOL_CONTENT_PATTERN, "");
+  return content
+    .replace(EMPTY_PROTOCOL_CONTENT_PATTERN, "")
+    .replace(THINK_BLOCK_PATTERN, "")
+    .replace(THINK_TAG_TOKEN_PATTERN, "");
 }
 
 function getLastTaggedContent(content: string, pattern: RegExp): string {

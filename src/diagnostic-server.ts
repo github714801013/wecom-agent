@@ -1,6 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import { BaseMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { getMissingPriorityAnswerAnchors, repairAnswerForMissingPriorityAnchors } from "./answer-anchor-guard.js";
 import { createAgentProgressGuard, createAgentProgressLimitError } from "./agent-progress-guard.js";
 import { config } from "./config.js";
 import {
@@ -19,7 +20,11 @@ import { buildQuestionWithHistory, type ConversationContextItem } from "./intera
 import { getAllMcpTools } from "./mcp-client.js";
 import { buildProgressStreamContent, collapseProgressUpdates } from "./progress-updates.js";
 import { buildProgressLimitRecoverySystemPrompt, ensureRecoverySqlAuditMarker } from "./recovery-synthesis.js";
-import { buildUserFacingAuditFallbackMessage, type RuntimeTodoItem } from "./runtime-todolist.js";
+import {
+  buildUserFacingAuditFallbackMessage,
+  generateUserFacingAuditFallbackMessage,
+  type RuntimeTodoItem,
+} from "./runtime-todolist.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 
 const DEFAULT_DIAGNOSTIC_PORT = 3010;
@@ -102,6 +107,39 @@ export function evaluateDiagnosticCase(caseName: EvaluateCase, input: Record<str
   throw new Error(`Unsupported diagnostic case: ${caseName}`);
 }
 
+function buildDiagnosticAuditFallbackItems(input: Record<string, unknown>) {
+  const itemIds = Array.isArray(input.itemIds) && input.itemIds.length > 0
+    ? input.itemIds.map(String)
+    : ["project_scope_audited", "evidence_audited"];
+  return itemIds.map(id => ({
+    id,
+    task: id,
+    status: "blocked" as const,
+    evidence: "debug audit fallback",
+  }));
+}
+
+async function evaluateDiagnosticCaseAsync(caseName: EvaluateCase, input: Record<string, unknown>): Promise<DiagnosticResult> {
+  if (caseName !== "audit-fallback" || (!input.useLlm && typeof input.llmReply !== "string")) {
+    return evaluateDiagnosticCase(caseName, input);
+  }
+
+  const question = String(input.question || "");
+  const items = buildDiagnosticAuditFallbackItems(input);
+  const model = typeof input.llmReply === "string"
+    ? {
+      async invoke() {
+        return { content: String(input.llmReply) };
+      },
+    }
+    : await getBaseModel();
+
+  return {
+    case: "audit-fallback",
+    reply: await generateUserFacingAuditFallbackMessage({ question, items, model }),
+  };
+}
+
 function parsePositiveInteger(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -121,6 +159,16 @@ function appendAnswerContent(current: string, content: unknown) {
 function sanitizeDiagnosticAnswer(content: string) {
   const withoutEmptyProtocolContent = content.replace(/\[System: Empty message content sanitised to satisfy protocol\]/g, "");
   return extractFlowControl(collapseProgressUpdates(withoutEmptyProtocolContent)).content.trim();
+}
+
+async function repairDiagnosticAnswerIfNeeded(question: string, answer: string) {
+  if (getMissingPriorityAnswerAnchors(question, answer).length === 0) return answer;
+  const baseModel = await getBaseModel();
+  return sanitizeDiagnosticAnswer(await repairAnswerForMissingPriorityAnchors({
+    model: baseModel,
+    questionWithHistory: question,
+    answer,
+  }));
 }
 
 function normalizeDiagnosticHistory(input: unknown): ConversationContextItem[] {
@@ -247,7 +295,11 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
       }
     }
   } catch (error: any) {
-    if (error?.lc_error_code === "AGENT_TOOL_PROGRESS_LIMIT") {
+    if (
+      error?.lc_error_code === "AGENT_TOOL_PROGRESS_LIMIT"
+      || error?.lc_error_code === "GRAPH_RECURSION_LIMIT"
+      || error?.message?.includes("Recursion limit")
+    ) {
       try {
         const baseModel = await getBaseModel();
         const businessPrompt = await getBusinessPrompt(plannerResult);
@@ -267,7 +319,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
           question,
           rawQuestion,
           historyCount: diagnosticHistory.length,
-          answer: sanitizeDiagnosticAnswer(ensureRecoverySqlAuditMarker(recoveryResponse.content.toString())),
+          answer: await repairDiagnosticAnswerIfNeeded(question, sanitizeDiagnosticAnswer(ensureRecoverySqlAuditMarker(recoveryResponse.content.toString()))),
           toolResultCount: toolRecords.length,
           toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
           repoHints,
@@ -321,7 +373,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
     question,
     rawQuestion,
     historyCount: diagnosticHistory.length,
-    answer: sanitizeDiagnosticAnswer(answer),
+    answer: await repairDiagnosticAnswerIfNeeded(question, sanitizeDiagnosticAnswer(answer)),
     toolResultCount: toolRecords.length,
     toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
     repoHints,
@@ -365,17 +417,17 @@ export function startDiagnosticServer() {
     });
   });
 
-  app.get("/__debug/evaluate", (req, res) => {
+  app.get("/__debug/evaluate", async (req, res) => {
     try {
-      res.json(evaluateDiagnosticCase(normalizeCase(req.query.case), req.query));
+      res.json(await evaluateDiagnosticCaseAsync(normalizeCase(req.query.case), req.query));
     } catch (error: any) {
       res.status(400).json({ ok: false, error: error.message });
     }
   });
 
-  app.post("/__debug/evaluate", (req, res) => {
+  app.post("/__debug/evaluate", async (req, res) => {
     try {
-      res.json(evaluateDiagnosticCase(normalizeCase(req.body?.case), req.body || {}));
+      res.json(await evaluateDiagnosticCaseAsync(normalizeCase(req.body?.case), req.body || {}));
     } catch (error: any) {
       res.status(400).json({ ok: false, error: error.message });
     }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { runSearchLoopPrelude, extractExplicitRepoHint, extractExplicitRepoHints, extractMcpProjectCandidates, buildMessagesForCurrentTurn, scopeToolsToRepo } from "../graph.js";
+import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { runSearchLoopPrelude, extractExplicitRepoHint, extractExplicitRepoHints, extractMcpProjectCandidates, buildMessagesForCurrentTurn, compactSessionMessagesForGoal, scopeToolsToRepo } from "../graph.js";
 import type { CompressorInput, PlannerResult } from "../graph.js";
 
 async function runTest() {
@@ -85,6 +85,52 @@ async function runTest() {
   assert.match(prelude, /sms template/);
   assert.match(prelude, /sendSms 调用证据/);
   assert.doesNotMatch(prelude, /sms template 缺少发送调用/);
+
+  const priorityCalls: any[] = [];
+  await runSearchLoopPrelude({
+    userQuestion: "点立即购买按钮提示已超过复购时间，重点看后端接口",
+    plannerResult: {
+      ...plannerResult,
+      queries: [
+        { query: "年包 复购 到期 消息 推送", type: "keyword", priority: 2, reason: "业务扩展" },
+        { query: "SmallproFilmCardServiceImpl repurchaseBuyExpireMsg", type: "symbol", priority: 1, reason: "历史关键线索" },
+      ],
+    },
+    tools: [{
+      name: "gitnexus_query",
+      description: "Search code by query",
+      schema: { shape: { query: {} } },
+      invoke: async (args: any) => {
+        priorityCalls.push(args);
+        return { filePath: "SmallproFilmCardServiceImpl.java", content: "repurchaseBuyExpireMsg 关键证据" };
+      },
+    }],
+    compressor: async (input: CompressorInput) => ({
+      status: "ok",
+      intent: "FLOW",
+      partial: false,
+      compressed_sections: input.search_results.map((item, index) => ({
+        section_id: `p${index}`,
+        file_path: item.file_path || "",
+        symbol: "",
+        kind: "code",
+        lines: "",
+        score: 1,
+        reason: "命中历史关键线索",
+        anchors: [],
+        content: item.content,
+        merged_from: [item.id],
+      })),
+      call_chain: [],
+      key_evidence: input.search_results.map(item => item.content),
+      dropped: [],
+      missing_info: [],
+      warnings: [],
+      errors: [],
+      budget: { input_est: 0, output_est: 0, target: 1000, mode: "balanced" },
+    }),
+  });
+  assert.equal(priorityCalls[0].query, "SmallproFilmCardServiceImpl repurchaseBuyExpireMsg");
 
   const nonQueryToolCalls: any[] = [];
   const skippedPrelude = await runSearchLoopPrelude({
@@ -341,9 +387,41 @@ async function runTest() {
     userContent: "只查 oa-order 短信模板来源",
     repoHint: "oa-order",
   });
-  assert.equal(currentTurnMessages.length, 3);
-  assert.equal(currentTurnMessages[0]?.content, "上一轮只查 oa-after");
-  assert.equal(currentTurnMessages[2]?.content, "只查 oa-order 短信模板来源");
+  const currentTurnText = currentTurnMessages.map(message => String(message.content)).join("\n");
+  assert.equal(currentTurnMessages[currentTurnMessages.length - 1]?.content, "只查 oa-order 短信模板来源");
+  assert.match(currentTurnText, /当前目标上下文精简/);
+  assert.doesNotMatch(currentTurnText, /上一轮只查 oa-after/);
+
+  const compactedSession = compactSessionMessagesForGoal(
+    [
+      new HumanMessage("常用资产历史价取值逻辑"),
+      new AIMessage("历史价来自 asset_price 表，这条和当前目标无关"),
+      new HumanMessage("submitFilmYearOrder 这个方法调用链路"),
+      new AIMessage("已确认 submitFilmYearOrder 位于 ShellFilmServiceImpl.java"),
+      new HumanMessage("另一个完全无关的问题"),
+      new AIMessage("无关回答"),
+    ],
+    "submitFilmYearOrder 这个方法调用链路",
+  );
+  const compactedText = compactedSession.map(message => String(message.content)).join("\n");
+  assert.match(compactedText, /当前目标上下文精简/);
+  assert.match(compactedText, /submitFilmYearOrder/);
+  assert.match(compactedText, /ShellFilmServiceImpl\.java/);
+  assert.doesNotMatch(compactedText, /asset_price/);
+
+  const compactedCurrentTurn = buildMessagesForCurrentTurn({
+    sessionMessages: [
+      new HumanMessage("常用资产历史价取值逻辑"),
+      new AIMessage("历史价来自 asset_price 表，这条和当前目标无关"),
+      new AIMessage("已确认 submitFilmYearOrder 位于 ShellFilmServiceImpl.java"),
+    ],
+    userContent: "submitFilmYearOrder 这个方法调用链路",
+  });
+  const compactedCurrentTurnText = compactedCurrentTurn.map(message => String(message.content)).join("\n");
+  assert.match(compactedCurrentTurnText, /submitFilmYearOrder/);
+  assert.match(compactedCurrentTurnText, /ShellFilmServiceImpl\.java/);
+  assert.doesNotMatch(compactedCurrentTurnText, /asset_price/);
+
   console.log("[SUCCESS] search loop prelude verified");
 }
 

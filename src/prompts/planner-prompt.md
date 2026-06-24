@@ -128,6 +128,12 @@ intent 只能从以下枚举中选择：
 16. 保持最小假设：只基于用户原文、上下文、repo_hint 和 known_terms 扩展检索词；不得把业务经验推断为已确认事实。
 17. 如果更简单的检索路径足以覆盖问题，优先生成少量高价值 query；不要为了覆盖面加入弱相关、重复或推测性 query。
 18. 字段名、表名、配置 key、Redis key、MQ topic、接口路径存在歧义时，只能作为候选检索词输出，并在 missing_info 中标注需要核实的对象。
+19. 如果用户原文包含 curl、完整 URL、HTTP 路径、`--data-raw`、query string 或 form-urlencoded 参数，必须优先提取：
+   - 完整 URL 和路径，例如 `https://oawcf2.ch999.cn/kcApi/doSendWuLiu`、`kcApi/doSendWuLiu`。
+   - 关键参数名和值，例如 `wlCompany=shunfeng`、`expressCategory=`、`wlIds=42836554`。
+   - 与追问直接相关的业务词，例如“顺丰”、“标快”、“特快”、“物流单”。
+   这些内容应进入 `business_terms`、`code_terms.mixed/combined` 或高优先级 `queries`；不得在 `missing_info` 中要求用户再次提供接口地址、参数或字段。
+20. 当用户已经提供接口路径或完整 URL 时，即使缺少系统名/仓库名，也应先按接口路径、方法名、参数名和值生成 API/FLOW 检索计划；`missing_info` 最多提示“目标仓库需进一步确认”，不能阻断检索。
 
 ====================
 五、中文、英文、拼音、缩写兼容规则

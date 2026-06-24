@@ -154,4 +154,16 @@ assert.equal(
   "thinking heartbeat should not expose empty protocol marker",
 );
 
+assert.equal(
+  collapseProgressUpdates("</think></think></think>已读取第 510-570 行，继续核实中。"),
+  "已读取第 510-570 行，继续核实中。",
+  "repeated closing think tags should be stripped from visible progress",
+);
+
+assert.equal(
+  collapseProgressUpdates("<think>内部思考过程不要展示</think>结论：submitFilmYearOrder 调用链路如下。"),
+  "结论：submitFilmYearOrder 调用链路如下。",
+  "think blocks should be stripped from visible answer",
+);
+
 console.log("progress overwrite 验证通过");

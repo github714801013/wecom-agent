@@ -1,4 +1,4 @@
-import { parseWeComMessage } from "../wecom-adapter.js";
+import { parseWeComMessage, shouldStartEarlyProgressBeforeParse } from "../wecom-adapter.js";
 import type { VisionAnalysisInput } from "../vision-analyzer.js";
 
 function assertTrue(condition: boolean, message: string) {
@@ -46,6 +46,7 @@ assertTrue(mixedResultText.includes("data:image/jpeg;base64,"), "解析结果应
 assertTrue(Boolean(mixedAnalyzerInput), "mixed 图片应调用图片识别器");
 assertTrue(mixedAnalyzerInput?.question.includes("常用资产历史价显示这里的取值逻辑") === true, "图片识别器应拿到当前用户提问上下文");
 assertTrue(mixedAnalyzerInput?.contextLabel === "主消息图文混排第2项", "mixed 图片应带主消息图文上下文标识");
+assertTrue(shouldStartEarlyProgressBeforeParse(mixedBody), "主消息图文混排图片应提前发送处理中反馈");
 
 const quoteBody = {
   msgid: "quote-image",
@@ -67,6 +68,14 @@ assertTrue(quoteResultText.includes("【图片识别结果】"), "引用图片�
 assertTrue(Boolean(quoteAnalyzerInput), "引用图片应调用图片识别器");
 assertTrue(quoteAnalyzerInput?.question.includes("圈出来的按钮是什么条件显示") === true, "引用图片识别器应拿到当前主消息问题");
 assertTrue(quoteAnalyzerInput?.contextLabel === "引用图片", "引用图片应带引用上下文标识");
+assertTrue(shouldStartEarlyProgressBeforeParse(quoteBody), "引用图片应提前发送处理中反馈");
+
+assertTrue(
+  !shouldStartEarlyProgressBeforeParse({ msgtype: "text", text: { content: "帮助" } }),
+  "纯文本消息不应提前插入处理中反馈",
+);
+assertTrue(shouldStartEarlyProgressBeforeParse({ msgtype: "file", file: { filename: "a.pdf" } }), "文件消息应提前发送处理中反馈");
+assertTrue(shouldStartEarlyProgressBeforeParse({ msgtype: "video", video: { url: "https://example.com/a.mp4" } }), "视频消息应提前发送处理中反馈");
 
 const failingAnalyzer = async () => {
   throw new Error("vision unavailable");

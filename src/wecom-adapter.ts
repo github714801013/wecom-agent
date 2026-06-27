@@ -1388,7 +1388,10 @@ ${hypotheses}
       } else {
         // 兜底：LLM 未走 human_loop JSON 协议，但输出的是提问/澄清类内容，
         // 转成 Human Loop 暂停等用户补充，而不是追加 notice 直接发送终止。
-        const clarificationRequest = detectClarificationContent(fullContent, currentQuestion);
+        // 防死循环：如果当前是 Human Loop 恢复后的轮次（resumeCount > 0），说明用户刚补充过，
+        // 不再兜底转 Human Loop，而是追加检索提示强制 AI 继续查代码。
+        const isResumeTurn = (activePendingHumanLoop?.resumeCount ?? 0) > 0;
+        const clarificationRequest = isResumeTurn ? null : detectClarificationContent(fullContent, currentQuestion);
         if (clarificationRequest) {
           console.log(`[${botConfig.name}] Clarification content detected without human_loop protocol, converting to Human Loop for ${body.msgid}`);
           const storedClarification = toStoredHumanLoopRequest(clarificationRequest, body.msgid);

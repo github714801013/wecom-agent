@@ -181,12 +181,23 @@ export function isAmbiguousNewTopicWhilePending(text: string) {
     || /[？?]$/.test(normalized);
 }
 
-// 兜底拦截：LLM 用自然语言提问/要求补充信息，但没输出 human_loop JSON 协议时，
-// 识别这类内容并构造 clarification HumanLoopRequest，让会话进入 Human Loop 暂停，
-// 而不是被当成"不完整最终答案"追加 notice 直接发送后终止。
-// 仅在内容不含 human_loop/humanLoop JSON 标记时生效，避免和 detectHumanLoopRequest 重复处理。
-const CLARIFICATION_PATTERN = /(?:请(?:补充|确认|提供|告知|回复|说明)|想请|需要你|是否能|是否是|具体(?:是指|是)|还是(?:指|是)|能不能|可以吗|麻烦你)[\s\S]{2,}/u;
-const QUESTION_DOMINANT_PATTERN = /[？?]/u;
+// 兜底拦截：LLM 未输出 human_loop JSON 协议，却以自然语言向用户提问时，
+// 仅当该提问属于"真正的用户意图二选一澄清"（A 还是 B、是所有还是个别、是这个还是那个）才触发，
+// 让会话进入 Human Loop 暂停。其余"请补充信息/麻烦确认业务细节/请告知"等应当自行检索的内容一律放行，
+// 避免 AI 反复向用户索要信息而不去查代码。
+//
+// 判定策略：白名单（意图二选一结构）命中 + 不在黑名单（应自查的补充类话术）内。
+
+// 白名单：真正的用户意图二选一/范围界定型问句。
+//   1) "A还是B" 二选一句式
+//   2) "是所有...还是个别/特定..." 范围界定
+//   3) "你说的X是指A还是B" / "具体是指A还是B"
+const CLARIFICATION_WHITELIST =
+  /还是.{0,40}(还是|个别|特定|某些|某些情况|部分)|是所有.{0,30}还是.{0,20}(个别|特定|部分|某些)|具体(?:是指|是).{0,30}还是/u;
+
+// 黑名单：应让 LLM 自行检索/判断，不应弹给用户的补充类话术。
+const SELF_RESEARCH_BLACKLIST =
+  /请(?:补充|提供|告知|回复|说明|提供一点|补充一点|补充一点信息|提供一点信息)|麻烦(?:补充|确认|提供|告知)|想请你?(?:补充|提供|确认|告知)|需要你(?:补充|提供|确认|告知)|能否(?:补充|提供|确认|告知)|可以(?:补充|提供|确认|告知)/u;
 
 export function detectClarificationContent(
   text: string,
@@ -197,9 +208,10 @@ export function detectClarificationContent(
   // 已含 human_loop JSON 协议标记的交给 detectHumanLoopRequest 处理
   if (normalized.includes("human_loop") || normalized.includes("humanLoop")) return null;
 
-  const hasClarificationCue = CLARIFICATION_PATTERN.test(normalized);
-  const hasQuestionMark = QUESTION_DOMINANT_PATTERN.test(normalized);
-  if (!hasClarificationCue && !hasQuestionMark) return null;
+  // 仅当命中白名单（真正的二选一/范围澄清），且不在黑名单（应自查的补充类话术）时才触发。
+  const isGenuineClarification = CLARIFICATION_WHITELIST.test(normalized);
+  const isSelfResearch = SELF_RESEARCH_BLACKLIST.test(normalized);
+  if (!isGenuineClarification || isSelfResearch) return null;
 
   return {
     reason: "clarification_required",
@@ -208,7 +220,7 @@ export function detectClarificationContent(
     contextSnapshot: {
       userQuestion,
       knownFacts: [],
-      missingFacts: ["LLM 未走 human_loop 协议，以自然语言向用户提问，需要用户补充澄清"],
+      missingFacts: ["LLM 未走 human_loop 协议，以自然语言提出用户意图二选一澄清问题，需要用户明确选择"],
     },
   };
 }

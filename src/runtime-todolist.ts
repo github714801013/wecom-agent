@@ -663,6 +663,18 @@ export function summarizeTodoList(todoList: RuntimeTodoList) {
     .join("; ");
 }
 
+// 面向用户展示的步骤清单渲染：done 打 ✓，未完成用心跳帧图标表示进行中。
+// 心跳帧由外部传入（基于当前时间计算），保证和全局心跳动画同步。
+export function renderTodoStepsForHeartbeat(todoList: RuntimeTodoList, heartbeatFrame: string) {
+  if (todoList.items.length === 0) return "";
+  const lines = todoList.items.map(item => {
+    const done = item.status === "done";
+    const marker = done ? "✓" : heartbeatFrame;
+    return `${marker} ${item.task}`;
+  });
+  return `【规划步骤】\n${lines.join("\n")}`;
+}
+
 function getAuditTodoFailureGuide(item: RuntimeTodoItem) {
   const baseReason = item.status === "blocked"
     ? item.evidence || "模型主动标记该审核项阻塞，但未说明原因"

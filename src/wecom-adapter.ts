@@ -16,7 +16,7 @@ import {
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
-import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, stripProtocolNoise } from "./progress-updates.js";
+import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, getProcessingFrame, stripProtocolNoise } from "./progress-updates.js";
 import {
   consumeFlowControlDelta,
   createDefaultFlowControl,
@@ -73,6 +73,7 @@ import {
   hasTodoItem,
   isFinalAnswerReady,
   isSqlAuditEvidenceBlocking,
+  renderTodoStepsForHeartbeat,
   syncRuntimeAuditTodoPlan,
   startTodoItem,
   summarizeTodoList,
@@ -848,22 +849,25 @@ const runtimeTodoList = createRuntimeTodoList();
         clearInterval(heartbeatTimer);
         heartbeatTimer = undefined;
       };
-      heartbeatTimer = setInterval(() => {
-        if (heartbeatInFlight || shouldStopCurrentTask()) return;
-        const now = Date.now();
-        if (now - lastHeartbeatTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
-        heartbeatInFlight = true;
+     heartbeatTimer = setInterval(() => {
+       if (heartbeatInFlight || shouldStopCurrentTask()) return;
+       const now = Date.now();
+       if (now - lastHeartbeatTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
+       heartbeatInFlight = true;
+        const heartbeatContent = buildThinkingHeartbeatContent(fullContent, getActiveToolCalls(), now);
+        const todoSteps = renderTodoStepsForHeartbeat(runtimeTodoList, getProcessingFrame(now));
+        const heartbeatWithSteps = todoSteps ? `${heartbeatContent}\n\n${todoSteps}` : heartbeatContent;
         void safeReplyStream(
-          buildThinkingHeartbeatContent(fullContent, getActiveToolCalls(), now),
+          heartbeatWithSteps,
           false,
         ).then(sent => {
-          if (sent) lastHeartbeatTime = Date.now();
-        }).catch(error => {
-          console.error(`[${botConfig.name}] Thinking heartbeat failed for ${body.msgid}:`, error);
-        }).finally(() => {
-          heartbeatInFlight = false;
-        });
-      }, THINKING_HEARTBEAT_INTERVAL_MS);
+         if (sent) lastHeartbeatTime = Date.now();
+       }).catch(error => {
+         console.error(`[${botConfig.name}] Thinking heartbeat failed for ${body.msgid}:`, error);
+       }).finally(() => {
+         heartbeatInFlight = false;
+       });
+     }, THINKING_HEARTBEAT_INTERVAL_MS);
 
       // --- Planner Logic Start ---
       let plannerResult = null;
@@ -923,7 +927,12 @@ Human Loop 严格门槛：所有可由 LLM 工具、代码检索、调用链、�
               plannerIntent: plannerResult.intent,
               secondaryIntents: plannerResult.secondary_intents,
             });
-            await sendStageProgress("已完成问题规划，正在整理检索词和候选方向，继续核实中。", true);
+           await sendStageProgress("已完成问题规划，正在整理检索词和候选方向，继续核实中。", true);
+            // 规划完成后立即展示步骤清单，已完成打 ✓，未完成的后续由心跳持续更新
+            const planSteps = renderTodoStepsForHeartbeat(runtimeTodoList, getProcessingFrame(Date.now()));
+            if (planSteps) {
+              await sendStageProgress(planSteps, true);
+            }
             const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
             

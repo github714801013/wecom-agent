@@ -11,6 +11,7 @@ import {
   buildHumanLoopReply,
   buildHumanLoopResumeContent,
   detectHumanLoopRequest,
+  detectClarificationContent,
   isAmbiguousNewTopicWhilePending,
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
@@ -1385,9 +1386,20 @@ ${hypotheses}
       if (isFinalAnswerReady(fullContent)) {
         completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}`);
       } else {
-        console.error(`[${botConfig.name}] Runtime TodoList blocked for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
-        fullContent = appendIncompleteFinalNotice(fullContent);
-        completeTodoItem(runtimeTodoList, "final_checked", "sent incomplete-answer notice with preserved content");
+        // 兜底：LLM 未走 human_loop JSON 协议，但输出的是提问/澄清类内容，
+        // 转成 Human Loop 暂停等用户补充，而不是追加 notice 直接发送终止。
+        const clarificationRequest = detectClarificationContent(fullContent, currentQuestion);
+        if (clarificationRequest) {
+          console.log(`[${botConfig.name}] Clarification content detected without human_loop protocol, converting to Human Loop for ${body.msgid}`);
+          const storedClarification = toStoredHumanLoopRequest(clarificationRequest, body.msgid);
+          sessionManager.setPendingHumanLoop(sessionKey, storedClarification);
+          fullContent = buildHumanLoopReply(storedClarification);
+          completeTodoItem(runtimeTodoList, "final_checked", "converted clarification content to human loop");
+        } else {
+          console.error(`[${botConfig.name}] Runtime TodoList blocked for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
+          fullContent = appendIncompleteFinalNotice(fullContent);
+          completeTodoItem(runtimeTodoList, "final_checked", "sent incomplete-answer notice with preserved content");
+        }
       }
       if (auditPassed) {
         assertTodoListComplete(runtimeTodoList);

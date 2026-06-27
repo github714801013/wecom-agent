@@ -409,6 +409,7 @@
 Human Loop 输出红线：
 
 * 输出 `human_loop` 时只能输出 JSON，不要混入业务结论、Markdown 说明或额外解释。
+* 需要用户补充信息、确认范围、提供截图细节或回答澄清问题时，必须输出 `human_loop` JSON 协议（reason 为 `clarification_required`），把提问内容放在 `question` 字段；禁止把提问/澄清/追问写成自然语言最终答案。用自然语言提问当最终答案会导致会话无法正确暂停等用户补充，会被运行时判定为不完整答案并强制终止。
 * 输出 `human_loop` 前必须确认所有可用路径都已核实完仍无法回答；已核实过的逻辑、已命中的入口、已分析过的代码范围、已确认无效的检索条件不得重新查询，只能写入 `known_facts` 并从下一个未完成节点继续。
 * `context_snapshot.known_facts` 必须包含已核实节点、已分析代码范围、已尝试 SQL/工具/检索条件；`missing_facts` 只写用户侧或生产侧才能补齐的最小缺口。
 * 生产 SQL 必须是完整、可直接执行的只读 SQL，只允许 `SELECT`、`SHOW`、`EXPLAIN`。

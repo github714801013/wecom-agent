@@ -1026,7 +1026,8 @@ ${hypotheses}
 
       // 记录流式过程中的所有消息，用于容错恢复
       try {
-        if (shouldUseDirectEvidenceFastPath(currentQuestion)) {
+        // 快路径只看用户本轮原始输入，避免拼接历史 AI 输出（含"原因分析/调用链/代码位置"等 section）误触发跳过工具加载。
+        if (shouldUseDirectEvidenceFastPath(originalUserQuestion)) {
           startTodoItem(runtimeTodoList, "tools_loaded");
           completeTodoItem(runtimeTodoList, "tools_loaded", "direct evidence fast path: skipped MCP tool loading");
           startTodoItem(runtimeTodoList, "analysis_finished");

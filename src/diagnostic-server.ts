@@ -26,6 +26,12 @@ import {
   type RuntimeTodoItem,
 } from "./runtime-todolist.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
+import {
+  buildDirectEvidenceFastPathInstruction,
+  buildDirectEvidenceRuntimeInstruction,
+  hasDirectEvidenceAnchors,
+  shouldUseDirectEvidenceFastPath,
+} from "./direct-evidence.js";
 
 const DEFAULT_DIAGNOSTIC_PORT = 3010;
 
@@ -200,8 +206,6 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
 
   const maxToolResults = parsePositiveInteger(input.maxToolResults, config.tools.maxAgentToolResultsPerTurn);
   const recursionLimit = parsePositiveInteger(input.recursionLimit, config.llm.recursionLimit);
-  const plannerResult = await runPlanner(question);
-  const tools = await getAllMcpTools(botConfig);
   const requestedRepoHints = Array.isArray(input.repoHints)
     ? input.repoHints.map(String).filter(Boolean)
     : typeof input.repoHint === "string" && input.repoHint.trim()
@@ -209,8 +213,33 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
       : [];
   const explicitRepoHints = extractExplicitRepoHints(question, extractMcpProjectCandidates(config.mcpServers));
   const repoHints = requestedRepoHints.length > 0 ? requestedRepoHints : explicitRepoHints;
+  const plannerResult = await runPlanner(question);
+  if (shouldUseDirectEvidenceFastPath(question)) {
+    const businessPrompt = await getBusinessPrompt(plannerResult);
+    const baseModel = await getBaseModel();
+    const response = await baseModel.invoke([
+      new SystemMessage(`${businessPrompt}\n\n${buildDirectEvidenceFastPathInstruction()}`),
+      new HumanMessage(question),
+    ]);
+    return {
+      ok: true,
+      question,
+      rawQuestion,
+      historyCount: diagnosticHistory.length,
+      answer: sanitizeDiagnosticAnswer(String(response.content || "")),
+      toolResultCount: 0,
+      toolNames: [],
+      repoHints,
+      maxToolResults,
+      recursionLimit,
+      plannerIntent: plannerResult?.intent,
+      plannerQueries: plannerResult?.queries,
+    };
+  }
+  const tools = await getAllMcpTools(botConfig);
   const scopedTools = scopeToolsToRepo(tools, repoHints);
   const prelude = plannerResult
+    && !hasDirectEvidenceAnchors(question)
     ? await runSearchLoopPrelude({
       userQuestion: question,
       plannerResult,
@@ -220,6 +249,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
     : "";
   const userContent = [
     prelude,
+    hasDirectEvidenceAnchors(question) ? buildDirectEvidenceRuntimeInstruction() : "",
     "请基于工具证据直接给出最终结论；不要输出阶段性处理话术。",
     question,
   ].filter(Boolean).join("\n\n");

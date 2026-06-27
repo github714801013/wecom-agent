@@ -20,6 +20,7 @@ export const mcpServerSchema = z.object({
   url: z.string(),
   type: z.enum(["sse", "stdio"]).default("sse"),
   headers: headerSchema.default({}),
+  headerProfiles: z.record(z.string(), headerSchema).default({}),
 });
 
 export const botSchema = z.object({
@@ -28,6 +29,7 @@ export const botSchema = z.object({
   secret: z.string(),
   wsUrl: z.string().default("wss://openws.work.weixin.qq.com"),
   mcpHeaders: z.record(z.string(), headerSchema).default({}),
+  defaultMcpHeaderCommand: z.string().regex(/^\/[A-Za-z0-9_-]+$/).optional(),
 });
 
 const agentConfigSchema = z.object({

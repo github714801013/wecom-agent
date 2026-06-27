@@ -25,10 +25,13 @@ const clearHistoryTool = {
   }
 };
 
-export function buildMcpHeaders(server: McpServerConfig, bot?: BotConfig) {
+export type McpHeaderOverrides = Record<string, Record<string, string>>;
+
+export function buildMcpHeaders(server: McpServerConfig, bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {
   return {
     ...server.headers,
     ...(bot?.mcpHeaders?.[server.name] || {}),
+    ...(headerOverrides[server.name] || {}),
   };
 }
 
@@ -40,8 +43,8 @@ type McpToolsCacheEntry = {
   pending?: Promise<McpTool[]>;
 };
 
-export function buildMcpToolsCacheKey(bot?: BotConfig) {
-  return `${bot?.botId || "__default__"}:${JSON.stringify(bot?.mcpHeaders || {})}`;
+export function buildMcpToolsCacheKey(bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {
+  return `${bot?.botId || "__default__"}:${JSON.stringify(bot?.mcpHeaders || {})}:${JSON.stringify(headerOverrides)}`;
 }
 
 export function getMcpToolsCacheTtlMs(cacheTtlMinutes = config.tools.cacheTtlMinutes) {
@@ -87,7 +90,7 @@ export function createMcpToolsCache(ttlMs: number, now = () => Date.now()) {
 
 const mcpToolsCache = createMcpToolsCache(getMcpToolsCacheTtlMs());
 
-async function loadFreshMcpTools(bot?: BotConfig) {
+async function loadFreshMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {
   const allTools = [];
 
   for (const server of config.mcpServers) {
@@ -96,7 +99,7 @@ async function loadFreshMcpTools(bot?: BotConfig) {
       
       let transport;
       if (server.type === "sse") {
-        const headers = buildMcpHeaders(server, bot);
+        const headers = buildMcpHeaders(server, bot, headerOverrides);
         const transportInit = Object.keys(headers).length > 0 ? { headers } as any : undefined;
         transport = new SSEClientTransport(new URL(server.url), {
           requestInit: transportInit,
@@ -146,6 +149,6 @@ async function loadFreshMcpTools(bot?: BotConfig) {
   return filteredTools;
 }
 
-export async function getAllMcpTools(bot?: BotConfig) {
-  return mcpToolsCache.get(buildMcpToolsCacheKey(bot), () => loadFreshMcpTools(bot));
+export async function getAllMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {
+  return mcpToolsCache.get(buildMcpToolsCacheKey(bot, headerOverrides), () => loadFreshMcpTools(bot, headerOverrides));
 }

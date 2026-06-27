@@ -68,8 +68,8 @@ try {
   const auditFallback = await auditFallbackResponse.json() as any;
   assert.equal(auditFallback.case, "audit-fallback");
   assert.match(auditFallback.reply, /常用资产历史价/);
-  assert.match(auditFallback.reply, /请补充/);
-  assert.match(auditFallback.reply, /你说的“这里”/);
+  assert.doesNotMatch(auditFallback.reply, /请补充以下任一信息后我继续查/);
+  assert.match(auditFallback.reply, /请说明你指的具体字段、按钮或区域/);
   assert.doesNotMatch(auditFallback.reply, /审核未完成/);
   assert.doesNotMatch(auditFallback.reply, /project_scope_audited|runtime_todolist_update/);
 
@@ -85,7 +85,7 @@ try {
   assert.equal(modelFallbackResponse.status, 200, "model fallback evaluate endpoint should be callable");
   const modelFallback = await modelFallbackResponse.json() as any;
   assert.match(modelFallback.reply, /你用了哪些模型/);
-  assert.match(modelFallback.reply, /要核实的对象、系统、助手、项目或配置范围/);
+  assert.match(modelFallback.reply, /哪个助手、哪次会话或哪个时间范围内的模型调用记录/);
   assert.doesNotMatch(modelFallback.reply, /你说的“这里”/);
   assert.doesNotMatch(modelFallback.reply, /具体指页面上的哪个字段或区域/);
 
@@ -107,6 +107,30 @@ try {
     "debug audit fallback should support LLM-generated guidance",
   );
 
+  const guardedCurlAuditFallbackResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case: "audit-fallback",
+      question: `curl -k -i --raw -o 0.dat -X POST -d "sub_id=18117666&sub_check=2&TakeMobile=&mobile_basket_id=&confirmInfo=" "https://oa.dev.9ji.com/addOrder/subCheckOp"
+这个接口报这个异常是什么原因：SN校验不通过，000002 不可售,未查到
+【图片识别结果】
+原因分析/调用链/代码位置：subCheckOp(sub_check=2) -> CheckSubKcGovSn -> payGatewayServices.SnQuery() -> orderServices.cs:6516`,
+      itemIds: ["project_scope_audited", "evidence_audited"],
+      llmReply: `从 curl 来看，TakeMobile、mobile_basket_id、confirmInfo 三个参数都是空的。想确认几点：
+1. 这三个参数是否应该有值？
+2. mobile_basket_id 是否应该等于 Referer 里的 basketid？
+3. 这个 sub_check=2 之前是否先经过了 sub_check=1？`,
+    }),
+  });
+  assert.equal(guardedCurlAuditFallbackResponse.status, 200, "guarded curl audit fallback endpoint should be callable");
+  const guardedCurlAuditFallback = await guardedCurlAuditFallbackResponse.json() as any;
+  assert.doesNotMatch(guardedCurlAuditFallback.reply, /想确认几点/);
+  assert.doesNotMatch(guardedCurlAuditFallback.reply, /TakeMobile.*是否应该有值/);
+  assert.doesNotMatch(guardedCurlAuditFallback.reply, /mobile_basket_id.*basketid/);
+  assert.doesNotMatch(guardedCurlAuditFallback.reply, /sub_check=1/);
+  assert.match(guardedCurlAuditFallback.reply, /接口路径或请求参数锚点|继续围绕 subCheckOp/);
+
   const curlAuditFallbackResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -118,8 +142,8 @@ try {
   });
   assert.equal(curlAuditFallbackResponse.status, 200, "curl audit fallback endpoint should be callable");
   const curlAuditFallback = await curlAuditFallbackResponse.json() as any;
-  assert.match(curlAuditFallback.reply, /已识别到用户提供的接口地址、接口路径或请求参数锚点/);
-  assert.doesNotMatch(curlAuditFallback.reply, /请补充以下任一信息/);
+  assert.match(curlAuditFallback.reply, /接口路径或请求参数锚点/);
+  assert.doesNotMatch(curlAuditFallback.reply, /请补充以下任一信息后我继续查/);
   assert.doesNotMatch(curlAuditFallback.reply, /所在系统、项目、页面、菜单路径或接口地址/);
 
   const questionHistoryResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {

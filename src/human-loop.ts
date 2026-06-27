@@ -147,7 +147,7 @@ export function buildHumanLoopResumeContent(request: HumanLoopRequest, resumeInp
   const missingFacts = request.contextSnapshot.missingFacts.map(item => `- ${item}`).join("\n") || "- 无";
 
   return `【Human Loop 恢复】
-原始问题：
+用户整合后的问题：
 ${request.contextSnapshot.userQuestion}
 
 暂停原因：

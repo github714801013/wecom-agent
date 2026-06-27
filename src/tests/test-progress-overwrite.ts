@@ -1,5 +1,7 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import {
+  buildIntermediateStreamContent,
   buildProgressStreamContent,
   buildThinkingHeartbeatContent,
   collapseProgressUpdates,
@@ -96,7 +98,26 @@ assert.equal(
   "streaming content should overwrite old progress and old active tool lines",
 );
 
-assert.equal(getProcessingFrame(0), "⠋", "processing frame should be deterministic by timestamp");
+assert.equal(getProcessingFrame(0), "◐", "processing frame should be deterministic by timestamp");
+assert.equal(getProcessingFrame(1000), "◓", "processing frame should rotate to the next heartbeat icon");
+
+assert.equal(
+  buildIntermediateStreamContent("已完成问题规划，继续核实中。", 0),
+  "◐ 已完成问题规划，继续核实中。",
+  "ordinary intermediate stream replies should carry the current processing icon",
+);
+
+assert.equal(
+  buildIntermediateStreamContent("> 🔍 正在调用: query...", 1000),
+  "◓ > 🔍 正在调用: query...",
+  "tool-only intermediate stream replies should carry the current processing icon",
+);
+
+assert.equal(
+  buildIntermediateStreamContent("◐ 处理中：仍在分析中.", 2000),
+  "◐ 处理中：仍在分析中.",
+  "heartbeat replies should not receive a duplicate processing icon",
+);
 
 assert.equal(
   buildProgressStreamContent("已完成问题规划，继续核实中。"),
@@ -113,12 +134,12 @@ assert.equal(
 const firstHeartbeat = buildThinkingHeartbeatContent("", [], 0);
 const secondHeartbeat = buildThinkingHeartbeatContent("", [], 1000);
 assert.notEqual(firstHeartbeat, secondHeartbeat, "thinking heartbeat should change over time");
-assert.equal(firstHeartbeat, "⠋ 处理中：仍在分析中.", "heartbeat should include dynamic dotted text when no content exists");
-assert.equal(secondHeartbeat, "⠹ 处理中：仍在核实中..", "heartbeat should rotate text and dots");
+assert.equal(firstHeartbeat, "◐ 处理中：仍在分析中.", "heartbeat should include dynamic dotted text when no content exists");
+assert.equal(secondHeartbeat, "◓ 处理中：仍在核实中..", "heartbeat should rotate text and dots");
 
 assert.equal(
   buildThinkingHeartbeatContent("已完成问题规划，继续核实中。", [], 0),
-  "已完成问题规划，继续核实中。\n\n⠋ 处理中：仍在分析中.",
+  "已完成问题规划，继续核实中。\n\n◐ 处理中：仍在分析中.",
   "heartbeat should append dynamic thinking line after latest visible progress",
 );
 
@@ -150,8 +171,26 @@ assert.equal(
 
 assert.equal(
   buildThinkingHeartbeatContent(emptyProtocolMarker, [], 0),
-  "⠋ 处理中：仍在分析中.",
+  "◐ 处理中：仍在分析中.",
   "thinking heartbeat should not expose empty protocol marker",
+);
+
+const adapterSource = readFileSync(new URL("../wecom-adapter.ts", import.meta.url), "utf8");
+assert.doesNotMatch(
+  adapterSource,
+  /now - lastUpdateTime < THINKING_HEARTBEAT_INTERVAL_MS/,
+  "thinking heartbeat should be pushed on its own fixed interval instead of waiting for idle output",
+);
+const heartbeatStartIndex = adapterSource.indexOf("heartbeatTimer = setInterval");
+const agentStreamIndex = adapterSource.indexOf("const stream = await agent.stream");
+const finalStopIndex = adapterSource.indexOf("stopThinkingHeartbeat();\n      if (!shouldStopCurrentTask())");
+assert.ok(
+  heartbeatStartIndex >= 0 && agentStreamIndex >= 0 && heartbeatStartIndex < agentStreamIndex,
+  "thinking heartbeat should start before the agent stream so backend pre/post processing stays alive",
+);
+assert.ok(
+  finalStopIndex > agentStreamIndex,
+  "thinking heartbeat should remain active until the final answer is ready to send",
 );
 
 assert.equal(

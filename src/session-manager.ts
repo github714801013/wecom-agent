@@ -1,13 +1,22 @@
 import { BaseMessage, HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { runCompressor, getModelContextWindow } from "./graph.js";
 import type { StoredHumanLoopRequest } from "./human-loop.js";
+import { buildRelationshipIndex, formatRelationshipIndex } from "./relationship-index.js";
+import { buildAnalyzedCodeRangeIndex, formatAnalyzedCodeRangeIndex } from "./analyzed-code-range-index.js";
+import {
+  appendCompressionToSessionMemoryGraph,
+  appendMessagesToSessionMemoryGraph,
+  type SessionMemoryGraph,
+} from "./session-memory-graph.js";
 
 export interface Session {
   messages: BaseMessage[];
   lastActivity: number;
   isCompressed?: boolean;
   currentRepoHints?: string[] | undefined;
+  currentMcpHeaders?: Record<string, Record<string, string>> | undefined;
   pendingHumanLoop?: StoredHumanLoopRequest | undefined;
+  memoryGraph?: SessionMemoryGraph | undefined;
 }
 
 export class SessionManager {
@@ -24,8 +33,10 @@ export class SessionManager {
       console.log(`[Session] Session for ${sessionKey} expired, clearing history.`);
       session.messages = [];
       session.currentRepoHints = undefined;
+      session.currentMcpHeaders = undefined;
       session.pendingHumanLoop = undefined;
       session.isCompressed = false;
+      session.memoryGraph = undefined;
     }
 
     if (!session) {
@@ -73,17 +84,48 @@ export class SessionManager {
     session.lastActivity = Date.now();
   }
 
-  resolveRepoHints(sessionKey: string, explicitRepoHints: string[] = []) {
+  resolveRepoHints(sessionKey: string, explicitRepoHints: string[] = [], defaultRepoHints: readonly string[] = []) {
     const session = this.getOrCreateSession(sessionKey);
     if (explicitRepoHints.length > 0) {
       session.currentRepoHints = [...explicitRepoHints];
     }
-    return [...(session.currentRepoHints ?? [])];
+    return [...(session.currentRepoHints ?? defaultRepoHints)];
+  }
+
+  setRepoHints(sessionKey: string, repoHints: readonly string[]) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.currentRepoHints = [...repoHints];
+    session.lastActivity = Date.now();
+  }
+
+  setMcpHeaders(sessionKey: string, serverName: string, headers: Record<string, string>) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.currentMcpHeaders = {
+      ...(session.currentMcpHeaders ?? {}),
+      [serverName]: { ...headers },
+    };
+    session.lastActivity = Date.now();
+  }
+
+  setMcpHeaderOverrides(sessionKey: string, headersByServer: Record<string, Record<string, string>>) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.currentMcpHeaders = Object.fromEntries(
+      Object.entries(headersByServer).map(([serverName, headers]) => [serverName, { ...headers }]),
+    );
+    session.lastActivity = Date.now();
+  }
+
+  resolveMcpHeaders(sessionKey: string) {
+    const session = this.getOrCreateSession(sessionKey);
+    return Object.fromEntries(
+      Object.entries(session.currentMcpHeaders ?? {}).map(([serverName, headers]) => [serverName, { ...headers }]),
+    );
   }
 
   async addMessages(sessionKey: string, newMessages: BaseMessage[]) {
     const session = this.getOrCreateSession(sessionKey, true);
     session.messages.push(...newMessages);
+    session.memoryGraph = appendMessagesToSessionMemoryGraph(session.memoryGraph, newMessages);
     
     // Check for compression
     await this.checkAndCompress(sessionKey, session);
@@ -136,16 +178,43 @@ export class SessionManager {
         });
 
         if (compressionResult && compressionResult.status === 'ok') {
-          // Replace history with a single compressed context message
+          session.memoryGraph = appendCompressionToSessionMemoryGraph(session.memoryGraph, {
+            intent: compressionResult.intent,
+            keyEvidence: compressionResult.key_evidence,
+            missingInfo: compressionResult.missing_info,
+            sections: compressionResult.compressed_sections,
+            callChain: compressionResult.call_chain,
+          });
+          const relationshipIndex = formatRelationshipIndex(
+            buildRelationshipIndex({
+              callChain: compressionResult.call_chain,
+              texts: [
+                ...compressionResult.key_evidence,
+                ...compressionResult.compressed_sections.map(section => section.content),
+              ],
+            }),
+          );
+          const analyzedCodeRangeIndex = formatAnalyzedCodeRangeIndex(
+            buildAnalyzedCodeRangeIndex({
+              sections: compressionResult.compressed_sections,
+              texts: [
+                ...compressionResult.key_evidence,
+                ...compressionResult.compressed_sections.map(section => section.content),
+              ],
+            }),
+          );
           const summary = `【历史上下文自动压缩】
+历史详情已写入短时记忆图，后续需要继承上下文时调用 session_memory_graph_query 按需查询，避免把长历史常驻 prompt。
+
 意图: ${compressionResult.intent}
-关键证据:
-${compressionResult.key_evidence.map(e => `- ${e}`).join('\n')}
 
-压缩后的代码上下文:
-${compressionResult.compressed_sections.map(s => `文件: ${s.file_path}\n内容: ${s.content}`).join('\n---\n')}
+关系索引:
+${relationshipIndex}
 
-缺失信息: ${compressionResult.missing_info.join(', ')}`;
+已分析代码范围索引:
+${analyzedCodeRangeIndex}
+
+缺失信息: ${compressionResult.missing_info.join(', ') || "无"}`;
 
           session.messages = [
             new SystemMessage(`这是之前对话的压缩总结，请基于此继续回答：\n\n${summary}`),

@@ -6,7 +6,7 @@ import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/
 import { sessionManager } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 import { analyzeImageForQuestion, type VisionImageAnalyzer } from "./vision-analyzer.js";
-import { getAllMcpTools } from "./mcp-client.js";
+import { buildMcpHeaders, getAllMcpTools } from "./mcp-client.js";
 import {
   buildHumanLoopReply,
   buildHumanLoopResumeContent,
@@ -15,7 +15,7 @@ import {
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
 } from "./human-loop.js";
-import { buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, stripProtocolNoise } from "./progress-updates.js";
+import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, stripProtocolNoise } from "./progress-updates.js";
 import {
   consumeFlowControlDelta,
   createDefaultFlowControl,
@@ -28,6 +28,26 @@ import { createAgentProgressGuard, createAgentProgressLimitError } from "./agent
 import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 import { buildProgressLimitRecoverySystemPrompt, ensureRecoverySqlAuditMarker } from "./recovery-synthesis.js";
+import { buildOriginalQuestionTool } from "./original-question-tool.js";
+import { buildSessionMemoryGraphTool } from "./session-memory-graph.js";
+import {
+  buildStreamPauseResumeRequest,
+  buildStreamPauseResumeRuntimeInstruction,
+  isStreamPauseResumeRequest,
+} from "./stream-pause-resume.js";
+import {
+  extractProjectsFromHeaders,
+  extractProjectsFromMcpHeaders,
+  listMcpHeaderCommands,
+  parseMcpHeaderCommand,
+  resolveMcpHeaderCommand,
+} from "./mcp-header-commands.js";
+import {
+  buildDirectEvidenceFastPathInstruction,
+  buildDirectEvidenceRuntimeInstruction,
+  hasDirectEvidenceAnchors,
+  shouldUseDirectEvidenceFastPath,
+} from "./direct-evidence.js";
 import {
   buildFollowupQuestion,
   buildQuestionWithHistory,
@@ -37,6 +57,7 @@ import {
 } from "./interaction-control.js";
 import {
   applySqlAuditEvidence,
+  appendIncompleteFinalNotice,
   assertTodoListComplete,
   blockTodoItem,
   buildIncompleteAuditTodoMessage,
@@ -48,8 +69,10 @@ import {
   completeTodoItem,
   createRuntimeTodoList,
   getIncompleteAuditTodoItems,
+  hasTodoItem,
   isFinalAnswerReady,
   isSqlAuditEvidenceBlocking,
+  syncRuntimeAuditTodoPlan,
   startTodoItem,
   summarizeTodoList,
 } from "./runtime-todolist.js";
@@ -291,7 +314,10 @@ export function isHelpCommand(text: string): boolean {
   return exactCommands.has(normalized);
 }
 
-export function buildHelpReply() {
+export function buildHelpReply(headerCommands = listMcpHeaderCommands(config.mcpServers)) {
+  const commandText = headerCommands.length > 0
+    ? `发送 ${headerCommands.map(command => `\`${command.command}\``).join("、")} 切换 MCP header 配置。`
+    : "也可以直接说明“不要沿用上个项目，改查 <项目名>”。";
   return [
     "使用帮助",
     "",
@@ -303,6 +329,7 @@ export function buildHelpReply() {
     "",
     "3. 清理项目限制",
     "发送“清理会话”后重新提问，不带历史项目范围；也可以直接说明“不要沿用上个项目，改查 <项目名>”。",
+    commandText,
     "",
     "4. 继续或停止",
     "任务处理中发送“继续”可确认继续等待；发送“停止”可取消当前任务。",
@@ -492,6 +519,7 @@ export async function startBot(botConfig: BotConfig) {
     }
 
     let parsedContent: Awaited<ReturnType<typeof parseWeComMessage>>;
+    let stopThinkingHeartbeat = () => {};
     try {
       parsedContent = await parseWeComMessage(body, bot);
     } finally {
@@ -523,7 +551,28 @@ export async function startBot(botConfig: BotConfig) {
     const isHardcodedNew = isClearSessionCommand(commandText);
     const activeTask = activeTasks.get(sessionKey);
     const activeText = stripBoundaryMentions(commandText);
+    const mcpHeaderCommand = parseMcpHeaderCommand(commandText, config.mcpServers);
     let followupQuestion = "";
+
+    if (mcpHeaderCommand) {
+      const projects = extractProjectsFromMcpHeaders(mcpHeaderCommand.headersByServer);
+      sessionManager.setMcpHeaderOverrides(sessionKey, mcpHeaderCommand.headersByServer);
+      sessionManager.setRepoHints(sessionKey, projects);
+      await bot.replyStreamWithCard(
+        frame,
+        body.msgid,
+        `已切换到 ${mcpHeaderCommand.label} 配置：${projects.length > 0 ? projects.join(", ") : JSON.stringify(mcpHeaderCommand.headersByServer)}`,
+        true,
+        {
+          templateCard: {
+            card_type: "text_notice",
+            main_title: { title: "MCP 配置已切换", desc: mcpHeaderCommand.command },
+            task_id: `task_${body.msgid}`,
+          },
+        }
+      );
+      return;
+    }
 
     if (activeTask && !activeTask.cancelled) {
       const activeIntent = detectActiveMessageIntent(activeText);
@@ -602,12 +651,17 @@ export async function startBot(botConfig: BotConfig) {
       return;
     }
 
+    const originalUserQuestion = typeof parsedContent === "string"
+      ? stripBoundaryMentions(parsedContent)
+      : extractTextContent(parsedContent as any);
     let effectiveParsedContent: typeof parsedContent = parsedContent;
     const pendingHumanLoop = sessionManager.getPendingHumanLoop(sessionKey);
     const pendingText = stripBoundaryMentions(commandText);
     const activePendingHumanLoop = pendingHumanLoop && !isHumanLoopExpired(pendingHumanLoop)
       ? pendingHumanLoop
       : undefined;
+    const isStreamPauseResume = isStreamPauseResumeRequest(activePendingHumanLoop);
+    const hasDirectEvidence = hasDirectEvidenceAnchors(originalUserQuestion);
 
     if (pendingHumanLoop && !activePendingHumanLoop) {
       sessionManager.clearPendingHumanLoop(sessionKey);
@@ -691,7 +745,16 @@ const runtimeTodoList = createRuntimeTodoList();
           coverNextVisibleContent = true;
         }
       };
+      let finalContentForPrompt: any = effectiveParsedContent;
+      let intermediateMessages: BaseMessage[] = [];
+      const toolContextRecords: ToolContextRecord[] = [];
+      const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
+      let repoHints: string[] = [];
+      let recoveryAuditReason = "";
       let lastUpdateTime = 0;
+      let heartbeatInFlight = false;
+      let lastHeartbeatTime = 0;
+      let heartbeatTimer: NodeJS.Timeout | undefined;
       const UPDATE_INTERVAL = 2000;
       let expiredStreamFinalSent = false;
       let expiredStreamHistorySaved = false;
@@ -700,8 +763,21 @@ const runtimeTodoList = createRuntimeTodoList();
       const saveExpiredStreamHistory = async () => {
         if (expiredStreamHistorySaved) return;
         expiredStreamHistorySaved = true;
+        const toolContextSummary = buildToolContextSummary(toolContextRecords);
+        const pauseResumeRequest = toStoredHumanLoopRequest(
+          buildStreamPauseResumeRequest({
+            userQuestion: currentQuestion,
+            currentQuestion,
+            partialAnswer: collapseProgressUpdates(stripEmptyProtocolContent(fullContent)),
+            toolContextSummary,
+            repoHints,
+          }),
+          body.msgid,
+        );
+        sessionManager.setPendingHumanLoop(sessionKey, pauseResumeRequest);
         await sessionManager.addMessages(sessionKey, [
           new HumanMessage({ content: effectiveParsedContent as any }),
+          ...(toolContextSummary ? [new SystemMessage(toolContextSummary)] : []),
           new AIMessage(STREAM_EXPIRED_MESSAGE),
         ]);
       };
@@ -709,7 +785,9 @@ const runtimeTodoList = createRuntimeTodoList();
         if (shouldStopCurrentTask()) return false;
         const safeContent = stripEmptyProtocolContent(content).trim();
         if (!safeContent && !final) return false;
-        const replyContent = safeContent || "未获取到有效回复";
+        const replyContent = final
+          ? (safeContent || "未获取到有效回复")
+          : buildIntermediateStreamContent(safeContent);
         if (isStreamExpired(streamStartedAt)) {
           await saveExpiredStreamHistory();
           currentTask.cancelled = true;
@@ -761,27 +839,54 @@ const runtimeTodoList = createRuntimeTodoList();
         await safeReplyStream(buildProgressStreamContent(content), false);
         lastUpdateTime = Date.now();
       };
+      const getActiveToolCalls = () => Array.from(toolCallMap.values())
+        .filter(c => c.name && !c.completed)
+        .map(c => `> 🔍 正在调用: ${getToolDisplay(c.name, c.args)}...`);
+      stopThinkingHeartbeat = () => {
+        if (!heartbeatTimer) return;
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      };
+      heartbeatTimer = setInterval(() => {
+        if (heartbeatInFlight || shouldStopCurrentTask()) return;
+        const now = Date.now();
+        if (now - lastHeartbeatTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
+        heartbeatInFlight = true;
+        void safeReplyStream(
+          buildThinkingHeartbeatContent(fullContent, getActiveToolCalls(), now),
+          false,
+        ).then(sent => {
+          if (sent) lastHeartbeatTime = Date.now();
+        }).catch(error => {
+          console.error(`[${botConfig.name}] Thinking heartbeat failed for ${body.msgid}:`, error);
+        }).finally(() => {
+          heartbeatInFlight = false;
+        });
+      }, THINKING_HEARTBEAT_INTERVAL_MS);
 
       // --- Planner Logic Start ---
-      let finalContentForPrompt: any = effectiveParsedContent;
       let plannerResult = null;
       const runtimeTodoInstruction = `系统提示：【运行时 TodoList 工具要求】
-当前回答必须使用工具 runtime_todolist_update 维护审核 TodoList。
-在最终回答前，必须分别调用该工具并将以下 itemId 标记为 done：
-1. project_scope_audited：审核代码包、仓库、项目和用户目标范围一致性；不涉及代码范围时 evidence 写“不适用”及原因。
-2. sql_correctness_audited：审核 SQL 完整性、只读性、表名字段名、dev 执行校验；若 dev 库无对应表，evidence 必须写“dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构”。
-3. evidence_audited：审核核心结论证据、字段语义和查询收敛。
-4. execution_flow_audited：审核接口链路、缺失日志、未触达下游、回调、MQ、外部系统推送或状态流转的执行链完整性；不涉及此类问题时 evidence 写“不涉及接口链路/下游触达/状态流转”及原因。
-5. owner_contact_audited：审核建议处理中是否需要提示联系相关开发人员；涉及代码缺陷、配置异常、流程实现、历史逻辑归属或需要推动修复时，必须说明已给出联系开发人员建议；如果工具列表存在 git_author_trace，只能基于最终结论实际引用的仓库、文件、方法、代码片段、symbol uid 或接口入口追溯联系人，不得使用最终未引用的候选文件，并按“与最终结论最相关的修改优先、同等相关时最新修改优先”选择开发人员线索。
-6. final_format_audited：审核过程标签和最终结论分离。
-没有证据时必须调用 runtime_todolist_update 将对应 itemId 标记为 blocked，不得直接输出最终结论。`;
+当前回答由运行时 TodoList 控制流程完成度，TodoList 是动态计划，不是固定审核清单。
+如果当前工具列表存在 runtime_todolist_update，只需要维护当前问题实际需要的审核节点；不要为了无关节点补“不适用”，也不要输出内部 TodoList 内容。
+如果你需要核对用户整合后的问题，或怀疑历史整合、上下文压缩、提示词增强导致问题失真，必须调用 original_user_question_get 获取整合后的用户问题后再继续分析。
+如果当前问题是“继续”、追问上一轮、需要继承历史里的项目/接口/方法/文件/表字段/已分析行号范围，或担心短时记忆压缩导致锚点丢失，必须先调用 session_memory_graph_query 获取相关历史图索引；不要因为默认上下文里没看到历史细节就要求用户补充。
+测试环境/dev 环境排障硬约束：如果用户已提供接口 URL、query 参数、请求体、返回体，或明确说“可以直接查库/测试环境可查库”，禁止在查询前询问用户补充 type 含义、状态字段、业务节点、同类型正常样本或数据库连接信息。必须先使用可用工具、代码检索、参数映射和测试库只读查询确认；只有这些查询后仍无法确认，或工具/测试库不可达，才允许 Human Loop，并且必须说明已尝试的工具、SQL 或代码证据。
+Human Loop 严格门槛：所有可由 LLM 工具、代码检索、调用链、已保存工具证据、测试/dev 库只读查询验证的信息，都必须先自主核实；只有所有可用路径都核实完仍无法回答，才允许对用户提问。触发 Human Loop 前必须在 context_snapshot.known_facts 写清已核实节点、已分析代码范围、已尝试 SQL/工具/检索条件和剩余最小缺口。
+动态审核节点规则：
+1. 代码/项目/接口/页面/仓库类问题：维护 project_scope_audited，证据写明目标范围和命中的入口一致性。
+2. 最终回答输出 SQL、生产取数 SQL 或声明 dev 校验：维护 sql_correctness_audited；若 dev 库无对应表，evidence 必须写“dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构”。
+3. 需要基于工具、代码、数据库或业务规则下结论：维护 evidence_audited，证据写明核心结论来自哪些已核实事实。
+4. 涉及接口链路、按钮显示、状态流转、回调、MQ、外部推送、缺失日志、下游触达条件或异常拦截：维护 execution_flow_audited。
+5. 只有涉及代码缺陷、配置异常、流程实现归属、历史逻辑归属或需要推动修复时，才维护 owner_contact_audited，并且联系人线索只能来自最终结论实际引用证据。
+没有证据时将当前相关节点标记 blocked 并触发 Human Loop 或说明最小缺口；无关节点不要处理。`;
       const flowControlInstruction = `系统提示：【流程控制 JSON 协议】
 当你已经能确定下游节点是否需要继续执行某个步骤时，可以输出流程控制协议。协议必须单独放在 <flow_control>...</flow_control> 中，运行时会剥离，用户不可见。
 格式：
 <flow_control>{"next":{"runSqlAudit":false,"skipAuditItems":["execution_flow_audited","owner_contact_audited"]},"stream":{"coverPrevious":true}}</flow_control>
 字段含义：
 - next.runSqlAudit=false：当前最终回答不涉及 SQL 输出或 SQL 审核不适用，下游跳过 SQL 正确性审核；不确定时不要输出该字段，默认继续审核。
-- next.skipAuditItems：当上游已经明确判断某些后续审核节点不需要处理时，列出要跳过的 itemId；运行时会将这些节点标记为已跳过。可选值：project_scope_audited、sql_correctness_audited、evidence_audited、execution_flow_audited、owner_contact_audited、final_format_audited。只有明确不适用时才输出；如果最终回答包含 SQL 或声明 dev 校验，不能用 skipAuditItems 跳过 sql_correctness_audited。
+- next.skipAuditItems：当上游已经明确判断某些后续审核节点不需要处理时，列出要跳过的 itemId；运行时只会影响当前动态计划里已经存在的节点。可选值：project_scope_audited、sql_correctness_audited、evidence_audited、execution_flow_audited、owner_contact_audited、final_format_audited。只有明确不适用时才输出；如果最终回答包含 SQL 或声明 dev 校验，不能用 skipAuditItems 跳过 sql_correctness_audited。
 - stream.coverPrevious=true：下一段真实可见内容应覆盖前面已展示的阶段性流式内容；不确定时不要输出该字段，默认追加。
 只输出明确需要改变默认行为的字段，不要把 flow_control 写进最终业务结论。`;
 
@@ -794,13 +899,29 @@ const runtimeTodoList = createRuntimeTodoList();
         if (textItem) textToPlan = stripBoundaryMentions(textItem.text || "");
       }
 
-      if (textToPlan.trim().length > 0) {
+      if (isStreamPauseResume) {
+        startTodoItem(runtimeTodoList, "planner_checked");
+        completeTodoItem(runtimeTodoList, "planner_checked", "stream pause resume: skipped planner/prelude to avoid restarting from head");
+        if (typeof effectiveParsedContent === 'string') {
+          finalContentForPrompt = `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${buildStreamPauseResumeRuntimeInstruction()}\n\n${effectiveParsedContent}`;
+        } else if (Array.isArray(effectiveParsedContent)) {
+          finalContentForPrompt = [
+            { type: 'text', text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${buildStreamPauseResumeRuntimeInstruction()}\n\n` },
+            ...effectiveParsedContent,
+          ];
+        }
+      } else if (textToPlan.trim().length > 0) {
         try {
           startTodoItem(runtimeTodoList, "planner_checked");
           await sendStageProgress("已收到问题，正在识别意图和检索锚点，继续核实中。", true);
           plannerResult = await runPlanner(textToPlan);
           if (plannerResult) {
             completeTodoItem(runtimeTodoList, "planner_checked", `intent=${plannerResult.intent || "unknown"}`);
+            syncRuntimeAuditTodoPlan(runtimeTodoList, {
+              question: currentQuestion,
+              plannerIntent: plannerResult.intent,
+              secondaryIntents: plannerResult.secondary_intents,
+            });
             await sendStageProgress("已完成问题规划，正在整理检索词和候选方向，继续核实中。", true);
             const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
@@ -856,14 +977,14 @@ ${hypotheses}
 * 首轮代码检索必须保持跨项目发现能力：除非用户明确要求“只查某仓库/某项目”，否则不得把项目名作为过滤参数；如果用户明确指定 GitNexus repo 且工具 schema 支持 repo 参数，当次查询必须携带该 repo。
 * 严禁在代码检索中包含人名、商品名、租户名、订单号等实例数据。
 * 如果意图模糊，参考问题假设进行进一步排查。
-* GitNexus query 成本较高，必须合并查询条件：把项目、核心业务词、动作词、接口/文件锚点尽量放入一次 query/zoekt；同一问题原则上不超过 2 次 query，命中候选文件后改用 code_snippet/context 或已有证据回答。
+* GitNexus query 成本较高，必须合并查询条件：把项目、核心业务词、动作词、接口/文件锚点尽量放入一次 query/zoekt；同一问题原则上不超过 16 次 query，命中候选文件后改用 code_snippet/context 或已有证据回答。
 * 严禁拆分关键词进行多次循环搜索。${smsTemplateEvidenceHint}`;
             
             if (typeof effectiveParsedContent === 'string') {
-              finalContentForPrompt = `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${searchPlanHint}\n\n${effectiveParsedContent}`;
+              finalContentForPrompt = `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${hasDirectEvidence ? `${buildDirectEvidenceRuntimeInstruction()}\n\n` : ""}${searchPlanHint}\n\n${effectiveParsedContent}`;
             } else if (Array.isArray(effectiveParsedContent)) {
               finalContentForPrompt = [
-                { type: 'text', text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${searchPlanHint}\n\n` },
+                { type: 'text', text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${hasDirectEvidence ? `${buildDirectEvidenceRuntimeInstruction()}\n\n` : ""}${searchPlanHint}\n\n` },
                 ...effectiveParsedContent.map(item => item.type === 'text' ? { ...item, text: stripBoundaryMentions(item.text || '') } : item)
               ];
             }
@@ -894,29 +1015,60 @@ ${hypotheses}
       // --- Planner Logic End ---
 
       // 记录流式过程中的所有消息，用于容错恢复
-      let intermediateMessages: BaseMessage[] = [];
-      const toolContextRecords: ToolContextRecord[] = [];
-      let repoHints: string[] = [];
-      let recoveryAuditReason = "";
-
       try {
+        if (shouldUseDirectEvidenceFastPath(currentQuestion)) {
+          startTodoItem(runtimeTodoList, "tools_loaded");
+          completeTodoItem(runtimeTodoList, "tools_loaded", "direct evidence fast path: skipped MCP tool loading");
+          startTodoItem(runtimeTodoList, "analysis_finished");
+          const businessPrompt = await getBusinessPrompt(plannerResult);
+          const baseModel = await getBaseModel();
+          const fastPathResponse = await baseModel.invoke([
+            new SystemMessage(`${businessPrompt}\n\n${buildDirectEvidenceFastPathInstruction()}`),
+            new HumanMessage(typeof finalContentForPrompt === "string" ? finalContentForPrompt : currentQuestion),
+          ]);
+          fullContent = ensureRecoverySqlAuditMarker(String(fastPathResponse.content || ""));
+          completeTodoItem(runtimeTodoList, "analysis_finished", `direct evidence fast path contentLength=${fullContent.length}`);
+        } else {
         startTodoItem(runtimeTodoList, "tools_loaded");
         await sendStageProgress("正在加载 MCP 工具和项目范围，继续核实中。", true);
-        const tools = await getAllMcpTools(botConfig);
+        const sessionMcpHeaderOverrides = sessionManager.resolveMcpHeaders(sessionKey);
+        const defaultMcpHeaderCommand = botConfig.defaultMcpHeaderCommand
+          ? resolveMcpHeaderCommand(botConfig.defaultMcpHeaderCommand, config.mcpServers)
+          : null;
+        const mcpHeaderOverrides = Object.keys(sessionMcpHeaderOverrides).length > 0
+          ? sessionMcpHeaderOverrides
+          : defaultMcpHeaderCommand?.headersByServer ?? {};
+        const tools = await getAllMcpTools(botConfig, mcpHeaderOverrides);
+        const defaultRepoHints = extractProjectsFromMcpHeaders(mcpHeaderOverrides);
         const explicitRepoHints = extractExplicitRepoHints(
           textToPlan,
-          extractMcpProjectCandidates(config.mcpServers)
+          Array.from(new Set([...extractMcpProjectCandidates(config.mcpServers), ...defaultRepoHints]))
         );
-        repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints);
+        repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints, defaultRepoHints);
         const scopedEvidenceTools = scopeToolsToRepo(tools, repoHints);
+        syncRuntimeAuditTodoPlan(runtimeTodoList, {
+          question: currentQuestion,
+          repoHints,
+          ...(plannerResult?.intent ? { plannerIntent: plannerResult.intent } : {}),
+          ...(plannerResult?.secondary_intents ? { secondaryIntents: plannerResult.secondary_intents } : {}),
+        });
         const agentTools = [
           ...scopedEvidenceTools,
+          buildOriginalQuestionTool({
+            originalUserQuestion,
+            currentQuestion,
+            sessionMessages: session.messages,
+          }),
+          buildSessionMemoryGraphTool({
+            graph: session.memoryGraph,
+            currentQuestion,
+          }),
           buildRuntimeTodoTool(runtimeTodoList),
         ];
         completeTodoItem(runtimeTodoList, "tools_loaded", `tools=${agentTools.length}, repoHints=${repoHints.join(",") || "none"}`);
         await sendStageProgress("已加载可用工具，正在判断是否需要预检索，继续核实中。", true);
 
-        if (plannerResult && textToPlan.trim().length > 0) {
+        if (!isStreamPauseResume && !hasDirectEvidence && plannerResult && textToPlan.trim().length > 0) {
           await sendStageProgress("正在执行预检索以缩小证据范围，继续核实中。", true);
           const prelude = await runSearchLoopPrelude({
             userQuestion: textToPlan,
@@ -952,35 +1104,11 @@ ${hypotheses}
           streamMode: "messages",
         });
 
-        // 工具调用累加器：用于聚合流式的 tool_call_chunks
-        const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
         const agentProgressGuard = createAgentProgressGuard({
           maxToolResults: getMaxAgentToolResultsPerTurn(),
         });
-        const getActiveToolCalls = () => Array.from(toolCallMap.values())
-          .filter(c => c.name && !c.completed)
-          .map(c => `> 🔍 正在调用: ${getToolDisplay(c.name, c.args)}...`);
-        let heartbeatInFlight = false;
-        let lastHeartbeatTime = 0;
-        const heartbeatTimer = setInterval(() => {
-          if (heartbeatInFlight || shouldStopCurrentTask()) return;
-          const now = Date.now();
-          if (now - lastUpdateTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
-          if (now - lastHeartbeatTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
-          heartbeatInFlight = true;
-          void safeReplyStream(
-            buildThinkingHeartbeatContent(fullContent, getActiveToolCalls(), now),
-            false,
-          ).then(sent => {
-            if (sent) lastHeartbeatTime = Date.now();
-          }).catch(error => {
-            console.error(`[${botConfig.name}] Thinking heartbeat failed for ${body.msgid}:`, error);
-          }).finally(() => {
-            heartbeatInFlight = false;
-          });
-        }, THINKING_HEARTBEAT_INTERVAL_MS);
-        try {
-          for await (const [message, metadata] of stream) {
+        // 工具调用累加器：用于聚合流式的 tool_call_chunks
+        for await (const [message, metadata] of stream) {
             const streamMetadata = metadata as AgentStreamMetadata | undefined;
             if (shouldStopCurrentTask()) {
               fullContent = "";
@@ -1103,9 +1231,6 @@ ${hypotheses}
                 }
               }
             }
-          }
-        } finally {
-          clearInterval(heartbeatTimer);
         }
 
         // 最终检查：记录那些可能未返回 ToolMessage 的调用
@@ -1115,6 +1240,7 @@ ${hypotheses}
           }
         }
         completeTodoItem(runtimeTodoList, "analysis_finished", `contentLength=${fullContent.length}, toolResults=${toolContextRecords.length}`);
+        }
 
       } catch (err: any) {
         console.error(`Agent execution error for ${body.msgid}:`, err);
@@ -1182,7 +1308,9 @@ ${hypotheses}
               questionWithHistory: finalContentForPrompt,
               answer: fullContent,
             });
-            completeTodoItem(runtimeTodoList, "evidence_audited", `已补齐历史优先锚点覆盖：${missingPriorityAnchors.join(", ")}`);
+            if (hasTodoItem(runtimeTodoList, "evidence_audited")) {
+              completeTodoItem(runtimeTodoList, "evidence_audited", `已补齐历史优先锚点覆盖：${missingPriorityAnchors.join(", ")}`);
+            }
           } catch (anchorRepairError) {
             console.error(`[${botConfig.name}] Failed to repair answer priority anchors for ${body.msgid}:`, anchorRepairError);
           }
@@ -1208,14 +1336,27 @@ ${hypotheses}
 
       // 发送最终结果
       fullContent = collapseProgressUpdates(stripEmptyProtocolContent(fullContent));
-      const sqlAuditEvidence = buildSqlAuditEvidence(fullContent, toolContextRecords);
+
+      const sqlAuditEvidence = buildSqlAuditEvidence(fullContent, toolContextRecords, summarizeTodoList(runtimeTodoList));
+      syncRuntimeAuditTodoPlan(runtimeTodoList, {
+        question: currentQuestion,
+        answer: fullContent,
+        repoHints,
+        toolResultCount: toolContextRecords.length,
+        sqlAuditEvidence,
+        skipAuditItems: flowControl.next.skipAuditItems,
+        ...(plannerResult?.intent ? { plannerIntent: plannerResult.intent } : {}),
+        ...(plannerResult?.secondary_intents ? { secondaryIntents: plannerResult.secondary_intents } : {}),
+      });
       const skipAuditItems = new Set(flowControl.next.skipAuditItems);
       const shouldSkipSqlAudit = !flowControl.next.runSqlAudit || skipAuditItems.has("sql_correctness_audited");
-      if (shouldSkipSqlAudit && !isSqlAuditEvidenceBlocking(sqlAuditEvidence)) {
-        console.log(`[${botConfig.name}] FlowControl skipped SQL audit for ${body.msgid}: ${sqlAuditEvidence}`);
-        completeTodoItem(runtimeTodoList, "sql_correctness_audited", `flow_control: 上游声明不需要 SQL 审核；${sqlAuditEvidence}`);
-      } else {
-        applySqlAuditEvidence(runtimeTodoList, sqlAuditEvidence);
+      if (hasTodoItem(runtimeTodoList, "sql_correctness_audited")) {
+        if (shouldSkipSqlAudit && !isSqlAuditEvidenceBlocking(sqlAuditEvidence)) {
+          console.log(`[${botConfig.name}] FlowControl skipped SQL audit for ${body.msgid}: ${sqlAuditEvidence}`);
+          completeTodoItem(runtimeTodoList, "sql_correctness_audited", `flow_control: 上游声明不需要 SQL 审核；${sqlAuditEvidence}`);
+        } else {
+          applySqlAuditEvidence(runtimeTodoList, sqlAuditEvidence);
+        }
       }
       completeSkippedAuditItems(runtimeTodoList, flowControl.next.skipAuditItems);
       if (recoveryAuditReason) {
@@ -1245,13 +1386,14 @@ ${hypotheses}
         completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}`);
       } else {
         console.error(`[${botConfig.name}] Runtime TodoList blocked for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
-        fullContent = "抱歉，本次回答还停留在阶段性处理中，未能形成可发送的最终结论。请缩小问题范围或稍后重试。";
-        completeTodoItem(runtimeTodoList, "final_checked", "sent incomplete-answer fallback");
+        fullContent = appendIncompleteFinalNotice(fullContent);
+        completeTodoItem(runtimeTodoList, "final_checked", "sent incomplete-answer notice with preserved content");
       }
       if (auditPassed) {
         assertTodoListComplete(runtimeTodoList);
         console.log(`[${botConfig.name}] Runtime TodoList completed for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
       }
+      stopThinkingHeartbeat();
       if (!shouldStopCurrentTask()) {
         await safeReplyStream(fullContent || "未获取到有效回复", true);
       }
@@ -1259,6 +1401,7 @@ ${hypotheses}
         activeTasks.delete(sessionKey);
       }
     } catch (error) {
+      stopThinkingHeartbeat();
       console.error(`Outer error processing message ${body.msgid}:`, error);
       const activeTaskAfterError = activeTasks.get(sessionKey);
       if (activeTaskAfterError?.msgid === body.msgid) {

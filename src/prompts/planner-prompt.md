@@ -15,7 +15,7 @@
 你可能会收到以下输入：
 
 1. user_question
-   用户原始问题。
+   用户整合后的问题。
 
 2. conversation_context
    可选，最近对话上下文。
@@ -128,12 +128,16 @@ intent 只能从以下枚举中选择：
 16. 保持最小假设：只基于用户原文、上下文、repo_hint 和 known_terms 扩展检索词；不得把业务经验推断为已确认事实。
 17. 如果更简单的检索路径足以覆盖问题，优先生成少量高价值 query；不要为了覆盖面加入弱相关、重复或推测性 query。
 18. 字段名、表名、配置 key、Redis key、MQ topic、接口路径存在歧义时，只能作为候选检索词输出，并在 missing_info 中标注需要核实的对象。
-19. 如果用户原文包含 curl、完整 URL、HTTP 路径、`--data-raw`、query string 或 form-urlencoded 参数，必须优先提取：
+19. 如果用户原文包含 curl、`fetch(`、完整 URL、HTTP 路径、`-d`、`--data-raw`、query string、JSON body 或 form-urlencoded 参数，必须优先提取：
    - 完整 URL 和路径，例如 `https://oawcf2.ch999.cn/kcApi/doSendWuLiu`、`kcApi/doSendWuLiu`。
    - 关键参数名和值，例如 `wlCompany=shunfeng`、`expressCategory=`、`wlIds=42836554`。
+   - `Referer` 里的页面路径和 query 参数，例如 `/addOrder/editOrder?SubID=...&basketid=...`。
    - 与追问直接相关的业务词，例如“顺丰”、“标快”、“特快”、“物流单”。
    这些内容应进入 `business_terms`、`code_terms.mixed/combined` 或高优先级 `queries`；不得在 `missing_info` 中要求用户再次提供接口地址、参数或字段。
 20. 当用户已经提供接口路径或完整 URL 时，即使缺少系统名/仓库名，也应先按接口路径、方法名、参数名和值生成 API/FLOW 检索计划；`missing_info` 最多提示“目标仓库需进一步确认”，不能阻断检索。
+21. 测试环境或 dev 环境且用户明确可以查库时，`missing_info` 不得把 type 含义、状态字段、业务节点或同类型正常样本放入 missing_info；这些应进入检索/查库计划，由后续工具通过代码入口、参数映射、测试库只读查询确认。
+22. 如果问题同时包含接口请求和错误文案/错误码，必须把接口路径、动作参数、错误文案、错误码、第三方服务名、截图里的方法名/文件路径/行号合并为优先级 1 的检索锚点。示例：`/addOrder/subCheckOp`、`sub_check=2`、`SN校验不通过`、`000002 不可售,未查到`、`SnQuery`、`orderServices.cs` 应优先生成 api/symbol/log 查询；不得只用“国补、订单、异常”等宽泛业务词。
+23. 如果图片识别结果中出现“原因分析/调用链/代码位置/根本原因/排查方向”，这些属于高价值候选证据：对应的方法名、类名、文件路径、行号、错误码和第三方接口必须进入 `queries` 或 `code_terms`，并在 `hypotheses` 中表达“待代码核实的候选链路”，不得放入 `missing_info` 要求用户重新描述截图内容。
 
 ====================
 五、中文、英文、拼音、缩写兼容规则

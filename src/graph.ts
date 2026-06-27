@@ -6,6 +6,9 @@ import { getAllMcpTools } from "./mcp-client.js";
 import { config } from "./config.js";
 import { readFile } from "fs/promises";
 import { join } from "path";
+import { buildRelationshipIndex, formatRelationshipIndex } from "./relationship-index.js";
+import { buildAnalyzedCodeRangeIndex, formatAnalyzedCodeRangeIndex } from "./analyzed-code-range-index.js";
+import { PROGRESS_KEYWORDS } from "./progress-updates.js";
 
 const MODEL_CONTEXT_MAP: Record<string, number> = {
   "MiniMax-M2.5": 200000,
@@ -172,12 +175,7 @@ export interface ReviewedAgentOptions {
   now?: () => number;
 }
 
-const INCOMPLETE_PROGRESS_PATTERNS = [
-  "继续核实中",
-  "继续读取",
-  "继续确认",
-  "准备输出结论",
-];
+const INCOMPLETE_PROGRESS_PATTERNS = [...PROGRESS_KEYWORDS];
 
 export interface SearchQuery {
   query: string;
@@ -625,7 +623,15 @@ export function extractExplicitRepoHints(userQuestion: string, repoCandidates: s
     .map(match => candidateByLower.get(match.toLowerCase()))
     .filter((match): match is string => Boolean(match));
 
-  return Array.from(new Set(matchedRepos));
+  const pathAnchors = Array.from(new Set(
+    candidates.filter(candidate => {
+      const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp(`(?:^|[^A-Za-z0-9_.-])${escaped}(?:[\\\\/]|\\b)`, "i");
+      return pattern.test(userQuestion);
+    }),
+  ));
+
+  return Array.from(new Set([...matchedRepos, ...pathAnchors]));
 }
 
 export function extractExplicitRepoHint(userQuestion: string, repoCandidates: string[] = []) {
@@ -721,6 +727,24 @@ export function formatSearchLoopPrelude(loopResult: MinimalSearchLoopResult) {
   const keyEvidence = lastCompression.key_evidence
     .map(evidence => `- ${evidence}`)
     .join("\n");
+  const relationshipIndex = formatRelationshipIndex(
+    buildRelationshipIndex({
+      callChain: lastCompression.call_chain,
+      texts: [
+        ...lastCompression.key_evidence,
+        ...lastCompression.compressed_sections.map(section => section.content),
+      ],
+    }),
+  );
+  const analyzedCodeRangeIndex = formatAnalyzedCodeRangeIndex(
+    buildAnalyzedCodeRangeIndex({
+      sections: lastCompression.compressed_sections,
+      texts: [
+        ...lastCompression.key_evidence,
+        ...lastCompression.compressed_sections.map(section => section.content),
+      ],
+    }),
+  );
   const sections = lastCompression.compressed_sections
     .map(section => `- 文件: ${section.file_path || "未知"}\n  证据: ${section.content}`)
     .join("\n");
@@ -734,6 +758,12 @@ ${executedQueries || "- 无"}
 
 关键证据:
 ${keyEvidence || "- 无"}
+
+关系索引:
+${relationshipIndex}
+
+已分析代码范围索引:
+${analyzedCodeRangeIndex}
 
 压缩代码片段:
 ${sections || "- 无"}
@@ -788,8 +818,8 @@ export function buildMessagesForCurrentTurn(input: {
   ];
 }
 
-const MAX_GOAL_RELEVANT_SESSION_MESSAGES = 8;
-const MAX_COMPACT_SESSION_MESSAGE_LENGTH = 1200;
+const MAX_GOAL_RELEVANT_SESSION_MESSAGES = 4;
+const MAX_COMPACT_SESSION_MESSAGE_LENGTH = 700;
 const STRONG_GOAL_TOKEN_PATTERN = /[A-Za-z][A-Za-z0-9_$]{2,}|[\u4e00-\u9fa5]{2,}|\/[A-Za-z0-9/_{}.-]+/g;
 const NOISY_SESSION_MARKERS = [
   "继续核实中",
@@ -838,8 +868,34 @@ function isGoalRelevantSessionMessage(message: BaseMessage, goalTokens: string[]
   const type = (message as any)._getType?.() || message.constructor.name;
   const content = stringifyMessageContent(message.content);
   if (!content.trim()) return false;
-  if (content.includes("【历史上下文自动压缩】") || content.includes("已确认锚点清单")) return true;
+  if (content.includes("短时记忆图") || content.includes("已确认锚点清单")) return true;
   return goalTokens.some(token => content.includes(token));
+}
+
+function buildSelectedSessionRelationshipIndex(messages: BaseMessage[], userContent: string) {
+  return formatRelationshipIndex(
+    buildRelationshipIndex({
+      texts: [
+        userContent,
+        ...messages.map(message => stringifyMessageContent(message.content)),
+      ],
+      maxEdges: 10,
+    }),
+    "- 暂无明确关系索引；请优先沿当前问题锚点继续核实，不要用被剔除历史反推结论。",
+  );
+}
+
+function buildSelectedSessionAnalyzedCodeRangeIndex(messages: BaseMessage[], userContent: string) {
+  return formatAnalyzedCodeRangeIndex(
+    buildAnalyzedCodeRangeIndex({
+      texts: [
+        userContent,
+        ...messages.map(message => stringifyMessageContent(message.content)),
+      ],
+      maxRanges: 12,
+    }),
+    "- 暂无明确已分析代码范围索引；如需继续读取代码，优先避开已确认范围。",
+  );
 }
 
 export function compactSessionMessagesForGoal(
@@ -870,8 +926,16 @@ export function compactSessionMessagesForGoal(
 
   if (compacted.length < sessionMessages.length) {
     const removed = sessionMessages.length - compacted.length;
+    const relationshipIndex = buildSelectedSessionRelationshipIndex(compacted, userContent);
+    const analyzedCodeRangeIndex = buildSelectedSessionAnalyzedCodeRangeIndex(compacted, userContent);
     return [
-      new SystemMessage(`【当前目标上下文精简】已剔除 ${removed} 条与当前目标弱相关的历史消息，仅保留当前目标、最近对话、历史压缩摘要和命中锚点相关内容。后续分析必须围绕当前问题继续收敛。`),
+      new SystemMessage(`【当前目标上下文精简】已剔除 ${removed} 条与当前目标弱相关的历史消息，仅保留少量命中锚点内容。完整历史、已确认锚点、调用关系和已分析代码范围已通过 session_memory_graph_query 按需查询；遇到“继续/追问/继承上一轮锚点/避免重复读取代码”时必须先调用该工具。
+
+【关系索引】
+${relationshipIndex}
+
+【已分析代码范围索引】
+${analyzedCodeRangeIndex}`),
       ...compacted,
     ];
   }
@@ -879,7 +943,7 @@ export function compactSessionMessagesForGoal(
   return compacted;
 }
 
-function getConfiguredMaxReviewRounds() {
+export function getConfiguredMaxReviewRounds() {
   const rawValue = process.env.ANSWER_REVIEW_MAX_ROUNDS;
   if (!rawValue) return 2;
 
@@ -965,7 +1029,7 @@ export async function runAnswerReview(input: {
   return parseAnswerReviewResult(response.content.toString());
 }
 
-function buildReviewCorrectionMessage(review: AnswerReviewResult) {
+export function buildReviewCorrectionMessage(review: AnswerReviewResult) {
   return new HumanMessage(`【回答审核未通过】
 审核状态：${review.status}
 审核原因：${review.reason || "未提供"}
@@ -1008,10 +1072,15 @@ function isAnswerContentMessage(message: BaseMessage) {
   return Boolean(stringifyMessageContent(aiMsg.content));
 }
 
+const PROGRESS_END_PATTERN = new RegExp(
+  `(?:${PROGRESS_KEYWORDS.map(keyword => keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[。.!！\\s]*$`,
+  "u",
+);
+
 export function enforceFinalAnswerCompleteness(review: AnswerReviewResult, answer: string): AnswerReviewResult {
   const normalizedAnswer = answer.trim();
   const hasIncompleteProgress = INCOMPLETE_PROGRESS_PATTERNS.some(pattern => normalizedAnswer.includes(pattern));
-  const endsAsProgress = /(?:继续核实中|继续读取|继续确认|准备输出结论)[。.!！\s]*$/u.test(normalizedAnswer);
+  const endsAsProgress = PROGRESS_END_PATTERN.test(normalizedAnswer);
 
   if (!hasIncompleteProgress || !endsAsProgress) {
     return review;

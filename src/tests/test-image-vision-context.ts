@@ -1,5 +1,6 @@
 import { parseWeComMessage, shouldStartEarlyProgressBeforeParse } from "../wecom-adapter.js";
 import type { VisionAnalysisInput } from "../vision-analyzer.js";
+import { readFileSync } from "node:fs";
 
 function assertTrue(condition: boolean, message: string) {
   if (!condition) {
@@ -85,5 +86,11 @@ const fallbackResultText = JSON.stringify(fallbackResult);
 
 assertTrue(fallbackResultText.includes("图片识别失败"), "图片识别失败时应生成可见失败说明");
 assertTrue(fallbackResultText.includes("data:image/jpeg;base64,"), "图片识别失败时仍应保留原图");
+
+const visionSource = readFileSync("src/vision-analyzer.ts", "utf8");
+assertTrue(visionSource.includes("原因分析、根本原因、调用链、代码位置"), "视觉识别应提取截图中的原因分析和调用链");
+assertTrue(visionSource.includes("方法名、类名、文件路径、行号"), "视觉识别应提取代码定位信息");
+assertTrue(visionSource.includes("错误码/状态码含义"), "视觉识别应提取错误码含义");
+assertTrue(visionSource.includes("根本原因/排查方向"), "视觉识别应提取根因和排查方向");
 
 console.log("图片视觉上下文解析测试通过");

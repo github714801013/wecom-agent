@@ -18,7 +18,15 @@
       "url": "http://127.0.0.1:1348/sse",
       "type": "sse",
       "headers": {
-        "projects": "project-a,project-b"
+        "x-server": "gitnexus"
+      },
+      "headerProfiles": {
+        "/oa": {
+          "projects": "oa-stock,jiuji-m,9ji-admin,MyDjangoProject,jiuji-mp,yimagz_submit,oa-order,autoTransfer,oa-pc,oa-after,oa-finance,huishou,oanew,saasoanew,oa-api,nc-segments,logistics,orginfo,StateAllowanceDeclaration,web,oa-pay,iteng-sp"
+        },
+        "/neo": {
+          "projects": "small-oa,jiuyun-oa,neo-oa,jiuyun-moa"
+        }
       }
     },
     {
@@ -36,10 +44,10 @@
       "wsUrl": "wss://openws.work.weixin.qq.com",
       "mcpHeaders": {
         "gitnexus": {
-          "x-project": "project-a",
           "x-robot": "robot-a"
         }
-      }
+      },
+      "defaultMcpHeaderCommand": "/oa"
     },
     {
       "name": "robot-b",
@@ -50,8 +58,12 @@
         "db": {
           "x-project": "project-b",
           "x-robot": "robot-b"
+        },
+        "gitnexus": {
+          "x-robot": "robot-b"
         }
-      }
+      },
+      "defaultMcpHeaderCommand": "/neo"
     }
   ],
   "tools": {

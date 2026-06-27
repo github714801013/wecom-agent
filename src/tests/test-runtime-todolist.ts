@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  addRuntimeAuditTodoItem,
   applySqlAuditEvidence,
   assertTodoListComplete,
   buildIncompleteAuditTodoMessage,
@@ -13,40 +14,56 @@ import {
   completeTodoItem,
   createRuntimeTodoList,
   generateUserFacingAuditFallbackMessage,
+  getActiveAuditTodoItems,
   getIncompleteAuditTodoItems,
   getIncompleteTodoItems,
+  appendIncompleteFinalNotice,
   isFinalAnswerReady,
   isSqlAuditEvidenceBlocking,
+  syncRuntimeAuditTodoPlan,
   startTodoItem,
 } from "../runtime-todolist.js";
 
+function addAuditItems(todoList: ReturnType<typeof createRuntimeTodoList>, itemIds: string[]) {
+  for (const itemId of itemIds) {
+    addRuntimeAuditTodoItem(todoList, itemId);
+  }
+}
+
 const defaultTodoList = createRuntimeTodoList();
-assert.ok(
-  defaultTodoList.items.some(item => item.id === "project_scope_audited"),
-  "默认 TodoList 必须包含项目/代码包一致性审核"
+assert.equal(
+  getActiveAuditTodoItems(defaultTodoList).length,
+  0,
+  "默认 TodoList 只包含核心流程，审核节点必须按问题动态加入"
 );
+syncRuntimeAuditTodoPlan(defaultTodoList, {
+  question: "九机物流单详情，什么情况下显示作废按钮",
+  answer: "结论：按钮显示由 oa-pc 页面状态和接口返回共同决定。",
+  plannerIntent: "API",
+  repoHints: ["oa-pc"],
+  toolResultCount: 2,
+});
+assert.deepEqual(
+  getActiveAuditTodoItems(defaultTodoList).map(item => item.id),
+  ["project_scope_audited", "evidence_audited", "execution_flow_audited"],
+  "代码/接口类问题应动态加入范围、证据和执行链审核"
+);
+syncRuntimeAuditTodoPlan(defaultTodoList, {
+  question: "给我查询物流单 SQL",
+  answer: "SELECT * FROM order_info LIMIT 20",
+  plannerIntent: "SQL",
+});
 assert.ok(
   defaultTodoList.items.some(item => item.id === "sql_correctness_audited"),
-  "默认 TodoList 必须包含 SQL 正确性审核"
-);
-assert.ok(
-  defaultTodoList.items.some(item => item.id === "evidence_audited"),
-  "默认 TodoList 必须包含证据完整性审核"
-);
-assert.ok(
-  defaultTodoList.items.some(item => item.id === "execution_flow_audited"),
-  "默认 TodoList 必须包含执行链完整性审核"
-);
-assert.ok(
-  defaultTodoList.items.some(item => item.id === "owner_contact_audited"),
-  "默认 TodoList 必须包含开发人员联系建议审核"
-);
-assert.ok(
-  defaultTodoList.items.some(item => item.id === "final_format_audited"),
-  "默认 TodoList 必须包含最终输出格式审核"
+  "SQL 类问题应动态加入 SQL 正确性审核"
 );
 
 const skippedAuditTodoList = createRuntimeTodoList();
+addAuditItems(skippedAuditTodoList, [
+  "execution_flow_audited",
+  "owner_contact_audited",
+  "sql_correctness_audited",
+]);
 completeSkippedAuditItems(skippedAuditTodoList, [
   "execution_flow_audited",
   "owner_contact_audited",
@@ -99,10 +116,15 @@ assertTodoListComplete(todoList);
 
 assert.equal(isFinalAnswerReady("已定位到候选入口，继续核实中。"), false);
 assert.equal(isFinalAnswerReady("结论：已核实接口逻辑，权限值是 6e6。"), true);
+const incompleteFinalNotice = appendIncompleteFinalNotice("已识别到接口路径或请求参数锚点，我会继续围绕这些锚点核实代码入口。");
+assert.match(incompleteFinalNotice, /已识别到接口路径或请求参数锚点/);
+assert.match(incompleteFinalNotice, /不是最终结论/);
+assert.match(incompleteFinalNotice, /目前能搜索到的信息/);
+assert.match(appendIncompleteFinalNotice(""), /不是最终结论/);
 
 const toolTodoList = createRuntimeTodoList();
 const runtimeTodoTool = buildRuntimeTodoTool(toolTodoList);
-assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 6);
+assert.equal(getIncompleteAuditTodoItems(toolTodoList).length, 0);
 await runtimeTodoTool.invoke({
   itemId: "project_scope_audited",
   status: "done",
@@ -213,6 +235,7 @@ assert.equal(
   "真实 dev 查询工具结果支撑的 SQL 审核证据不应阻塞最终发送",
 );
 const sqlAuditTodoList = createRuntimeTodoList();
+addRuntimeAuditTodoItem(sqlAuditTodoList, "sql_correctness_audited");
 applySqlAuditEvidence(sqlAuditTodoList, sqlAuditPassedEvidence);
 assert.equal(
   sqlAuditTodoList.items.find(item => item.id === "sql_correctness_audited")?.status,
@@ -224,6 +247,7 @@ const sqlAuditBlockingEvidence = buildSqlAuditEvidence(
   [],
 );
 const sqlAuditBlockingTodoList = createRuntimeTodoList();
+addRuntimeAuditTodoItem(sqlAuditBlockingTodoList, "sql_correctness_audited");
 applySqlAuditEvidence(sqlAuditBlockingTodoList, sqlAuditBlockingEvidence);
 assert.equal(
   sqlAuditBlockingTodoList.items.find(item => item.id === "sql_correctness_audited")?.status,
@@ -403,8 +427,24 @@ assert.match(
   /不涉及 SQL/,
   "不涉及 SQL 时允许审核项以不适用完成"
 );
+const codeInferredSqlEvidence = buildSqlAuditEvidence(
+  "list 数据来源是分页查库，不直接来自前端缓存；Service 调用 baseMapper.getInitData 后做动态表头组装。",
+  [],
+  "evidence_audited=done (Service 代码确认 page=baseMapper.getInitData(page,req) 为分页查库；XML 确认 SQL 从 productinfo + OperatorBusinessConfig + Ok3w_qudao + category + ch999_user 等表联查；extracted 方法确认 searchType==1 时先查商品名匹配 ppriceid 列表再传入 SQL); execution_flow_audited=done (Controller → Service → Mapper(baseMapper.getInitData 分页查询) → XML getInitData SQL)",
+);
+assert.match(
+  codeInferredSqlEvidence,
+  /代码证据反推 Mapper\/表字段结构路径/,
+  "已有 Mapper/XML/表字段来源证据时，应允许 SQL 审核按代码反推路径通过",
+);
+assert.equal(
+  isSqlAuditEvidenceBlocking(codeInferredSqlEvidence),
+  false,
+  "代码反推结构路径属于非阻塞 SQL 审核证据",
+);
 
 const incompleteAuditTodoList = createRuntimeTodoList();
+addRuntimeAuditTodoItem(incompleteAuditTodoList, "sql_correctness_audited");
 blockTodoItem(incompleteAuditTodoList, "sql_correctness_audited", "回答包含 SELECT，但没有 dev 校验结果");
 const incompleteAuditMessage = buildIncompleteAuditTodoMessage(getIncompleteAuditTodoItems(incompleteAuditTodoList));
 assert.match(incompleteAuditMessage, /SQL 正确性审核未完成/);
@@ -413,26 +453,29 @@ assert.match(incompleteAuditMessage, /下一步：/);
 assert.match(incompleteAuditMessage, /dev 执行校验结果/);
 assert.match(incompleteAuditMessage, /dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构/);
 
+const incompleteScopeTodoList = createRuntimeTodoList();
+addRuntimeAuditTodoItem(incompleteScopeTodoList, "project_scope_audited");
+blockTodoItem(incompleteScopeTodoList, "project_scope_audited", "未定位到截图区域或页面字段");
+
 const userFacingScopeFallback = buildUserFacingAuditFallbackMessage(
   "常用资产历史价显示这里的取值逻辑帮我看看",
-  getIncompleteAuditTodoItems(incompleteAuditTodoList),
+  getIncompleteAuditTodoItems(incompleteScopeTodoList),
 );
 assert.doesNotMatch(userFacingScopeFallback, /审核未完成/);
 assert.doesNotMatch(userFacingScopeFallback, /project_scope_audited|sql_correctness_audited|runtime_todolist_update/);
 assert.match(userFacingScopeFallback, /常用资产历史价/);
-assert.match(userFacingScopeFallback, /系统|项目|页面|菜单|截图/);
-assert.match(userFacingScopeFallback, /请补充/);
-assert.match(userFacingScopeFallback, /你说的“这里”具体指页面上的哪个字段、按钮、区域或截图标注/);
+assert.doesNotMatch(userFacingScopeFallback, /请补充以下任一信息后我继续查/);
+assert.match(userFacingScopeFallback, /请说明你指的具体字段、按钮或区域/);
 
 const noDeicticScopeFallback = buildUserFacingAuditFallbackMessage(
   "你用了哪些模型",
-  getIncompleteAuditTodoItems(incompleteAuditTodoList),
+  getIncompleteAuditTodoItems(incompleteScopeTodoList),
 );
 assert.match(noDeicticScopeFallback, /你用了哪些模型/);
-assert.match(noDeicticScopeFallback, /请补充以下任一信息后我继续查/);
+assert.match(noDeicticScopeFallback, /哪个助手、哪次会话或哪个时间范围内的模型调用记录/);
+assert.doesNotMatch(noDeicticScopeFallback, /请补充以下任一信息后我继续查/);
 assert.doesNotMatch(noDeicticScopeFallback, /你说的“这里”/);
 assert.doesNotMatch(noDeicticScopeFallback, /具体指页面上的哪个字段或区域/);
-assert.match(noDeicticScopeFallback, /要核实的对象、系统、助手、项目或配置范围/);
 
 const auditFallbackModelCalls: string[] = [];
 const llmGeneratedFallback = await generateUserFacingAuditFallbackMessage({
@@ -454,30 +497,59 @@ assert.equal(auditFallbackModelCalls.length, 1, "生成用户补充引导时必�
 assert.match(auditFallbackModelCalls[0]!, /不使用固定模板/);
 assert.match(auditFallbackModelCalls[0]!, /不要说“你说的这里”/);
 assert.match(auditFallbackModelCalls[0]!, /你用了哪些模型/);
+assert.match(auditFallbackModelCalls[0]!, /不要再反问这些参数是否应该有值/);
+assert.match(auditFallbackModelCalls[0]!, /禁止输出“想确认几点：”/);
 
 const failedLlmGeneratedFallback = await generateUserFacingAuditFallbackMessage({
   question: "你用了哪些模型",
-  items: getIncompleteAuditTodoItems(incompleteAuditTodoList),
+  items: getIncompleteAuditTodoItems(incompleteScopeTodoList),
   model: {
     async invoke() {
       throw new Error("llm unavailable");
     },
   },
 });
-assert.match(failedLlmGeneratedFallback, /要核实的对象、系统、助手、项目或配置范围/);
+assert.match(failedLlmGeneratedFallback, /哪个助手、哪次会话或哪个时间范围内的模型调用记录|最小定位锚点/);
 assert.doesNotMatch(failedLlmGeneratedFallback, /你说的“这里”/);
 
 const curlScopeFallback = buildUserFacingAuditFallbackMessage(
   `curl 'https://oawcf2.ch999.cn/kcApi/doSendWuLiu' --data-raw 'wlCompany=shunfeng&expressCategory=&wlIds=42836554'
 这个提交顺丰物流单，默认是标快还是特快`,
-  getIncompleteAuditTodoItems(incompleteAuditTodoList),
+  getIncompleteAuditTodoItems(incompleteScopeTodoList),
 );
-assert.doesNotMatch(curlScopeFallback, /请补充以下任一信息/);
+assert.doesNotMatch(curlScopeFallback, /请补充以下任一信息后我继续查/);
 assert.doesNotMatch(curlScopeFallback, /所在系统、项目、页面、菜单路径或接口地址/);
-assert.match(curlScopeFallback, /已识别到用户提供的接口地址、接口路径或请求参数锚点/);
-assert.match(curlScopeFallback, /继续围绕这些锚点检索代码入口、参数映射和下游调用/);
+assert.match(curlScopeFallback, /接口路径或请求参数锚点/);
+assert.match(curlScopeFallback, /继续围绕这些锚点核实代码入口、参数映射和下游调用|如果还缺少信息，只需要补最小的项目、页面或入口/);
+
+const guardedCurlFallback = await generateUserFacingAuditFallbackMessage({
+  question: `curl -k -i --raw -o 0.dat -X POST -d "sub_id=18117666&sub_check=2&TakeMobile=&mobile_basket_id=&confirmInfo=" "https://oa.dev.9ji.com/addOrder/subCheckOp"
+这个接口报这个异常是什么原因：SN校验不通过，000002 不可售,未查到
+【图片识别结果】
+原因分析/调用链/代码位置：subCheckOp(sub_check=2) -> CheckSubKcGovSn -> payGatewayServices.SnQuery() -> orderServices.cs:6516`,
+  items: getIncompleteAuditTodoItems(incompleteAuditTodoList),
+  model: {
+    async invoke() {
+      return {
+        content: `从 curl 来看，TakeMobile、mobile_basket_id、confirmInfo 三个参数都是空的，而错误信息里提到了"SN校验不通过"和"000002 不可售"。我会继续围绕 subCheckOp、CheckSubKcGovSn 和 payGatewayServices.SnQuery 这条链路核实，先确认当前缺口是在参数映射、前置校验还是 SN 返回结果。`,
+      };
+    },
+  },
+});
+assert.doesNotMatch(guardedCurlFallback, /想确认几点/);
+assert.doesNotMatch(guardedCurlFallback, /TakeMobile.*是否应该有值/);
+assert.doesNotMatch(guardedCurlFallback, /sub_check=1/);
+assert.match(guardedCurlFallback, /接口路径或请求参数锚点|继续围绕 subCheckOp/);
 
 const finalFormatAuditTodoList = createRuntimeTodoList();
+addAuditItems(finalFormatAuditTodoList, [
+  "project_scope_audited",
+  "sql_correctness_audited",
+  "evidence_audited",
+  "execution_flow_audited",
+  "owner_contact_audited",
+  "final_format_audited",
+]);
 completeTodoItem(finalFormatAuditTodoList, "project_scope_audited", "不涉及代码范围");
 completeTodoItem(finalFormatAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
 completeTodoItem(finalFormatAuditTodoList, "evidence_audited", "已有结论证据");
@@ -488,6 +560,13 @@ assert.match(finalFormatAuditMessage, /最终输出格式审核未完成/);
 assert.match(finalFormatAuditMessage, /过程标签和最终结论分离/);
 
 const ownerContactAuditTodoList = createRuntimeTodoList();
+addAuditItems(ownerContactAuditTodoList, [
+  "project_scope_audited",
+  "sql_correctness_audited",
+  "evidence_audited",
+  "execution_flow_audited",
+  "owner_contact_audited",
+]);
 completeTodoItem(ownerContactAuditTodoList, "project_scope_audited", "已核对 repo");
 completeTodoItem(ownerContactAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
 completeTodoItem(ownerContactAuditTodoList, "evidence_audited", "已有结论证据");
@@ -502,6 +581,12 @@ assert.match(ownerContactAuditMessage, /最相关的修改优先/);
 assert.match(ownerContactAuditMessage, /最新修改优先/);
 
 const executionFlowAuditTodoList = createRuntimeTodoList();
+addAuditItems(executionFlowAuditTodoList, [
+  "project_scope_audited",
+  "sql_correctness_audited",
+  "evidence_audited",
+  "execution_flow_audited",
+]);
 completeTodoItem(executionFlowAuditTodoList, "project_scope_audited", "已核对 repo");
 completeTodoItem(executionFlowAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
 completeTodoItem(executionFlowAuditTodoList, "evidence_audited", "已有结论证据");
@@ -515,6 +600,13 @@ assert.match(executionFlowAuditMessage, /取数验证方式/);
 assert.match(executionFlowAuditMessage, /继续下一层/);
 
 const recoveryAuditTodoList = createRuntimeTodoList();
+addAuditItems(recoveryAuditTodoList, [
+  "project_scope_audited",
+  "sql_correctness_audited",
+  "evidence_audited",
+  "execution_flow_audited",
+  "owner_contact_audited",
+]);
 completeTodoItem(recoveryAuditTodoList, "sql_correctness_audited", "不涉及 SQL");
 completeRecoveryAuditItems(recoveryAuditTodoList, {
   question: "九机物流单详情，什么情况下显示作废按钮",
@@ -530,6 +622,7 @@ assert.equal(
 );
 
 const recoveryWithBlockedSqlTodoList = createRuntimeTodoList();
+addRuntimeAuditTodoItem(recoveryWithBlockedSqlTodoList, "sql_correctness_audited");
 blockTodoItem(
   recoveryWithBlockedSqlTodoList,
   "sql_correctness_audited",

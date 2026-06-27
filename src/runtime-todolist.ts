@@ -2,6 +2,7 @@ import { tool } from "@langchain/core/tools";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { z } from "zod";
 import { parseArgs, type ToolContextRecord } from "./tool-context-filter.js";
+import { PROGRESS_KEYWORDS } from "./progress-updates.js";
 
 export type RuntimeTodoStatus = "pending" | "in_progress" | "done" | "blocked";
 
@@ -20,21 +21,40 @@ export interface AuditFallbackModel {
   invoke(messages: Array<SystemMessage | HumanMessage>): Promise<{ content: unknown }>;
 }
 
-const DEFAULT_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = [
+export interface RuntimeAuditPlanInput {
+  question: string;
+  answer?: string;
+  plannerIntent?: string;
+  secondaryIntents?: string[];
+  repoHints?: string[];
+  toolResultCount?: number;
+  sqlAuditEvidence?: string;
+  skipAuditItems?: string[];
+}
+
+const CORE_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = [
   { id: "message_parsed", task: "解析用户消息并确定当前问题" },
   { id: "planner_checked", task: "完成问题规划或记录跳过原因" },
   { id: "tools_loaded", task: "加载 MCP 工具和项目范围" },
   { id: "analysis_finished", task: "完成业务分析节点执行" },
+  { id: "final_checked", task: "确认最终回答不是阶段性进度" },
+];
+
+const AUDIT_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = [
   { id: "project_scope_audited", task: "审核代码包、仓库、项目和用户目标范围一致性" },
   { id: "sql_correctness_audited", task: "审核 SQL 正确性、dev 校验或 dev 缺表代码反推路径" },
   { id: "evidence_audited", task: "审核结论证据完整性、字段语义和查询收敛" },
   { id: "execution_flow_audited", task: "审核接口链路、缺失日志和下游触达条件的执行链完整性" },
   { id: "owner_contact_audited", task: "审核建议处理是否需要联系相关开发人员" },
   { id: "final_format_audited", task: "审核过程标签和最终结论分离" },
-  { id: "final_checked", task: "确认最终回答不是阶段性进度" },
 ];
 
-const PROGRESS_ONLY_PATTERN = /(?:继续核实中|继续读取|继续确认|准备输出结论)[。.!！\s]*$/u;
+const AUDIT_RUNTIME_TODO_ITEM_BY_ID = new Map(AUDIT_RUNTIME_TODO_ITEMS.map(item => [item.id, item]));
+
+const PROGRESS_ONLY_PATTERN = new RegExp(
+  `(?:${PROGRESS_KEYWORDS.map(keyword => keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[。.!！\\s]*$`,
+  "u",
+);
 const SQL_INTENT_PATTERN = /(?:查询|输出|生成|执行|校验|验证|检查|写|给|补充).{0,12}SQL|SQL.{0,12}(?:查询|语句|执行|校验|验证|正确性|只读)|生产\s*SQL|prod_sql_required/iu;
 const DEV_SQL_VALIDATION_CLAIM_PATTERN = /dev\s*(环境|库).*(验证|校验)|已验证\s*dev|查询不报错/u;
 const SQL_NOT_APPLICABLE_CLAIM_PATTERN = /不涉及\s*SQL|没有输出.{0,8}SQL|未输出.{0,8}SQL|不需要.{0,8}SQL|无需.{0,8}SQL|不用.{0,8}SQL|不(?:给|写|补充|输出).{0,8}SQL|暂时不(?:给|写|补充|输出).{0,8}SQL/iu;
@@ -50,6 +70,7 @@ const DEICTIC_REFERENCE_PATTERN = /(?:这里|这儿|这边|这个|这个字段|�
 const SQL_AUDIT_NOT_APPLICABLE = "不涉及 SQL，SQL 正确性审核不适用";
 const SQL_AUDIT_DEV_SCHEMA_MISSING = "涉及 SQL，dev 缺表，已标记代码反推结构路径";
 const SQL_AUDIT_DEV_VALIDATED = "涉及 SQL，已有真实 dev 查询工具结果支撑执行校验路径";
+const SQL_AUDIT_CODE_INFERRED = "涉及 SQL，已通过代码证据反推 Mapper/表字段结构路径";
 const SQL_AUDIT_MISSING_SAME_SQL_TOOL_RESULT = "涉及 SQL，回答声明 dev 校验，但缺少同一条 SQL 的真实 dev 查询工具结果";
 const SQL_AUDIT_MISSING_TOOL_RESULT = "涉及 SQL，回答声明 dev 校验，但缺少真实 dev 查询工具结果";
 const SQL_AUDIT_MISSING_VALIDATION_PATH = "涉及 SQL，需在最终回答中说明 dev 校验或 dev 缺表代码反推路径";
@@ -67,6 +88,12 @@ const AUDIT_TODO_IDS = new Set([
   "owner_contact_audited",
   "final_format_audited",
 ]);
+const FLOW_AUDIT_PATTERN = /接口|路由|URL|curl|fetch|调用链|链路|回调|MQ|消息|下游|上游|推送|状态流转|按钮|权限|显示条件|提交|拦截|报错|异常|日志|入参|参数映射|Controller|Service|Mapper|api\//iu;
+const OWNER_CONTACT_PATTERN = /代码缺陷|配置异常|修复|推动|联系.*开发|开发人员|负责人|归属|历史逻辑|谁改|谁负责|git_author_trace/iu;
+const SQL_AUDIT_APPLICABLE_PATTERN = /涉及 SQL|已有真实 dev 查询工具结果|dev 缺表|缺少.*真实 dev 查询工具结果|需在最终回答中说明 dev 校验/iu;
+const SQL_CODE_INFERENCE_SQL_PATTERN = /SQL|查库|联查|分页查库|select|from|union\s+all/iu;
+const SQL_CODE_INFERENCE_CODE_PATTERN = /Mapper|XML|baseMapper|Controller|Service|调用链|实体映射|@(?:Post|Get|Put|Delete|Request)Mapping|\.xml|\.java/iu;
+const SQL_CODE_INFERENCE_STRUCTURE_PATTERN = /\b[A-Za-z_][A-Za-z0-9_]*(?:Mapper|Controller|Service)\b|(?:表|字段|实体|Mapper\/SQL|XML).{0,80}(?:确认|反推|来源|映射|联查)|(?:确认|反推|来源|映射|联查).{0,80}(?:表|字段|实体|Mapper\/SQL|XML)/iu;
 
 const AUDIT_FALLBACK_SYSTEM_PROMPT = `你是用户补充信息引导器，只负责把内部审核缺口转成自然、具体、最小化的用户追问。
 
@@ -77,10 +104,37 @@ const AUDIT_FALLBACK_SYSTEM_PROMPT = `你是用户补充信息引导器，只负
 4. 用户已经提供 URL、接口路径、请求参数、截图文字、字段名或日志时，不要重复要求用户再提供同类信息。
 5. 不要说“你说的这里”，除非用户问题本身确实存在需要消解的指代、截图标注或页面区域。
 6. 对“你用了哪些模型”这类问题，应优先引导确认是哪个助手、哪个环境、哪次会话、哪个时间范围或哪类调用记录，而不是询问页面字段。
-7. 如果缺口可以继续由工具自行核实，直接说明会继续围绕已给锚点核实；只有真的缺少用户侧信息时才请求补充。`;
+7. 如果缺口可以继续由工具自行核实，直接说明会继续围绕已给锚点核实；只有真的缺少用户侧信息时才请求补充。
+8. 如果用户问题已经包含 curl/fetch、URL、接口路径、请求参数、错误文案、错误码，或截图里已有候选调用链、代码位置、方法名、文件路径、行号，不要再反问这些参数是否应该有值、是否等于别的字段、是否先经过上一步校验；这些都属于可通过代码入口、参数映射、调用链和测试/dev 数据继续核实的事实。
+9. 对这类已给足锚点的问题，禁止输出“想确认几点：”后跟 1/2/3 条反问；应优先输出“我会继续围绕现有锚点核实”的引导。`;
+
+function extractRequestParamNames(question: string) {
+  const names = new Set<string>();
+  for (const match of question.matchAll(/(?:^|[?&\s'"`])([A-Za-z_][A-Za-z0-9_]*)=/gmu)) {
+    const name = String(match[1] || "").trim();
+    if (!name) continue;
+    names.add(name);
+  }
+  return [...names];
+}
+
+function isPrematureQueryableParamQuestion(question: string, reply: string) {
+  if (!CONCRETE_SCOPE_ANCHOR_PATTERN.test(question)) return false;
+  const normalizedReply = reply.trim();
+  if (!normalizedReply) return false;
+
+  const hasQuestioningShape = /想确认几点|麻烦确认|请确认以下|这几个信息|是否应该有值|是否先经过|还是说直接/u.test(normalizedReply)
+    || /(?:^|\n)\s*[1-3][.、]/u.test(normalizedReply);
+  if (!hasQuestioningShape) return false;
+
+  const paramNames = extractRequestParamNames(question);
+  if (paramNames.length === 0) return false;
+  const lowerReply = normalizedReply.toLowerCase();
+  return paramNames.some(name => lowerReply.includes(name.toLowerCase()));
+}
 
 export function createRuntimeTodoList(
-  items: Array<Pick<RuntimeTodoItem, "id" | "task">> = DEFAULT_RUNTIME_TODO_ITEMS
+  items: Array<Pick<RuntimeTodoItem, "id" | "task">> = CORE_RUNTIME_TODO_ITEMS
 ): RuntimeTodoList {
   return {
     items: items.map(item => ({
@@ -88,6 +142,108 @@ export function createRuntimeTodoList(
       status: "pending",
     })),
   };
+}
+
+export function hasTodoItem(todoList: RuntimeTodoList, id: string) {
+  return todoList.items.some(todo => todo.id === id);
+}
+
+function addTodoItemIfMissing(todoList: RuntimeTodoList, item: Pick<RuntimeTodoItem, "id" | "task">) {
+  if (hasTodoItem(todoList, item.id)) return;
+  todoList.items.push({
+    ...item,
+    status: "pending",
+  });
+}
+
+export function addRuntimeAuditTodoItem(todoList: RuntimeTodoList, id: string) {
+  const item = AUDIT_RUNTIME_TODO_ITEM_BY_ID.get(id);
+  if (!item) return false;
+  addTodoItemIfMissing(todoList, item);
+  return true;
+}
+
+function normalizeIntentList(input: RuntimeAuditPlanInput) {
+  return [
+    input.plannerIntent,
+    ...(input.secondaryIntents || []),
+  ]
+    .filter((item): item is string => Boolean(item))
+    .map(item => item.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+function shouldPlanProjectScopeAudit(input: RuntimeAuditPlanInput) {
+  const combined = `${input.question}\n${input.answer || ""}`;
+  return Boolean(
+    (input.repoHints || []).length > 0
+    || CODE_SCOPE_PATTERN.test(combined)
+    || CONCRETE_SCOPE_ANCHOR_PATTERN.test(combined)
+    || (input.toolResultCount || 0) > 0
+  );
+}
+
+function shouldPlanSqlAudit(input: RuntimeAuditPlanInput) {
+  const intents = normalizeIntentList(input);
+  if (intents.includes("SQL")) return true;
+  if (input.sqlAuditEvidence && SQL_AUDIT_APPLICABLE_PATTERN.test(input.sqlAuditEvidence)) return true;
+  return SQL_INTENT_PATTERN.test(`${input.question}\n${input.answer || ""}`);
+}
+
+function shouldPlanEvidenceAudit(input: RuntimeAuditPlanInput) {
+  const combined = `${input.question}\n${input.answer || ""}`;
+  return Boolean(
+    shouldPlanProjectScopeAudit(input)
+    || shouldPlanSqlAudit(input)
+    || FLOW_AUDIT_PATTERN.test(combined)
+    || (input.toolResultCount || 0) > 0
+  );
+}
+
+function shouldPlanExecutionFlowAudit(input: RuntimeAuditPlanInput) {
+  const combined = `${input.question}\n${input.answer || ""}`;
+  const intents = normalizeIntentList(input);
+  return FLOW_AUDIT_PATTERN.test(combined)
+    || intents.some(intent => ["API", "FLOW", "BUG", "CONFIG", "DEPLOY", "PERF"].includes(intent));
+}
+
+function shouldPlanOwnerContactAudit(input: RuntimeAuditPlanInput) {
+  const combined = `${input.question}\n${input.answer || ""}`;
+  return OWNER_CONTACT_PATTERN.test(combined);
+}
+
+export function planRuntimeAuditTodoItems(input: RuntimeAuditPlanInput) {
+  const skipped = new Set(input.skipAuditItems || []);
+  const planned: string[] = [];
+  const add = (id: string, applicable: boolean) => {
+    if (!applicable) return;
+    if (id !== "sql_correctness_audited" && skipped.has(id)) return;
+    if (id === "sql_correctness_audited" && skipped.has(id) && !isSqlAuditEvidenceBlocking(input.sqlAuditEvidence || "")) return;
+    if (!planned.includes(id)) planned.push(id);
+  };
+
+  add("project_scope_audited", shouldPlanProjectScopeAudit(input));
+  add("sql_correctness_audited", shouldPlanSqlAudit(input));
+  add("evidence_audited", shouldPlanEvidenceAudit(input));
+  add("execution_flow_audited", shouldPlanExecutionFlowAudit(input));
+  add("owner_contact_audited", shouldPlanOwnerContactAudit(input));
+
+  // 输出格式检查由 final_checked 的确定性闸门负责，只有模型主动使用该节点时才加入。
+  return planned
+    .map(id => AUDIT_RUNTIME_TODO_ITEM_BY_ID.get(id))
+    .filter((item): item is Pick<RuntimeTodoItem, "id" | "task"> => Boolean(item));
+}
+
+export function syncRuntimeAuditTodoPlan(todoList: RuntimeTodoList, input: RuntimeAuditPlanInput) {
+  const plannedItems = planRuntimeAuditTodoItems(input);
+  for (const item of plannedItems) {
+    addTodoItemIfMissing(todoList, item);
+  }
+  return plannedItems;
+}
+
+export function getActiveAuditTodoItems(todoList: RuntimeTodoList) {
+  return todoList.items.filter(item => AUDIT_TODO_IDS.has(item.id));
 }
 
 function findTodoItem(todoList: RuntimeTodoList, id: string) {
@@ -152,11 +308,79 @@ export function assertTodoListComplete(todoList: RuntimeTodoList) {
   }
 }
 
+function splitProgressSentences(content: string) {
+  return content
+    .replace(/\r\n/g, "\n")
+    .split(/(?<=[。.!！?？])\s*/u)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function isProgressSentence(sentence: string) {
+  return PROGRESS_KEYWORDS.some(keyword => sentence.includes(keyword));
+}
+
+// 结论性标记：正面判断回答是否包含实质性业务结论（而非纯过程话术）。
+// 只保留"出现即大概率有结论"的标记，排除接口/入口/来自等过程话术也会用的泛词。
+const CONCLUSION_MARKERS = [
+  "结论",
+  "依据",
+  "原因是",
+  "条件是",
+  "已核实",
+  ".java",
+  ".vue",
+  ".ts",
+  ".js",
+  ".xml",
+  ".yml",
+  ".yaml",
+  ".sql",
+  "表名",
+  "字段名",
+  "状态值",
+  "权限码",
+  "枚举值",
+];
+
+function hasConclusionMarker(content: string) {
+  return CONCLUSION_MARKERS.some(marker => content.includes(marker));
+}
+
+// 判断整段文本是否由过程话术主导（所有句子都是过程句，或文本以过程词结尾）。
+// 用于拦截模型输出的阶段性话术被当成最终答案发送。
+function isProgressDominantContent(content: string) {
+  const normalized = content.trim();
+  if (!normalized) return true;
+
+  // 以过程词结尾：经典阶段性话术
+  if (PROGRESS_ONLY_PATTERN.test(normalized)) return true;
+
+  // 拆句后，所有句子都是过程句：整段都是过程话术，没有实质结论
+  const sentences = splitProgressSentences(normalized);
+  if (sentences.length === 0) return false;
+  if (sentences.every(sentence => isProgressSentence(sentence))) return true;
+
+  // 整段不含任何结论性标记：只有过程话术或解释性话术，没有给出业务结论
+  if (!hasConclusionMarker(normalized)) return true;
+
+  return false;
+}
+
 export function isFinalAnswerReady(content: string) {
   const normalized = content.trim();
   return Boolean(normalized)
-    && !PROGRESS_ONLY_PATTERN.test(normalized)
+    && !isProgressDominantContent(normalized)
     && !normalized.includes("> 🔍 正在调用:");
+}
+
+const INCOMPLETE_FINAL_NOTICE = "提示：以上不是最终结论，只是目前能搜索到的信息；完整结论还需要继续补齐证据闭环。";
+
+export function appendIncompleteFinalNotice(content: string) {
+  const normalized = content.trim();
+  if (!normalized) return INCOMPLETE_FINAL_NOTICE;
+  if (normalized.includes("不是最终结论")) return normalized;
+  return `${normalized}\n\n${INCOMPLETE_FINAL_NOTICE}`;
 }
 
 export function buildProjectScopeAuditEvidence(question: string, answer: string, repoHints: string[] = []) {
@@ -322,8 +546,17 @@ function analyzeDevSqlValidationToolResults(toolRecords: ToolContextRecord[] = [
   return { hasDevSqlQuery, hasSuccessfulMatchingQuery };
 }
 
-export function buildSqlAuditEvidence(answer: string, toolRecords: ToolContextRecord[] = []) {
-  if (answer.includes(DEV_SCHEMA_MISSING_MARKER)) {
+function hasCodeInferredSqlStructureEvidence(content: string) {
+  const normalized = content.trim();
+  if (!normalized) return false;
+  return SQL_CODE_INFERENCE_SQL_PATTERN.test(normalized)
+    && SQL_CODE_INFERENCE_CODE_PATTERN.test(normalized)
+    && SQL_CODE_INFERENCE_STRUCTURE_PATTERN.test(normalized);
+}
+
+export function buildSqlAuditEvidence(answer: string, toolRecords: ToolContextRecord[] = [], auditEvidenceContext = "") {
+  const combinedEvidence = `${answer}\n${auditEvidenceContext}`;
+  if (combinedEvidence.includes(DEV_SCHEMA_MISSING_MARKER)) {
     return SQL_AUDIT_DEV_SCHEMA_MISSING;
   }
 
@@ -333,11 +566,8 @@ export function buildSqlAuditEvidence(answer: string, toolRecords: ToolContextRe
     return SQL_AUDIT_NOT_APPLICABLE;
   }
 
-  const hasSqlAuditIntent = SQL_INTENT_PATTERN.test(answer) || DEV_SQL_VALIDATION_CLAIM_PATTERN.test(answer);
-
-  if (!hasSqlStatement && !hasSqlAuditIntent) {
-    return SQL_AUDIT_NOT_APPLICABLE;
-  }
+  const hasSqlAuditIntent = SQL_INTENT_PATTERN.test(combinedEvidence) || DEV_SQL_VALIDATION_CLAIM_PATTERN.test(answer);
+  const hasCodeInferenceEvidence = hasCodeInferredSqlStructureEvidence(combinedEvidence);
 
   if (DEV_SQL_VALIDATION_CLAIM_PATTERN.test(answer)) {
     // 命中 dev 校验声明但未提取到 SQL 时，必须按缺少真实工具证据处理。
@@ -351,6 +581,14 @@ export function buildSqlAuditEvidence(answer: string, toolRecords: ToolContextRe
     return SQL_AUDIT_MISSING_TOOL_RESULT;
   }
 
+  if (hasCodeInferenceEvidence) {
+    return SQL_AUDIT_CODE_INFERRED;
+  }
+
+  if (!hasSqlStatement && !hasSqlAuditIntent) {
+    return SQL_AUDIT_NOT_APPLICABLE;
+  }
+
   return SQL_AUDIT_MISSING_VALIDATION_PATH;
 }
 
@@ -359,6 +597,7 @@ export function isSqlAuditEvidenceBlocking(evidence: string) {
 }
 
 export function applySqlAuditEvidence(todoList: RuntimeTodoList, evidence: string) {
+  addRuntimeAuditTodoItem(todoList, "sql_correctness_audited");
   if (isSqlAuditEvidenceBlocking(evidence)) {
     blockTodoItem(todoList, "sql_correctness_audited", evidence);
   } else {
@@ -498,16 +737,28 @@ function hasAuditItem(items: RuntimeTodoItem[], id: string) {
 }
 
 function buildProjectScopeFallbackRequest(question: string) {
-  const lines = [
-    "1. 要核实的对象、系统、助手、项目或配置范围。",
-    "2. 相关页面、菜单路径、接口地址、配置文件、字段名或日志关键词。",
-  ];
-  if (DEICTIC_REFERENCE_PATTERN.test(question)) {
-    lines.push("3. 你说的“这里”具体指页面上的哪个字段、按钮、区域或截图标注。");
-  } else {
-    lines.push("3. 如果问题来自截图、页面或聊天记录，请补充可见文字、URL、字段名或按钮名。");
+  const normalizedQuestion = question.trim();
+  const hasModelContext = /模型|会话|助手|调用记录|时间范围/iu.test(normalizedQuestion);
+  const hasDirectAnchor = CONCRETE_SCOPE_ANCHOR_PATTERN.test(normalizedQuestion);
+  const hasDeicticReference = DEICTIC_REFERENCE_PATTERN.test(normalizedQuestion);
+
+  if (hasModelContext) {
+    return "请说明你问的是哪个助手、哪次会话或哪个时间范围内的模型调用记录，我会继续围绕当前问题核实。";
   }
-  return `请补充以下任一信息后我继续查：\n${lines.join("\n")}`;
+
+  if (hasDirectAnchor && hasDeicticReference) {
+    return "请说明你指的具体字段、按钮或区域，我会继续围绕当前锚点核实。";
+  }
+
+  if (hasDirectAnchor) {
+    return "你已经给出接口路径或请求参数锚点，我会继续围绕这些锚点核实；如果还要补充，只需要补最小的项目、页面或入口信息。";
+  }
+
+  if (hasDeicticReference) {
+    return "请说明你指的具体字段、按钮或区域，我会继续围绕当前问题核实。";
+  }
+
+  return "请补充最小定位锚点，比如项目、页面、接口或截图文字，我会继续核实。";
 }
 
 function formatAuditFallbackItems(items: RuntimeTodoItem[]) {
@@ -534,7 +785,7 @@ export function buildUserFacingAuditFallbackMessage(question: string, items: Run
 
   if (hasAuditItem(items, "project_scope_audited") || hasAuditItem(items, "evidence_audited")) {
     if (hasConcreteScopeAnchor) {
-      return `${prefix}\n\n已识别到用户提供的接口地址、接口路径或请求参数锚点，当前缺口不是“缺少接口地址”，应继续围绕这些锚点检索代码入口、参数映射和下游调用；如仍无法命中，只需要补充目标仓库或系统名。`;
+      return `${prefix}\n\n已识别到接口路径或请求参数锚点，我会继续围绕这些锚点核实代码入口、参数映射和下游调用；如果还缺少信息，只需要补最小的项目、页面或入口。`;
     }
     return `${prefix}\n\n${buildProjectScopeFallbackRequest(normalizedQuestion)}`;
   }
@@ -565,6 +816,9 @@ export async function generateUserFacingAuditFallbackMessage(input: {
       })),
     ]);
     const generated = sanitizeLlmAuditFallback(response.content);
+    if (generated && isPrematureQueryableParamQuestion(input.question, generated)) {
+      return buildUserFacingAuditFallbackMessage(input.question, input.items);
+    }
     return generated || buildUserFacingAuditFallbackMessage(input.question, input.items);
   } catch (error) {
     console.error("Failed to generate audit fallback with LLM:", error);
@@ -575,6 +829,7 @@ export async function generateUserFacingAuditFallbackMessage(input: {
 export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {
   return tool(
     async ({ itemId, status, evidence }) => {
+      addRuntimeAuditTodoItem(todoList, itemId);
       if (status === "done") {
         completeTodoItem(todoList, itemId, evidence);
       } else if (status === "blocked") {
@@ -589,8 +844,9 @@ export function buildRuntimeTodoTool(todoList: RuntimeTodoList) {
       name: "runtime_todolist_update",
       description: [
         "更新当前回答的运行时 TodoList。",
-        "模型必须在最终回答前调用本工具完成审核步骤。",
-        "可用 itemId：project_scope_audited（代码包/仓库/项目范围一致性审核）、",
+        "当前 TodoList 是动态计划，不是固定流程；只处理系统提示或当前问题明确需要的 itemId。",
+        "如果分析过程中发现必须新增某个审核节点，可调用本工具写入该节点及证据。",
+        "可选 itemId：project_scope_audited（代码包/仓库/项目范围一致性审核）、",
         "sql_correctness_audited（SQL 正确性、dev 校验或 dev 缺表代码反推审核）、",
         "evidence_audited（结论证据完整性、字段语义和查询收敛审核）、",
         "execution_flow_audited（接口链路、缺失日志、下游触达条件、回调、MQ、外部系统推送和状态流转的执行链完整性审核）、",

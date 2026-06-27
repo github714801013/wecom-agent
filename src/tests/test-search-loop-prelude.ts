@@ -60,16 +60,18 @@ async function runTest() {
       compressed_sections: input.search_results.map((item, index) => ({
         section_id: `s${index}`,
         file_path: item.file_path || "",
-        symbol: "",
+        symbol: index === 0 ? "SmsController.send" : "SmsService.sendSms",
         kind: "code",
-        lines: "",
+        lines: index === 0 ? "10-30" : "40-90",
         score: 1,
         reason: "命中检索词",
         anchors: [],
         content: item.content,
         merged_from: [item.id],
       })),
-      call_chain: [],
+      call_chain: input.search_results.length > 1
+        ? [{ from: "SmsController.send", to: "SmsService.sendSms", relation: "calls" }]
+        : [],
       key_evidence: input.search_results.map(item => item.content),
       dropped: [],
       missing_info: input.search_results.length === 1 ? ["缺少发送调用"] : [],
@@ -84,6 +86,11 @@ async function runTest() {
   assert.match(prelude, /【预检索证据】/);
   assert.match(prelude, /sms template/);
   assert.match(prelude, /sendSms 调用证据/);
+  assert.match(prelude, /关系索引/);
+  assert.match(prelude, /SmsController\.send --calls--> SmsService\.sendSms/);
+  assert.match(prelude, /已分析代码范围索引/);
+  assert.match(prelude, /SmsController\.send:10~30（文件: src\/sms\.ts）/);
+  assert.match(prelude, /SmsService\.sendSms:40~90（文件: src\/send\.ts）/);
   assert.doesNotMatch(prelude, /sms template 缺少发送调用/);
 
   const priorityCalls: any[] = [];
@@ -397,7 +404,7 @@ async function runTest() {
       new HumanMessage("常用资产历史价取值逻辑"),
       new AIMessage("历史价来自 asset_price 表，这条和当前目标无关"),
       new HumanMessage("submitFilmYearOrder 这个方法调用链路"),
-      new AIMessage("已确认 submitFilmYearOrder 位于 ShellFilmServiceImpl.java"),
+      new AIMessage("已确认 submitFilmYearOrder 位于 ShellFilmServiceImpl.java，submitFilmYearOrder:300~500 已分析，submitFilmYearOrder 调用 ShellFilmServiceImpl.getYearPackageInfo，ShellFilmServiceImpl.getYearPackageInfo 调用 SmallproFilmCardServiceImpl.repurchaseBuyTime"),
       new HumanMessage("另一个完全无关的问题"),
       new AIMessage("无关回答"),
     ],
@@ -405,8 +412,13 @@ async function runTest() {
   );
   const compactedText = compactedSession.map(message => String(message.content)).join("\n");
   assert.match(compactedText, /当前目标上下文精简/);
+  assert.match(compactedText, /关系索引/);
+  assert.match(compactedText, /已分析代码范围索引/);
   assert.match(compactedText, /submitFilmYearOrder/);
+  assert.match(compactedText, /submitFilmYearOrder:300~500/);
   assert.match(compactedText, /ShellFilmServiceImpl\.java/);
+  assert.match(compactedText, /submitFilmYearOrder --calls--> ShellFilmServiceImpl\.getYearPackageInfo/);
+  assert.match(compactedText, /ShellFilmServiceImpl\.getYearPackageInfo --calls--> SmallproFilmCardServiceImpl\.repurchaseBuyTime/);
   assert.doesNotMatch(compactedText, /asset_price/);
 
   const compactedCurrentTurn = buildMessagesForCurrentTurn({

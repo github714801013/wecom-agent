@@ -26,13 +26,29 @@ fs.writeFileSync(tempConfigFile, JSON.stringify({
     recursionLimit: 25,
     contextWindow: 0,
   },
-  mcpServers: [],
+  mcpServers: [{
+    name: "gitnexus",
+    url: "http://127.0.0.1:1348/sse",
+    type: "sse",
+    headers: {
+      "x-server": "gitnexus",
+    },
+    headerProfiles: {
+      "/oa": {
+        projects: "oa-stock,jiuji-m,9ji-admin",
+      },
+      "/neo": {
+        projects: "small-oa,jiuyun-oa",
+      },
+    },
+  }],
   bots: [{
     name: "robot-a",
     botId: "${TEST_BOT_ID}",
     secret: "${TEST_BOT_SECRET}",
     wsUrl: "wss://openws.work.weixin.qq.com",
     mcpHeaders: {},
+    defaultMcpHeaderCommand: "/oa",
   }],
   tools: {
     allowed: [],
@@ -46,6 +62,9 @@ const { buildMcpHeaders } = await import("../mcp-client.js");
 
 assertEqual(config.llm.apiKey, "test-api-key", "config should resolve llm api key placeholder");
 assertEqual(config.bots[0]?.botId, "test-bot-id", "config should resolve bot id placeholder");
+assertEqual(config.mcpServers[0]?.headerProfiles["/oa"]?.projects, "oa-stock,jiuji-m,9ji-admin", "config should parse OA MCP header profile");
+assertEqual(config.mcpServers[0]?.headerProfiles["/neo"]?.projects, "small-oa,jiuyun-oa", "config should parse NEO MCP header profile");
+assertEqual(config.bots[0]?.defaultMcpHeaderCommand, "/oa", "bot should configure default MCP header command");
 assertEqual(config.tools.cacheTtlMinutes, 15, "config should parse MCP tools cache TTL");
 assertEqual(config.tools.maxAgentToolResultsPerTurn, 64, "config should default max agent tool results per turn to 64");
 assertEqual(config.vision.enabled, true, "config should enable image vision analysis by default");
@@ -69,6 +88,7 @@ const gitnexusServer = {
     "x-global": "global",
     "x-overlap": "server",
   },
+  headerProfiles: {},
 };
 
 const dbServer = {
@@ -78,6 +98,7 @@ const dbServer = {
   headers: {
     "x-global": "db-global",
   },
+  headerProfiles: {},
 };
 
 const bot = {
@@ -101,5 +122,12 @@ assertEqual(gitnexusHeaders["x-robot"], "robot-a", "bot header should be added t
 const dbHeaders = buildMcpHeaders(dbServer, bot);
 assertEqual(dbHeaders["x-global"], "db-global", "unmatched MCP server should keep server header");
 assertEqual(dbHeaders["x-robot"], undefined, "unmatched MCP server should not receive bot header");
+
+const overriddenHeaders = buildMcpHeaders(gitnexusServer, bot, {
+  gitnexus: {
+    projects: "small-oa,jiuyun-oa",
+  },
+});
+assertEqual(overriddenHeaders["projects"], "small-oa,jiuyun-oa", "session MCP header should override server and bot headers");
 
 console.log("配置解析与 MCP header 合并验证通过");

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { isFinalAnswerReady } from "../runtime-todolist.js";
+import { reviewFinalAnswerWithModel } from "../runtime-todolist.js";
 
 // 过程话术负样本：必须被判为非最终答案（不可发送给用户）
 const progressSamples = [
@@ -20,11 +20,29 @@ const finalSamples = [
 ];
 
 for (const sample of progressSamples) {
-  assert.equal(isFinalAnswerReady(sample), false, `应判定为非最终答案：${sample.slice(0, 30)}...`);
+  const review = await reviewFinalAnswerWithModel({
+    question: "排查接口问题",
+    answer: sample,
+    model: {
+      async invoke() {
+        return { content: { ready: false, action: "continue", reason: "模型判断仍是中间过程" } };
+      },
+    },
+  });
+  assert.equal(review.ready, false, `应由模型判定为非最终答案：${sample.slice(0, 30)}...`);
 }
 
 for (const sample of finalSamples) {
-  assert.equal(isFinalAnswerReady(sample), true, `应判定为最终答案：${sample.slice(0, 30)}...`);
+  const review = await reviewFinalAnswerWithModel({
+    question: "排查接口问题",
+    answer: sample,
+    model: {
+      async invoke() {
+        return { content: { ready: true, action: "send", reason: "模型判断已经回答用户问题" } };
+      },
+    },
+  });
+  assert.equal(review.ready, true, `应由模型判定为最终答案：${sample.slice(0, 30)}...`);
 }
 
-console.log("过程话术与最终答案判定验证通过");
+console.log("模型最终答案评审委托验证通过");

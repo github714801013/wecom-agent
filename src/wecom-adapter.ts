@@ -72,9 +72,9 @@ import {
   createRuntimeTodoList,
   getIncompleteAuditTodoItems,
   hasTodoItem,
-  isFinalAnswerReady,
   isSqlAuditEvidenceBlocking,
   renderTodoStepsForHeartbeat,
+  reviewFinalAnswerWithModel,
   syncRuntimeAuditTodoPlan,
   startTodoItem,
   summarizeTodoList,
@@ -841,10 +841,8 @@ const runtimeTodoList = createRuntimeTodoList();
         replyStreamQueue = replyTask.then(() => undefined, () => undefined);
         return replyTask;
       };
-      const hasFinalAnswerCandidate = () => isFinalAnswerReady(collapseProgressUpdates(stripEmptyProtocolContent(fullContent)));
       const sendStageProgress = async (content: string, force = false) => {
         if (shouldStopCurrentTask()) return;
-        if (hasFinalAnswerCandidate()) return;
         if (!force && Date.now() - lastUpdateTime <= 1000) return;
         await safeReplyStream(buildProgressStreamContent(content), false);
         lastUpdateTime = Date.now();
@@ -863,10 +861,6 @@ const runtimeTodoList = createRuntimeTodoList();
       };
       heartbeatTimer = setInterval(() => {
         if (heartbeatInFlight || shouldStopCurrentTask()) return;
-        if (hasFinalAnswerCandidate()) {
-          stopThinkingHeartbeat();
-          return;
-        }
         const now = Date.now();
        if (now - lastHeartbeatTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
        heartbeatInFlight = true;
@@ -1205,7 +1199,7 @@ ${hypotheses}
 
                     // 节流推送：避免高频更新导致前端闪烁
                     if (Date.now() - lastUpdateTime > 1000) {
-                      if (!shouldStopCurrentTask() && !hasFinalAnswerCandidate()) {
+                      if (!shouldStopCurrentTask()) {
                         await safeReplyStream(statusMsg, false);
                       }
                       lastUpdateTime = Date.now();
@@ -1228,7 +1222,7 @@ ${hypotheses}
                     const statusMsg = buildProgressStreamContent(fullContent, [
                       `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
                     ]);
-                    if (!shouldStopCurrentTask() && !hasFinalAnswerCandidate()) {
+                    if (!shouldStopCurrentTask()) {
                       await safeReplyStream(statusMsg, false);
                     }
                   }
@@ -1252,7 +1246,7 @@ ${hypotheses}
                   }
 
                   if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-                    if (!shouldStopCurrentTask() && !hasFinalAnswerCandidate()) {
+                    if (!shouldStopCurrentTask()) {
                       await safeReplyStream(collapseProgressUpdates(fullContent), false);
                     }
                     lastUpdateTime = Date.now();
@@ -1423,8 +1417,13 @@ ${hypotheses}
       }
 
       startTodoItem(runtimeTodoList, "final_checked");
-      if (isFinalAnswerReady(fullContent)) {
-        completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}`);
+      const finalReview = await reviewFinalAnswerWithModel({
+        question: currentQuestion,
+        answer: fullContent,
+        model: await getBaseModel(),
+      });
+      if (finalReview.ready) {
+        completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}; review=${finalReview.reason}`);
       } else {
         // 兜底：LLM 未走 human_loop JSON 协议，但输出的是提问/澄清类内容，
         // 转成 Human Loop 暂停等用户补充，而不是追加 notice 直接发送终止。
@@ -1441,7 +1440,7 @@ ${hypotheses}
         } else {
           console.error(`[${botConfig.name}] Runtime TodoList blocked for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
           fullContent = appendIncompleteFinalNotice(fullContent);
-          completeTodoItem(runtimeTodoList, "final_checked", "sent incomplete-answer notice with preserved content");
+          completeTodoItem(runtimeTodoList, "final_checked", `sent incomplete-answer notice with preserved content; review=${finalReview.reason}`);
         }
       }
       if (auditPassed) {

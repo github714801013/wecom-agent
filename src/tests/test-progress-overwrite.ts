@@ -201,7 +201,10 @@ assert.doesNotMatch(
 const heartbeatStartIndex = adapterSource.indexOf("heartbeatTimer = setInterval");
 const agentStreamIndex = adapterSource.indexOf("const stream = await agent.stream");
 const finalStopIndex = adapterSource.indexOf("stopThinkingHeartbeat();\n      if (!shouldStopCurrentTask())");
-const finalCandidateGuardIndex = adapterSource.indexOf("const hasFinalAnswerCandidate = () => isFinalAnswerReady(collapseProgressUpdates(stripEmptyProtocolContent(fullContent)))");
+const heartbeatEndIndex = adapterSource.indexOf("}, THINKING_HEARTBEAT_INTERVAL_MS);", heartbeatStartIndex);
+const heartbeatBlock = heartbeatStartIndex >= 0 && heartbeatEndIndex > heartbeatStartIndex
+  ? adapterSource.slice(heartbeatStartIndex, heartbeatEndIndex)
+  : "";
 assert.ok(
   heartbeatStartIndex >= 0 && agentStreamIndex >= 0 && heartbeatStartIndex < agentStreamIndex,
   "thinking heartbeat should start before the agent stream so backend pre/post processing stays alive",
@@ -210,24 +213,15 @@ assert.ok(
   finalStopIndex > agentStreamIndex,
   "thinking heartbeat should remain active until the final answer is ready to send",
 );
-assert.ok(
-  finalCandidateGuardIndex > 0,
-  "adapter should detect final answer candidates before sending more intermediate updates",
-);
-assert.match(
+assert.doesNotMatch(
   adapterSource,
-  /const sendStageProgress = async[\s\S]*?if \(hasFinalAnswerCandidate\(\)\) return;/,
-  "stage progress should stop once a final answer candidate exists",
+  /hasFinalAnswerCandidate|isFinalAnswerReady\(collapseProgressUpdates\(stripEmptyProtocolContent\(fullContent\)\)\)/,
+  "streaming path should not infer final answer candidates from partial content",
 );
-assert.match(
-  adapterSource,
-  /heartbeatTimer = setInterval[\s\S]*?if \(hasFinalAnswerCandidate\(\)\) \{\s*stopThinkingHeartbeat\(\);\s*return;\s*\}/,
-  "thinking heartbeat should stop once a final answer candidate exists",
-);
-assert.match(
-  adapterSource,
-  /!shouldStopCurrentTask\(\) && !hasFinalAnswerCandidate\(\)/,
-  "tool status and partial answer pushes should be suppressed after final answer candidate exists",
+assert.doesNotMatch(
+  heartbeatBlock,
+  /isFinalAnswerReady|stopThinkingHeartbeat\(\)/,
+  "thinking heartbeat should not stop before the agent stream ends based on content heuristics",
 );
 
 assert.equal(

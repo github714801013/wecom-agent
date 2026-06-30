@@ -2,7 +2,6 @@ import { tool } from "@langchain/core/tools";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { z } from "zod";
 import { parseArgs, type ToolContextRecord } from "./tool-context-filter.js";
-import { PROGRESS_KEYWORDS } from "./progress-updates.js";
 
 export type RuntimeTodoStatus = "pending" | "in_progress" | "done" | "blocked";
 
@@ -19,6 +18,20 @@ export interface RuntimeTodoList {
 
 export interface AuditFallbackModel {
   invoke(messages: Array<SystemMessage | HumanMessage>): Promise<{ content: unknown }>;
+}
+
+export type FinalAnswerReviewAction = "send" | "continue" | "human_loop";
+
+export interface FinalAnswerReviewResult {
+  ready: boolean;
+  action: FinalAnswerReviewAction;
+  reason: string;
+}
+
+export interface FinalAnswerReviewInput {
+  question: string;
+  answer: string;
+  model?: AuditFallbackModel;
 }
 
 export interface RuntimeAuditPlanInput {
@@ -51,10 +64,6 @@ const AUDIT_RUNTIME_TODO_ITEMS: Array<Pick<RuntimeTodoItem, "id" | "task">> = [
 
 const AUDIT_RUNTIME_TODO_ITEM_BY_ID = new Map(AUDIT_RUNTIME_TODO_ITEMS.map(item => [item.id, item]));
 
-const PROGRESS_ONLY_PATTERN = new RegExp(
-  `(?:${PROGRESS_KEYWORDS.map(keyword => keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[。.!！\\s]*$`,
-  "u",
-);
 const SQL_INTENT_PATTERN = /(?:查询|输出|生成|执行|校验|验证|检查|写|给|补充).{0,12}SQL|SQL.{0,12}(?:查询|语句|执行|校验|验证|正确性|只读)|生产\s*SQL|prod_sql_required/iu;
 const DEV_SQL_VALIDATION_CLAIM_PATTERN = /dev\s*(环境|库).*(验证|校验)|已验证\s*dev|查询不报错/u;
 const SQL_NOT_APPLICABLE_CLAIM_PATTERN = /不涉及\s*SQL|没有输出.{0,8}SQL|未输出.{0,8}SQL|不需要.{0,8}SQL|无需.{0,8}SQL|不用.{0,8}SQL|不(?:给|写|补充|输出).{0,8}SQL|暂时不(?:给|写|补充|输出).{0,8}SQL/iu;
@@ -67,6 +76,14 @@ const SQL_INLINE_PATTERN = /\b(?:select|show|explain)\b[\s\S]*?(?:;|$)/gimu;
 const CODE_SCOPE_PATTERN = /项目|仓库|代码包|模块|接口|页面|入口|类名|方法名|controller|service|mapper|repo|package|GitNexus/iu;
 const CONCRETE_SCOPE_ANCHOR_PATTERN = /\bhttps?:\/\/|(?:^|[\s'"`(（])\/?(?:api|[A-Za-z][A-Za-z0-9_-]*Api)\/[A-Za-z0-9][A-Za-z0-9/_{}.-]*|(?:^|[?&\s'"`])(?:wlCompany|expressCategory|wlIds|area|ch999id|source|status|orderId|subId|id)=/iu;
 const DEICTIC_REFERENCE_PATTERN = /(?:这里|这儿|这边|这个|这个字段|该字段|该按钮|截图|图片|圈出|圈选|标注|红圈|上面|下面)/iu;
+const IMAGE_ANALYSIS_ARTIFACT_MARKERS = [
+  "【图片识别结果】",
+  "图片位置：",
+  "图片标题：",
+  "圈选/标注重点：",
+  "关键字段/按钮/列名：",
+  "未识别清楚：",
+];
 const SQL_AUDIT_NOT_APPLICABLE = "不涉及 SQL，SQL 正确性审核不适用";
 const SQL_AUDIT_DEV_SCHEMA_MISSING = "涉及 SQL，dev 缺表，已标记代码反推结构路径";
 const SQL_AUDIT_DEV_VALIDATED = "涉及 SQL，已有真实 dev 查询工具结果支撑执行校验路径";
@@ -107,6 +124,17 @@ const AUDIT_FALLBACK_SYSTEM_PROMPT = `你是用户补充信息引导器，只负
 7. 如果缺口可以继续由工具自行核实，直接说明会继续围绕已给锚点核实；只有真的缺少用户侧信息时才请求补充。
 8. 如果用户问题已经包含 curl/fetch、URL、接口路径、请求参数、错误文案、错误码，或截图里已有候选调用链、代码位置、方法名、文件路径、行号，不要再反问这些参数是否应该有值、是否等于别的字段、是否先经过上一步校验；这些都属于可通过代码入口、参数映射、调用链和测试/dev 数据继续核实的事实。
 9. 对这类已给足锚点的问题，禁止输出“想确认几点：”后跟 1/2/3 条反问；应优先输出“我会继续围绕现有锚点核实”的引导。`;
+
+const FINAL_ANSWER_REVIEW_SYSTEM_PROMPT = `你是最终回复闸门，只判断候选回答是否已经可以作为最终回复发送给用户。
+
+只输出 JSON 对象，不输出 Markdown 或额外解释：
+{"ready":true|false,"action":"send"|"continue"|"human_loop","reason":"一句中文原因"}
+
+判断规则：
+1. 如果候选回答只是进度、工具状态、图片/OCR解析结果、规划步骤、还要继续查、还没形成业务结论，ready=false，action="continue"。
+2. 如果候选回答已经直接回答用户问题，并包含必要的结论、依据或明确的最小缺口，ready=true，action="send"。
+3. 如果确实需要用户补充信息才能继续，ready=false，action="human_loop"。
+4. 不要根据固定关键词判断，要结合用户原问题和候选回答的语义。`;
 
 function extractRequestParamNames(question: string) {
   const names = new Set<string>();
@@ -308,78 +336,65 @@ export function assertTodoListComplete(todoList: RuntimeTodoList) {
   }
 }
 
-function splitProgressSentences(content: string) {
-  return content
-    .replace(/\r\n/g, "\n")
-    .split(/(?<=[。.!！?？])\s*/u)
-    .map(item => item.trim())
-    .filter(Boolean);
+function parseJsonObject(content: unknown) {
+  if (content && typeof content === "object") return content as Record<string, unknown>;
+  const text = String(content || "").trim();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
 }
 
-function isProgressSentence(sentence: string) {
-  return PROGRESS_KEYWORDS.some(keyword => sentence.includes(keyword));
+function normalizeFinalAnswerReview(content: unknown): FinalAnswerReviewResult {
+  const parsed = parseJsonObject(content);
+  const action = parsed.action === "send" || parsed.action === "human_loop"
+    ? parsed.action
+    : "continue";
+  const ready = parsed.ready === true && action === "send";
+  const reason = typeof parsed.reason === "string" && parsed.reason.trim()
+    ? parsed.reason.trim()
+    : "模型未返回明确最终回复判定";
+
+  return { ready, action, reason };
 }
 
-// 结论性标记：正面判断回答是否包含实质性业务结论（而非纯过程话术）。
-// 只保留"出现即大概率有结论"的标记，排除接口/入口/来自等过程话术也会用的泛词。
-const CONCLUSION_MARKERS = [
-  "结论",
-  "依据",
-  "原因是",
-  "条件是",
-  "已核实",
-  ".java",
-  ".vue",
-  ".ts",
-  ".js",
-  ".xml",
-  ".yml",
-  ".yaml",
-  ".sql",
-  "表名",
-  "字段名",
-  "状态值",
-  "权限码",
-  "枚举值",
-];
-const DIAGNOSTIC_CONCLUSION_PATTERN = /(?:(?:返回|报错|错误码|code\s*=|code=|status\s*=|status=|error\s*=|error=).{0,120})?(?:access_?token|token).{0,80}(?:缺失|为空|null|无效|过期|未正确|异常|失败|不通过|不可售)|(?:返回|报错|错误码|code\s*=|code=|status\s*=|status=|error\s*=|error=).{0,120}(?:缺失|为空|null|无效|过期|未正确|异常|失败|不通过|不可售)|(?:属于|定位为).{0,40}(?:配置|授权|Token|token|校验|接口|后端|前端|数据).{0,40}(?:问题|缺失|异常|失败)/iu;
-
-function hasDiagnosticConclusion(content: string) {
-  return DIAGNOSTIC_CONCLUSION_PATTERN.test(content);
+function isImageAnalysisArtifact(content: string) {
+  return IMAGE_ANALYSIS_ARTIFACT_MARKERS.some(marker => content.includes(marker));
 }
 
-function hasConclusionMarker(content: string) {
-  return CONCLUSION_MARKERS.some(marker => content.includes(marker))
-    || hasDiagnosticConclusion(content);
-}
+export async function reviewFinalAnswerWithModel(input: FinalAnswerReviewInput): Promise<FinalAnswerReviewResult> {
+  if (!input.answer.trim()) {
+    return { ready: false, action: "continue", reason: "候选回答为空" };
+  }
+  if (!input.model) {
+    return { ready: false, action: "continue", reason: "缺少最终回复评审模型" };
+  }
 
-// 判断整段文本是否由过程话术主导（所有句子都是过程句，或文本以过程词结尾）。
-// 用于拦截模型输出的阶段性话术被当成最终答案发送。
-function isProgressDominantContent(content: string) {
-  const normalized = content.trim();
-  if (!normalized) return true;
-
-  if (hasDiagnosticConclusion(normalized)) return false;
-
-  // 以过程词结尾：经典阶段性话术
-  if (PROGRESS_ONLY_PATTERN.test(normalized)) return true;
-
-  // 拆句后，所有句子都是过程句：整段都是过程话术，没有实质结论
-  const sentences = splitProgressSentences(normalized);
-  if (sentences.length === 0) return false;
-  if (sentences.every(sentence => isProgressSentence(sentence))) return true;
-
-  // 整段不含任何结论性标记：只有过程话术或解释性话术，没有给出业务结论
-  if (!hasConclusionMarker(normalized)) return true;
-
-  return false;
-}
-
-export function isFinalAnswerReady(content: string) {
-  const normalized = content.trim();
-  return Boolean(normalized)
-    && !isProgressDominantContent(normalized)
-    && !normalized.includes("> 🔍 正在调用:");
+  try {
+    const response = await input.model.invoke([
+      new SystemMessage(FINAL_ANSWER_REVIEW_SYSTEM_PROMPT),
+      new HumanMessage(JSON.stringify({
+        user_question: input.question,
+        candidate_answer: input.answer,
+      })),
+    ]);
+    return normalizeFinalAnswerReview(response.content);
+  } catch (error) {
+    console.error("Failed to review final answer with LLM:", error);
+    return { ready: false, action: "continue", reason: "最终回复模型评审失败" };
+  }
 }
 
 const INCOMPLETE_FINAL_NOTICE = "提示：以上不是最终结论，只是目前能搜索到的信息；完整结论还需要继续补齐证据闭环。";
@@ -641,7 +656,7 @@ function hasVisibleAuditEvidenceAnchor(answer: string) {
 
 function hasAnswerEvidenceForRuntimeAudit(input: RuntimeAuditPlanInput) {
   const answer = (input.answer || "").trim();
-  if (!isFinalAnswerReady(answer)) return false;
+  if (!answer) return false;
 
   return hasVisibleAuditEvidenceAnchor(answer)
     && ((input.toolResultCount || 0) > 0 || (input.repoHints || []).length > 0);
@@ -838,6 +853,10 @@ function sanitizeLlmAuditFallback(content: unknown) {
 
 export function buildUserFacingAuditFallbackMessage(question: string, items: RuntimeTodoItem[]) {
   const normalizedQuestion = question.trim();
+  if (isImageAnalysisArtifact(normalizedQuestion)) {
+    return "已识别到图片里的报错信息，我会继续核实代码入口、参数映射和下游调用；这不是最终结论。";
+  }
+
   const prefix = normalizedQuestion
     ? `针对“${normalizedQuestion}”，当前还没有足够证据直接下结论。`
     : "当前还没有足够证据直接下结论。";

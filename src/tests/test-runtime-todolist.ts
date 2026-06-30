@@ -19,8 +19,8 @@ import {
   getIncompleteAuditTodoItems,
   getIncompleteTodoItems,
   appendIncompleteFinalNotice,
-  isFinalAnswerReady,
   isSqlAuditEvidenceBlocking,
+  reviewFinalAnswerWithModel,
   syncRuntimeAuditTodoPlan,
   startTodoItem,
 } from "../runtime-todolist.js";
@@ -29,6 +29,15 @@ function addAuditItems(todoList: ReturnType<typeof createRuntimeTodoList>, itemI
   for (const itemId of itemIds) {
     addRuntimeAuditTodoItem(todoList, itemId);
   }
+}
+
+function finalReviewModel(content: unknown, calls: string[] = []) {
+  return {
+    async invoke(messages: any[]) {
+      calls.push(messages.map(message => String(message.content)).join("\n\n"));
+      return { content };
+    },
+  };
 }
 
 const defaultTodoList = createRuntimeTodoList();
@@ -132,18 +141,36 @@ assert.throws(
 completeTodoItem(todoList, "step_two", "已完成第二步");
 assertTodoListComplete(todoList);
 
-assert.equal(isFinalAnswerReady("已定位到候选入口，继续核实中。"), false);
-assert.equal(isFinalAnswerReady("结论：已核实接口逻辑，权限值是 6e6。"), true);
-assert.equal(
-  isFinalAnswerReady("接口 doSendWuLiuV2 在 wlCompany=jingdong 时，京东开放平台返回 code=18，即 accessToken=null，属于京东授权 Token 缺失或未正确获取。"),
-  true,
-  "诊断型事实结论不应因没有显式“结论”标题而被判为无意义进度",
-);
-assert.equal(
-  isFinalAnswerReady("接口返回 code=18，accessToken=null，下一步我会继续核实 Token 刷新逻辑。"),
-  true,
-  "已有错误码和缺失方向的混合回答应被识别为可用诊断结论",
-);
+const progressReviewCalls: string[] = [];
+const progressFinalReview = await reviewFinalAnswerWithModel({
+  question: "这个接口报错是什么原因",
+  answer: "已定位到候选入口，继续核实中。",
+  model: finalReviewModel({ ready: false, action: "continue", reason: "仍是阶段性进度" }, progressReviewCalls),
+});
+assert.equal(progressFinalReview.ready, false);
+assert.equal(progressFinalReview.action, "continue");
+assert.match(progressReviewCalls[0]!, /只判断候选回答是否已经可以作为最终回复发送/);
+
+const readyFinalReview = await reviewFinalAnswerWithModel({
+  question: "权限值是什么",
+  answer: "结论：已核实接口逻辑，权限值是 6e6。",
+  model: finalReviewModel({ ready: true, action: "send", reason: "已经回答用户问题" }),
+});
+assert.equal(readyFinalReview.ready, true);
+assert.equal(readyFinalReview.action, "send");
+
+const imageArtifactReview = await reviewFinalAnswerWithModel({
+  question: "这个接口报错是什么原因",
+  answer: `这个接口报:
+【图片识别结果】
+图片标题：发货扫描
+错误码/状态码含义：错误码 18，含义为 accessToken不存在，accessToken=null (Missing access_token)。
+根本原因/排查方向：报错并非指业务系统的Token缺失，而是指京东开放平台的 access_token 缺失。`,
+  model: finalReviewModel({ ready: false, action: "continue", reason: "图片识别结果是输入解析产物，不是业务分析最终回复" }),
+});
+assert.equal(imageArtifactReview.ready, false, "图片识别结果是否最终由模型评审决定");
+assert.equal(imageArtifactReview.action, "continue");
+
 const incompleteFinalNotice = appendIncompleteFinalNotice("已识别到接口路径或请求参数锚点，我会继续围绕这些锚点核实代码入口。");
 assert.match(incompleteFinalNotice, /已识别到接口路径或请求参数锚点/);
 assert.match(incompleteFinalNotice, /不是最终结论/);
@@ -549,6 +576,21 @@ assert.doesNotMatch(curlScopeFallback, /请补充以下任一信息后我继续�
 assert.doesNotMatch(curlScopeFallback, /所在系统、项目、页面、菜单路径或接口地址/);
 assert.match(curlScopeFallback, /接口路径或请求参数锚点/);
 assert.match(curlScopeFallback, /继续围绕这些锚点核实代码入口、参数映射和下游调用|如果还缺少信息，只需要补最小的项目、页面或入口/);
+
+const imageDiagnosticFallback = buildUserFacingAuditFallbackMessage(
+  `这个接口报:
+【图片识别结果】
+图片标题：发货扫描
+原因分析/调用链/代码位置：结合请求参数 wlCompany=jingdong，说明 doSendWuLiuV2 接口在后台尝试调用京东物流API进行发货时，缺少京东的授权凭证。
+错误码/状态码含义：错误码 18，含义为 accessToken不存在，accessToken=null (Missing access_token)。
+根本原因/排查方向：报错并非指业务系统的Token缺失，而是指京东开放平台的 access_token 缺失。`,
+  getIncompleteAuditTodoItems(incompleteScopeTodoList),
+);
+assert.doesNotMatch(imageDiagnosticFallback, /【图片识别结果】/);
+assert.doesNotMatch(imageDiagnosticFallback, /图片标题：发货扫描/);
+assert.doesNotMatch(imageDiagnosticFallback, /根据图片识别结果，这个报错已经能定位方向/);
+assert.match(imageDiagnosticFallback, /已识别到图片里的报错信息/);
+assert.match(imageDiagnosticFallback, /继续核实代码入口、参数映射和下游调用/);
 
 const guardedCurlFallback = await generateUserFacingAuditFallbackMessage({
   question: `curl -k -i --raw -o 0.dat -X POST -d "sub_id=18117666&sub_check=2&TakeMobile=&mobile_basket_id=&confirmInfo=" "https://oa.dev.9ji.com/addOrder/subCheckOp"

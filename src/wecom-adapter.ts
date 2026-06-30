@@ -65,6 +65,7 @@ import {
   generateUserFacingAuditFallbackMessage,
   buildRuntimeTodoTool,
   buildSqlAuditEvidence,
+  completeAnswerSupportedAuditItems,
   completeRecoveryAuditItems,
   completeSkippedAuditItems,
   completeTodoItem,
@@ -318,7 +319,10 @@ export function isHelpCommand(text: string): boolean {
 
 export function buildHelpReply(headerCommands = listMcpHeaderCommands(config.mcpServers)) {
   const commandText = headerCommands.length > 0
-    ? `发送 ${headerCommands.map(command => `\`${command.command}\``).join("、")} 切换 MCP header 配置。`
+    ? [
+        "当前支持指令：",
+        ...headerCommands.map(command => `${command.command}：切换到 ${command.label} 配置（${command.serverNames.join("、")}）`),
+      ].join("\n")
     : "也可以直接说明“不要沿用上个项目，改查 <项目名>”。";
   return [
     "使用帮助",
@@ -327,7 +331,7 @@ export function buildHelpReply(headerCommands = listMcpHeaderCommands(config.mcp
     "直接描述业务问题、接口、报错、页面路径、项目名或截图。我会优先定位项目范围，再核实代码、SQL 或配置证据。",
     "",
     "2. 清理会话",
-    "发送“清理会话”“清空上下文”“重置对话”或 `/new`，可以清除当前会话历史。",
+    "发送“清理会话”“清空上下文”“重置对话”或 /new，可以清除当前会话历史。",
     "",
     "3. 清理项目限制",
     "发送“清理会话”后重新提问，不带历史项目范围；也可以直接说明“不要沿用上个项目，改查 <项目名>”。",
@@ -659,6 +663,8 @@ export async function startBot(botConfig: BotConfig) {
     let effectiveParsedContent: typeof parsedContent = parsedContent;
     const pendingHumanLoop = sessionManager.getPendingHumanLoop(sessionKey);
     const pendingText = stripBoundaryMentions(commandText);
+    const currentTurnText = stripBoundaryMentions(extractTextContent(parsedContent as any));
+    const historyRelevanceText = currentTurnText || pendingText;
     const activePendingHumanLoop = pendingHumanLoop && !isHumanLoopExpired(pendingHumanLoop)
       ? pendingHumanLoop
       : undefined;
@@ -703,13 +709,13 @@ export async function startBot(botConfig: BotConfig) {
           }
           return { role: "system", content: message.content.toString() };
         });
-      const relevance = classifyHistoryRelevance(historyItems, pendingText);
+      const relevance = classifyHistoryRelevance(historyItems, historyRelevanceText);
       if (relevance.decision === "independent") {
         console.log(`[Session] Auto clearing unrelated history for ${sessionKey}: ${relevance.reason}`);
         sessionManager.clearSession(sessionKey);
         session = sessionManager.getOrCreateSession(sessionKey, true);
       } else {
-        effectiveParsedContent = buildQuestionWithHistory(historyItems, pendingText);
+        effectiveParsedContent = buildQuestionWithHistory(historyItems, historyRelevanceText);
       }
     }
     // --- Session Handling End ---
@@ -835,8 +841,10 @@ const runtimeTodoList = createRuntimeTodoList();
         replyStreamQueue = replyTask.then(() => undefined, () => undefined);
         return replyTask;
       };
+      const hasFinalAnswerCandidate = () => isFinalAnswerReady(collapseProgressUpdates(stripEmptyProtocolContent(fullContent)));
       const sendStageProgress = async (content: string, force = false) => {
         if (shouldStopCurrentTask()) return;
+        if (hasFinalAnswerCandidate()) return;
         if (!force && Date.now() - lastUpdateTime <= 1000) return;
         await safeReplyStream(buildProgressStreamContent(content), false);
         lastUpdateTime = Date.now();
@@ -849,9 +857,17 @@ const runtimeTodoList = createRuntimeTodoList();
         clearInterval(heartbeatTimer);
         heartbeatTimer = undefined;
       };
-     heartbeatTimer = setInterval(() => {
-       if (heartbeatInFlight || shouldStopCurrentTask()) return;
-       const now = Date.now();
+      const stopThinkingHeartbeatAndDrain = async () => {
+        stopThinkingHeartbeat();
+        await replyStreamQueue;
+      };
+      heartbeatTimer = setInterval(() => {
+        if (heartbeatInFlight || shouldStopCurrentTask()) return;
+        if (hasFinalAnswerCandidate()) {
+          stopThinkingHeartbeat();
+          return;
+        }
+        const now = Date.now();
        if (now - lastHeartbeatTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
        heartbeatInFlight = true;
         const heartbeatContent = buildThinkingHeartbeatContent(fullContent, getActiveToolCalls(), now);
@@ -878,6 +894,8 @@ const runtimeTodoList = createRuntimeTodoList();
 如果当前问题是“继续”、追问上一轮、需要继承历史里的项目/接口/方法/文件/表字段/已分析行号范围，或担心短时记忆压缩导致锚点丢失，必须先调用 session_memory_graph_query 获取相关历史图索引；不要因为默认上下文里没看到历史细节就要求用户补充。
 测试环境/dev 环境排障硬约束：如果用户已提供接口 URL、query 参数、请求体、返回体，或明确说“可以直接查库/测试环境可查库”，禁止在查询前询问用户补充 type 含义、状态字段、业务节点、同类型正常样本或数据库连接信息。必须先使用可用工具、代码检索、参数映射和测试库只读查询确认；只有这些查询后仍无法确认，或工具/测试库不可达，才允许 Human Loop，并且必须说明已尝试的工具、SQL 或代码证据。
 Human Loop 严格门槛：所有可由 LLM 工具、代码检索、调用链、已保存工具证据、测试/dev 库只读查询验证的信息，都必须先自主核实；只有所有可用路径都核实完仍无法回答，才允许对用户提问。触发 Human Loop 前必须在 context_snapshot.known_facts 写清已核实节点、已分析代码范围、已尝试 SQL/工具/检索条件和剩余最小缺口。
+用户意图边界：每轮先判断用户是在要事实取值、用途解释、上下游定位、流程梳理、取数语句、排障原因、处理方案还是代码修改，并只完成当前明确要求的任务。当用户问“是什么/做什么用/作用是什么/哪里来的到哪里去/谁推送谁消费/谁写入谁读取/谁调用被谁调用/值从哪里来/显示条件是什么”时，只查对象用途、来源去向、上下游、读写点、触发位置和代码证据；适用对象包括 Topic、Redis key、接口、按钮、权限码、字段、表、枚举、配置、定时任务、脚本、页面、模块、服务、类、方法、日志 source、消息模板和第三方回调，不局限于 MQ 队列。即使用户附带异常背景、堆积量、监控截图、日志片段或历史结论，也不得主动升级为异常根因、堆积原因、消费失败、发布变更、配置异常、性能瓶颈或处理建议，除非用户明确问为什么、原因、异常、失败、没生效、怎么处理或怎么修。
+提问前证据门槛：遇到问题默认先查、先论证，实在查不到、查不准或继续查有真实风险时再问；不得把澄清提问当成检索或论证的前置动作。只要用户已经给出对象名、队列/Topic、vhost、Redis key、接口路径、按钮文案、权限码、字段名、表名、配置 key、日志关键词、错误文案、截图 URL、页面路由、类名、方法名或任务名，必须先用这些锚点自主检索、查配置、查调用链或查可用工具；项目、模块或业务归属未知时，先跨项目/全局检索锚点，不得在检索前询问“这是哪个系统/哪个模块/谁负责”。只有已经尝试可用检索路径后仍出现多个无法消歧的候选、锚点完全无结果、工具不可用、或继续操作存在生产数据/写操作风险时，才允许提问；提问必须说明已查锚点、命中候选或无结果原因、剩余最小歧义。
 动态审核节点规则：
 1. 代码/项目/接口/页面/仓库类问题：维护 project_scope_audited，证据写明目标范围和命中的入口一致性。
 2. 最终回答输出 SQL、生产取数 SQL 或声明 dev 校验：维护 sql_correctness_audited；若 dev 库无对应表，evidence 必须写“dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构”。
@@ -1187,7 +1205,7 @@ ${hypotheses}
 
                     // 节流推送：避免高频更新导致前端闪烁
                     if (Date.now() - lastUpdateTime > 1000) {
-                      if (!shouldStopCurrentTask()) {
+                      if (!shouldStopCurrentTask() && !hasFinalAnswerCandidate()) {
                         await safeReplyStream(statusMsg, false);
                       }
                       lastUpdateTime = Date.now();
@@ -1210,7 +1228,7 @@ ${hypotheses}
                     const statusMsg = buildProgressStreamContent(fullContent, [
                       `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
                     ]);
-                    if (!shouldStopCurrentTask()) {
+                    if (!shouldStopCurrentTask() && !hasFinalAnswerCandidate()) {
                       await safeReplyStream(statusMsg, false);
                     }
                   }
@@ -1234,7 +1252,7 @@ ${hypotheses}
                   }
 
                   if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-                    if (!shouldStopCurrentTask()) {
+                    if (!shouldStopCurrentTask() && !hasFinalAnswerCandidate()) {
                       await safeReplyStream(collapseProgressUpdates(fullContent), false);
                     }
                     lastUpdateTime = Date.now();
@@ -1293,6 +1311,8 @@ ${hypotheses}
           completeTodoItem(runtimeTodoList, "analysis_finished", "agent error, sent bounded fallback");
         }
       }
+
+      await stopThinkingHeartbeatAndDrain();
 
       // --- Update Session History ---
       if (fullContent) {
@@ -1379,6 +1399,16 @@ ${hypotheses}
           reason: recoveryAuditReason,
         });
       }
+      completeAnswerSupportedAuditItems(runtimeTodoList, {
+        question: currentQuestion,
+        answer: fullContent,
+        repoHints,
+        toolResultCount: toolContextRecords.length,
+        sqlAuditEvidence,
+        skipAuditItems: flowControl.next.skipAuditItems,
+        ...(plannerResult?.intent ? { plannerIntent: plannerResult.intent } : {}),
+        ...(plannerResult?.secondary_intents ? { secondaryIntents: plannerResult.secondary_intents } : {}),
+      });
       const incompleteAuditItems = getIncompleteAuditTodoItems(runtimeTodoList);
       const auditPassed = incompleteAuditItems.length === 0;
       if (!auditPassed) {

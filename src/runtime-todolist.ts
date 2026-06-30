@@ -342,9 +342,15 @@ const CONCLUSION_MARKERS = [
   "权限码",
   "枚举值",
 ];
+const DIAGNOSTIC_CONCLUSION_PATTERN = /(?:(?:返回|报错|错误码|code\s*=|code=|status\s*=|status=|error\s*=|error=).{0,120})?(?:access_?token|token).{0,80}(?:缺失|为空|null|无效|过期|未正确|异常|失败|不通过|不可售)|(?:返回|报错|错误码|code\s*=|code=|status\s*=|status=|error\s*=|error=).{0,120}(?:缺失|为空|null|无效|过期|未正确|异常|失败|不通过|不可售)|(?:属于|定位为).{0,40}(?:配置|授权|Token|token|校验|接口|后端|前端|数据).{0,40}(?:问题|缺失|异常|失败)/iu;
+
+function hasDiagnosticConclusion(content: string) {
+  return DIAGNOSTIC_CONCLUSION_PATTERN.test(content);
+}
 
 function hasConclusionMarker(content: string) {
-  return CONCLUSION_MARKERS.some(marker => content.includes(marker));
+  return CONCLUSION_MARKERS.some(marker => content.includes(marker))
+    || hasDiagnosticConclusion(content);
 }
 
 // 判断整段文本是否由过程话术主导（所有句子都是过程句，或文本以过程词结尾）。
@@ -352,6 +358,8 @@ function hasConclusionMarker(content: string) {
 function isProgressDominantContent(content: string) {
   const normalized = content.trim();
   if (!normalized) return true;
+
+  if (hasDiagnosticConclusion(normalized)) return false;
 
   // 以过程词结尾：经典阶段性话术
   if (PROGRESS_ONLY_PATTERN.test(normalized)) return true;
@@ -613,10 +621,50 @@ export function buildEvidenceAuditEvidence(answer: string, toolResultCount = 0) 
   return `已审核结论证据和查询收敛，toolResults=${toolResultCount}`;
 }
 
+function buildExecutionFlowAuditEvidence(answer: string, toolResultCount = 0) {
+  if (!answer.trim()) {
+    return "回答为空，执行链审核未通过";
+  }
+
+  return `已审核执行链、触发条件和上下游证据，toolResults=${toolResultCount}`;
+}
+
 function completeAuditItemIfOpen(todoList: RuntimeTodoList, id: string, evidence: string) {
   const item = todoList.items.find(todo => todo.id === id);
   if (!item || item.status === "done" || item.status === "blocked") return;
   completeTodoItem(todoList, id, evidence);
+}
+
+function hasVisibleAuditEvidenceAnchor(answer: string) {
+  return /(?:代码证据|证据汇总|文件[:：]|行号|调用链|生产者|消费者|触发条件|接口|Controller|Service|Mapper|SQL|队列|MQ)/iu.test(answer);
+}
+
+function hasAnswerEvidenceForRuntimeAudit(input: RuntimeAuditPlanInput) {
+  const answer = (input.answer || "").trim();
+  if (!isFinalAnswerReady(answer)) return false;
+
+  return hasVisibleAuditEvidenceAnchor(answer)
+    && ((input.toolResultCount || 0) > 0 || (input.repoHints || []).length > 0);
+}
+
+export function completeAnswerSupportedAuditItems(todoList: RuntimeTodoList, input: RuntimeAuditPlanInput) {
+  if (!hasAnswerEvidenceForRuntimeAudit(input)) return;
+
+  completeAuditItemIfOpen(
+    todoList,
+    "project_scope_audited",
+    `最终答案已有可见证据；${buildProjectScopeAuditEvidence(input.question, input.answer || "", input.repoHints || [])}`,
+  );
+  completeAuditItemIfOpen(
+    todoList,
+    "evidence_audited",
+    `最终答案已有可见证据；${buildEvidenceAuditEvidence(input.answer || "", input.toolResultCount || 0)}`,
+  );
+  completeAuditItemIfOpen(
+    todoList,
+    "execution_flow_audited",
+    `最终答案已有可见证据；${buildExecutionFlowAuditEvidence(input.answer || "", input.toolResultCount || 0)}`,
+  );
 }
 
 export function completeRecoveryAuditItems(todoList: RuntimeTodoList, input: {

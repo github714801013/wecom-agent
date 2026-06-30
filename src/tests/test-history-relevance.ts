@@ -24,6 +24,11 @@ const docsPathHistory: ConversationContextItem[] = [
   { role: "assistant", content: "当前文档锚点是 /docs/api.md。" },
 ];
 
+const queueHistory: ConversationContextItem[] = [
+  { role: "user", content: "cm_returned_imeis 队列是做什么用的" },
+  { role: "assistant", content: "结论：cm_returned_imeis 用于传递待退单的 IMEI。" },
+];
+
 function assertDecision(
   currentQuestion: string,
   expected: "related" | "independent" | "uncertain",
@@ -85,5 +90,20 @@ assertDecision(
 );
 assertDecision("怎么验证", "related");
 assertDecision("帮我整理一下今天的问题", "uncertain");
+assertDecision(
+  `[引用内容: curl -k -i --raw -o 0.dat -X POST -d "sub_id=18117666&sub_check=2&TakeMobile=&mobile_basket_id=&confirmInfo=" "http://test.example.com/order/check"]\n\n这个接口报这个异常是什么原因`,
+  "independent",
+  queueHistory,
+);
+assertDecision(
+  "sub_id=18117666 这个接口为什么报错",
+  "independent",
+  queueHistory,
+);
+assertDecision(
+  "cm_returned_imeis 哪里消费",
+  "uncertain",
+  queueHistory,
+);
 
 console.log("history relevance 判断规则验证通过");

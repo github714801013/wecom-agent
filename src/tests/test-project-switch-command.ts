@@ -79,6 +79,18 @@ async function runTest() {
   assert.deepEqual(manager.resolveMcpHeaders(sessionKey), { gitnexus: { projects: "oa-stock,jiuji-m,9ji-admin" } });
   assert.deepEqual(manager.resolveRepoHints(sessionKey, []), ["oa-stock", "jiuji-m", "9ji-admin"]);
 
+  const expiringSessionKey = "mcp-header-expiry";
+  manager.setMcpHeaderOverrides(expiringSessionKey, neoCommand.headersByServer);
+  const expiringSession = manager.getOrCreateSession(expiringSessionKey);
+  expiringSession.lastActivity = Date.now() - 31 * 60 * 1000;
+  manager.getOrCreateSession(expiringSessionKey, true);
+  assert.deepEqual(manager.resolveMcpHeaders(expiringSessionKey), {});
+  assert.deepEqual(
+    resolveMcpHeaderCommand(botConfig.defaultMcpHeaderCommand, [gitnexusServer, dbServer])?.headersByServer,
+    { gitnexus: { projects: "oa-stock,jiuji-m,9ji-admin" } },
+    "会话过期清空当前切换指令后，下一轮应回落到 bot 默认指令",
+  );
+
   console.log("[SUCCESS] project switch command verified");
 }
 

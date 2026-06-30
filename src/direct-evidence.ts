@@ -1,13 +1,16 @@
 const DIRECT_EVIDENCE_SECTION_PATTERN = /原因分析\/调用链\/代码位置[:：]/u;
 const DIRECT_EVIDENCE_CODE_ANCHOR_PATTERN = /(?:[A-Za-z0-9_-]+\.(?:cs|java|ts|js|py)|[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*->|[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*|:[0-9]{2,6})/u;
 const DIRECT_EVIDENCE_ROOT_CAUSE_PATTERN = /根本原因\/排查方向[:：]|错误码\/状态码含义[:：]/u;
+const DIRECT_EVIDENCE_LOOKUP_INTENT_PATTERN = /是什么|做什么用|作用是什么|哪里推送|哪里消费|谁推送|谁消费|哪里来的|到哪里去|谁写入|谁读取|谁调用|被谁调用|值从哪里来|显示条件是什么|干啥的|用途/u;
 
 export function hasDirectEvidenceAnchors(question: string) {
   return DIRECT_EVIDENCE_SECTION_PATTERN.test(question) && DIRECT_EVIDENCE_CODE_ANCHOR_PATTERN.test(question);
 }
 
 export function shouldUseDirectEvidenceFastPath(question: string) {
-  return hasDirectEvidenceAnchors(question) && DIRECT_EVIDENCE_ROOT_CAUSE_PATTERN.test(question);
+  return hasDirectEvidenceAnchors(question)
+    && DIRECT_EVIDENCE_ROOT_CAUSE_PATTERN.test(question)
+    && !DIRECT_EVIDENCE_LOOKUP_INTENT_PATTERN.test(question);
 }
 
 export function buildDirectEvidenceRuntimeInstruction() {

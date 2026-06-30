@@ -55,6 +55,7 @@ const MAINTAINED_REPO_ANCHORS = [
 
 const JAVA_FILE_PATTERN = /\b[A-Z][A-Za-z0-9_$]*(?:Controller|ServiceImpl|Service|Mapper|Dao|Repository|Client|Cloud|BO|DTO|VO)?\.java\b/;
 const CAMEL_METHOD_PATTERN = /\b[a-z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+\b/;
+const CODE_IDENTIFIER_PATTERN = /\b[A-Za-z][A-Za-z0-9]*(?:[_:.-][A-Za-z0-9]+){1,8}\b/;
 const CODE_SPAN_PATTERN = /`([^`\n]{2,120})`/;
 const CONFIRMED_EVIDENCE_PATTERN = /(命中|确认|入口|方法|类名|文件|接口|仓库|repo|有效工具证据|code_snippet)/;
 const USER_REQUEST_ANCHOR_PATTERN = /(curl|https?:\/\/|--data-raw|application\/x-www-form-urlencoded)/i;
@@ -154,6 +155,8 @@ function extractStrongAnchors(text: string) {
     ...collectPatternMatches(text, JAVA_FILE_PATTERN),
     ...collectPatternMatches(text, CAMEL_METHOD_PATTERN)
       .filter(anchor => anchor.length >= 6),
+    ...collectPatternMatches(text, CODE_IDENTIFIER_PATTERN)
+      .filter(anchor => anchor.length >= 4 && /[_:-]/.test(anchor)),
     ...MAINTAINED_REPO_ANCHORS.filter(anchor => text.includes(anchor)),
   ];
   return uniqueValues(anchors.map(anchor => anchor.trim()));

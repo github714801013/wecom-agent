@@ -12,6 +12,7 @@ export const PROGRESS_KEYWORDS = [
   "继续核实中",
   "继续读取",
   "继续确认",
+  "继续核实",
   "准备输出结论",
   "继续追踪",
   "继续排查",
@@ -39,6 +40,12 @@ export const PROGRESS_KEYWORDS = [
   "我将去追踪",
   "我会接着",
   "我会围绕",
+  "如果核实过程中",
+  "核实过程中确认",
+  "我需要核实",
+  "我需要确认",
+  "需要核实",
+  "需要确认",
   "我将继续围绕",
   "顺着代码",
   "顺着调用链",
@@ -57,6 +64,9 @@ const PROTOCOL_TAG_PREFIXES = ["<agent_progress", "</agent_progress", "<final_an
 const EMPTY_PROTOCOL_CONTENT_PATTERN = /\[System: Empty message content sanitised to satisfy protocol\]/g;
 const THINK_BLOCK_PATTERN = /<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi;
 const THINK_TAG_TOKEN_PATTERN = /<\/?think(?:ing)?\b[^>]*>/gi;
+const INCOMPLETE_FINAL_NOTICE_PATTERN = /不是最终结论|完整结论还需要继续补齐证据闭环/;
+const ACTIVE_TOOL_LINE_PATTERN = /^>.*正在调用[:：]/u;
+const PUNCTUATION_ONLY_PATTERN = /^[\s.。!！?？,，;；:：-]+$/u;
 
 export function stripProtocolNoise(content: string): string {
   return content
@@ -87,15 +97,22 @@ function collapsePlainProgressContent(content: string): string {
   if (!PROGRESS_KEYWORDS.some(keyword => trimmed.includes(keyword))) return content;
 
   const sentences = splitProgressSentences(trimmed);
+  const visibleSentences = sentences.filter(sentence =>
+    !INCOMPLETE_FINAL_NOTICE_PATTERN.test(sentence)
+    && !ACTIVE_TOOL_LINE_PATTERN.test(sentence)
+    && !PUNCTUATION_ONLY_PATTERN.test(sentence)
+  );
   let lastProgressIndex = -1;
-  for (let index = sentences.length - 1; index >= 0; index -= 1) {
-    const sentence = sentences[index];
+  for (let index = visibleSentences.length - 1; index >= 0; index -= 1) {
+    const sentence = visibleSentences[index];
     if (sentence && isProgressSentence(sentence)) {
       lastProgressIndex = index;
       break;
     }
   }
-  const nonProgressSentencesAfterProgress = sentences
+  if (lastProgressIndex < 0) return visibleSentences.join("\n\n").trim() || trimmed;
+
+  const nonProgressSentencesAfterProgress = visibleSentences
     .slice(lastProgressIndex + 1)
     .filter(sentence => !isProgressSentence(sentence));
 
@@ -103,7 +120,15 @@ function collapsePlainProgressContent(content: string): string {
     return nonProgressSentencesAfterProgress.join("\n\n").trim();
   }
 
-  return sentences[lastProgressIndex] || trimmed;
+  const nonProgressSentencesBeforeProgress = visibleSentences
+    .slice(0, lastProgressIndex)
+    .filter(sentence => !isProgressSentence(sentence));
+
+  if (nonProgressSentencesBeforeProgress.length > 0) {
+    return nonProgressSentencesBeforeProgress.join("\n\n").trim();
+  }
+
+  return visibleSentences[lastProgressIndex] || trimmed;
 }
 
 function extractTaggedDisplayContent(content: string): string {

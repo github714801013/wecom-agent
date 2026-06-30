@@ -35,6 +35,23 @@ assert.equal(
 );
 
 assert.equal(
+  collapseProgressUpdates("我需要核实生产者侧和消费者侧。\n\n我需要确认 RabbitMQ vhost 配置。\n\n结论：cm_returned_imeis 用于串号转现退单。"),
+  "结论：cm_returned_imeis 用于串号转现退单。",
+  "final content should drop plain verification prelude before the conclusion",
+);
+
+const mixedDiagnosticProgress = `你提供的 curl、请求参数、Cookie、Header 以及截图中的错误信息已经足够定位问题方向：接口 doSendWuLiuV2 在 wlCompany=jingdong 时，后端调用京东开放平台 API 返回 code=18，即 accessToken=null，属于京东授权 Token 缺失或未正确获取，与你端的登录 Token 无关。
+
+我会继续围绕现有锚点核实后端获取京东 access_token 的逻辑，包括 Token 是否过期、AppKey/AppSecret 配置是否正确、Token 存储与刷新机制是否正常，以及该环境（test01）下京东授权是否已完成初始化。如果核实过程中确认属于后端配置或授权流程问题，会明确建议你联系相关开发人员处理。
+
+提示：以上不是最终结论，只是目前能搜索到的信息；完整结论还需要继续补齐证据闭环。`;
+assert.equal(
+  collapseProgressUpdates(mixedDiagnosticProgress),
+  "你提供的 curl、请求参数、Cookie、Header 以及截图中的错误信息已经足够定位问题方向：接口 doSendWuLiuV2 在 wlCompany=jingdong 时，后端调用京东开放平台 API 返回 code=18，即 accessToken=null，属于京东授权 Token 缺失或未正确获取，与你端的登录 Token 无关。",
+  "diagnostic conclusion should not be overwritten by trailing progress and incomplete-final notice",
+);
+
+assert.equal(
   collapseProgressUpdates(`<agent_progress>
 已定位到候选入口，继续核实中。
 </agent_progress>
@@ -175,7 +192,7 @@ assert.equal(
   "thinking heartbeat should not expose empty protocol marker",
 );
 
-const adapterSource = readFileSync(new URL("../wecom-adapter.ts", import.meta.url), "utf8");
+const adapterSource = readFileSync(new URL("../wecom-adapter.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 assert.doesNotMatch(
   adapterSource,
   /now - lastUpdateTime < THINKING_HEARTBEAT_INTERVAL_MS/,
@@ -184,6 +201,7 @@ assert.doesNotMatch(
 const heartbeatStartIndex = adapterSource.indexOf("heartbeatTimer = setInterval");
 const agentStreamIndex = adapterSource.indexOf("const stream = await agent.stream");
 const finalStopIndex = adapterSource.indexOf("stopThinkingHeartbeat();\n      if (!shouldStopCurrentTask())");
+const finalCandidateGuardIndex = adapterSource.indexOf("const hasFinalAnswerCandidate = () => isFinalAnswerReady(collapseProgressUpdates(stripEmptyProtocolContent(fullContent)))");
 assert.ok(
   heartbeatStartIndex >= 0 && agentStreamIndex >= 0 && heartbeatStartIndex < agentStreamIndex,
   "thinking heartbeat should start before the agent stream so backend pre/post processing stays alive",
@@ -191,6 +209,25 @@ assert.ok(
 assert.ok(
   finalStopIndex > agentStreamIndex,
   "thinking heartbeat should remain active until the final answer is ready to send",
+);
+assert.ok(
+  finalCandidateGuardIndex > 0,
+  "adapter should detect final answer candidates before sending more intermediate updates",
+);
+assert.match(
+  adapterSource,
+  /const sendStageProgress = async[\s\S]*?if \(hasFinalAnswerCandidate\(\)\) return;/,
+  "stage progress should stop once a final answer candidate exists",
+);
+assert.match(
+  adapterSource,
+  /heartbeatTimer = setInterval[\s\S]*?if \(hasFinalAnswerCandidate\(\)\) \{\s*stopThinkingHeartbeat\(\);\s*return;\s*\}/,
+  "thinking heartbeat should stop once a final answer candidate exists",
+);
+assert.match(
+  adapterSource,
+  /!shouldStopCurrentTask\(\) && !hasFinalAnswerCandidate\(\)/,
+  "tool status and partial answer pushes should be suppressed after final answer candidate exists",
 );
 
 assert.equal(

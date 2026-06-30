@@ -9,6 +9,7 @@ import {
   buildRuntimeTodoTool,
   buildSqlAuditEvidence,
   blockTodoItem,
+  completeAnswerSupportedAuditItems,
   completeRecoveryAuditItems,
   completeSkippedAuditItems,
   completeTodoItem,
@@ -47,6 +48,23 @@ assert.deepEqual(
   getActiveAuditTodoItems(defaultTodoList).map(item => item.id),
   ["project_scope_audited", "evidence_audited", "execution_flow_audited"],
   "代码/接口类问题应动态加入范围、证据和执行链审核"
+);
+completeAnswerSupportedAuditItems(defaultTodoList, {
+  question: "这个队列 cm_returned_imeis 是干啥的？vhost 是 oaAsync",
+  answer: `结论：队列 cm_returned_imeis 用于串号转现退单。
+
+生产者：saasoanew 的 orderTransferServices.cs 调用 SendDjangoQueueMessage。
+消费者：MyDjangoProject 的 cm_order_entry/task.py 消费队列。
+触发条件：调拨删除且 imeis.Count > 0。
+代码证据：RabbitmqHelperSend.cs、orderTransferServices.cs、task.py。`,
+  plannerIntent: "FLOW",
+  repoHints: ["saasoanew", "MyDjangoProject"],
+  toolResultCount: 4,
+});
+assert.deepEqual(
+  getIncompleteAuditTodoItems(defaultTodoList).map(item => item.id),
+  [],
+  "已包含结论、上下游和代码证据的最终答案应程序化补齐审核项，不能被中间状态 fallback 覆盖",
 );
 syncRuntimeAuditTodoPlan(defaultTodoList, {
   question: "给我查询物流单 SQL",
@@ -116,6 +134,16 @@ assertTodoListComplete(todoList);
 
 assert.equal(isFinalAnswerReady("已定位到候选入口，继续核实中。"), false);
 assert.equal(isFinalAnswerReady("结论：已核实接口逻辑，权限值是 6e6。"), true);
+assert.equal(
+  isFinalAnswerReady("接口 doSendWuLiuV2 在 wlCompany=jingdong 时，京东开放平台返回 code=18，即 accessToken=null，属于京东授权 Token 缺失或未正确获取。"),
+  true,
+  "诊断型事实结论不应因没有显式“结论”标题而被判为无意义进度",
+);
+assert.equal(
+  isFinalAnswerReady("接口返回 code=18，accessToken=null，下一步我会继续核实 Token 刷新逻辑。"),
+  true,
+  "已有错误码和缺失方向的混合回答应被识别为可用诊断结论",
+);
 const incompleteFinalNotice = appendIncompleteFinalNotice("已识别到接口路径或请求参数锚点，我会继续围绕这些锚点核实代码入口。");
 assert.match(incompleteFinalNotice, /已识别到接口路径或请求参数锚点/);
 assert.match(incompleteFinalNotice, /不是最终结论/);

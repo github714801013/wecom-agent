@@ -19,8 +19,9 @@ const blocked = resolveFinalReplyDelivery({
   humanLoopReply: null,
 });
 
-assert.equal(blocked.shouldSendFinal, false, "最终闸门未通过且无法转 human loop 时不能发送 final");
-assert.equal(blocked.content, "");
+assert.equal(blocked.shouldSendFinal, true, "最终闸门未通过且无法转 human loop 时也要发送兜底 final，避免企微停留在处理中");
+assert.match(blocked.content, /没有形成足够明确的最终结论/);
+assert.match(blocked.content, /已获得的阶段性内容/);
 assert.match(blocked.reason, /候选仍是阶段性进度/);
 
 const sendable = resolveFinalReplyDelivery({

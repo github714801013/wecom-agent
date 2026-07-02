@@ -379,10 +379,21 @@ export function resolveFinalReplyDelivery(input: FinalReplyDeliveryInput): Final
     };
   }
 
+  const reason = `最终回复闸门未通过：${input.finalResolution.reason}`;
+  const candidate = input.content.trim();
+  const blockedMessage = [
+    "这次没有形成足够明确的最终结论，已先停止本轮处理，避免一直停留在处理中。",
+    "",
+    `卡住原因：${reason}`,
+    candidate ? `\n已获得的阶段性内容：\n${candidate}` : "",
+    "",
+    "你可以补充更明确的字段、接口、仓库或异常上下文后重新提问。",
+  ].filter(Boolean).join("\n");
+
   return {
-    content: "",
-    shouldSendFinal: false,
-    reason: `最终回复闸门未通过：${input.finalResolution.reason}`,
+    content: blockedMessage,
+    shouldSendFinal: true,
+    reason,
     source: "blocked",
   };
 }

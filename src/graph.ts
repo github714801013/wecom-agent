@@ -9,6 +9,7 @@ import { join } from "path";
 import { buildRelationshipIndex, formatRelationshipIndex } from "./relationship-index.js";
 import { buildAnalyzedCodeRangeIndex, formatAnalyzedCodeRangeIndex } from "./analyzed-code-range-index.js";
 import { PROGRESS_KEYWORDS } from "./progress-updates.js";
+import { createReactLoopController, wrapToolsWithReactLoopControl } from "./react-loop-control.js";
 
 const MODEL_CONTEXT_MAP: Record<string, number> = {
   "MiniMax-M2.5": 200000,
@@ -1112,11 +1113,13 @@ export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOption
 export async function initializeAgent(tools?: any[], plannerResult?: BusinessPromptPlanner | null) {
   const model = await getBaseModel();
   const agentTools = tools || await getAllMcpTools();
+  const reactLoopController = createReactLoopController();
+  const controlledTools = wrapToolsWithReactLoopControl(agentTools, reactLoopController);
   const systemPrompt = await getBusinessPrompt(plannerResult);
 
   const baseAgent = createAgent({
     model: model,
-    tools: agentTools,
+    tools: controlledTools,
     systemPrompt: systemPrompt,
   });
 

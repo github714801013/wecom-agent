@@ -23,6 +23,7 @@ import { buildProgressLimitRecoverySystemPrompt, ensureRecoverySqlAuditMarker } 
 import {
   buildUserFacingAuditFallbackMessage,
   generateUserFacingAuditFallbackMessage,
+  resolveFinalReplyWithModel,
   type RuntimeTodoItem,
 } from "./runtime-todolist.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
@@ -35,14 +36,15 @@ import {
 
 const DEFAULT_DIAGNOSTIC_PORT = 3010;
 
-type EvaluateCase = "progress" | "tool-context" | "human-loop" | "audit-fallback" | "question-history";
+type EvaluateCase = "progress" | "tool-context" | "human-loop" | "audit-fallback" | "question-history" | "final-gate";
 
 type DiagnosticResult =
   | { case: "progress"; collapsed: string; streamContent: string }
   | { case: "tool-context"; filteredContent: string }
   | { case: "human-loop"; request: ReturnType<typeof detectHumanLoopRequest> }
   | { case: "audit-fallback"; reply: string }
-  | { case: "question-history"; question: string; historyCount: number };
+  | { case: "question-history"; question: string; historyCount: number }
+  | { case: "final-gate"; ready: boolean; action: string; source: string; answer: string; reason: string };
 
 export function evaluateDiagnosticCase(caseName: "progress", input: Record<string, unknown>): Extract<DiagnosticResult, { case: "progress" }>;
 export function evaluateDiagnosticCase(caseName: "tool-context", input: Record<string, unknown>): Extract<DiagnosticResult, { case: "tool-context" }>;
@@ -113,6 +115,16 @@ export function evaluateDiagnosticCase(caseName: EvaluateCase, input: Record<str
   throw new Error(`Unsupported diagnostic case: ${caseName}`);
 }
 
+function normalizeDiagnosticStringArray(input: unknown) {
+  if (Array.isArray(input)) {
+    return input.map(String).filter(item => item.trim());
+  }
+  if (typeof input === "string" && input.trim()) {
+    return [input];
+  }
+  return [];
+}
+
 function buildDiagnosticAuditFallbackItems(input: Record<string, unknown>) {
   const itemIds = Array.isArray(input.itemIds) && input.itemIds.length > 0
     ? input.itemIds.map(String)
@@ -126,6 +138,36 @@ function buildDiagnosticAuditFallbackItems(input: Record<string, unknown>) {
 }
 
 async function evaluateDiagnosticCaseAsync(caseName: EvaluateCase, input: Record<string, unknown>): Promise<DiagnosticResult> {
+  if (caseName === "final-gate") {
+    const llmReplies = normalizeDiagnosticStringArray(input.llmReplies);
+    let replyIndex = 0;
+    const model = {
+      async invoke() {
+        const content = llmReplies[replyIndex] || input.llmReply || JSON.stringify({
+          ready: false,
+          action: "continue",
+          reason: "debug default non-final",
+        });
+        replyIndex += 1;
+        return { content };
+      },
+    };
+    const result = await resolveFinalReplyWithModel({
+      question: String(input.question || ""),
+      answer: String(input.candidateAnswer || input.answer || ""),
+      streamSnapshots: normalizeDiagnosticStringArray(input.streamSnapshots),
+      model,
+    });
+    return {
+      case: "final-gate",
+      ready: result.ready,
+      action: result.action,
+      source: result.source,
+      answer: result.answer,
+      reason: result.reason,
+    };
+  }
+
   if (caseName !== "audit-fallback" || (!input.useLlm && typeof input.llmReply !== "string")) {
     return evaluateDiagnosticCase(caseName, input);
   }
@@ -418,10 +460,10 @@ function normalizeCase(value: unknown): EvaluateCase {
   if (value === "progress" || value === "tool-context" || value === "human-loop" || value === "audit-fallback") {
     return value;
   }
-  if (value === "question-history") {
+  if (value === "question-history" || value === "final-gate") {
     return value;
   }
-  throw new Error("case must be one of: progress, tool-context, human-loop, audit-fallback, question-history");
+  throw new Error("case must be one of: progress, tool-context, human-loop, audit-fallback, question-history, final-gate");
 }
 
 export function startDiagnosticServer() {
@@ -443,7 +485,7 @@ export function startDiagnosticServer() {
         enabled: true,
         port,
       },
-      cases: ["progress", "tool-context", "human-loop", "audit-fallback", "question-history", "agent-question"],
+      cases: ["progress", "tool-context", "human-loop", "audit-fallback", "question-history", "final-gate", "agent-question"],
     });
   });
 

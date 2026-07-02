@@ -31,7 +31,21 @@ export interface FinalAnswerReviewResult {
 export interface FinalAnswerReviewInput {
   question: string;
   answer: string;
-  model?: AuditFallbackModel;
+  model?: AuditFallbackModel | undefined;
+}
+
+export interface FinalReplyResolutionInput extends FinalAnswerReviewInput {
+  streamSnapshots?: string[];
+  maxSnapshotReviews?: number;
+}
+
+export interface FinalReplyResolutionResult {
+  ready: boolean;
+  action: FinalAnswerReviewAction;
+  answer: string;
+  reason: string;
+  source: "candidate" | "stream_snapshot" | "unresolved";
+  review: FinalAnswerReviewResult;
 }
 
 export interface RuntimeAuditPlanInput {
@@ -397,6 +411,81 @@ export async function reviewFinalAnswerWithModel(input: FinalAnswerReviewInput):
   }
 }
 
+function collectFinalReplyCandidates(candidateAnswer: string, streamSnapshots: string[] = [], maxSnapshotReviews = 8) {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  const addCandidate = (content: string) => {
+    const normalized = content.trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
+
+  addCandidate(candidateAnswer);
+  for (const snapshot of [...streamSnapshots].reverse()) {
+    if (candidates.length > maxSnapshotReviews + 1) break;
+    addCandidate(snapshot);
+  }
+
+  return candidates;
+}
+
+export async function resolveFinalReplyWithModel(input: FinalReplyResolutionInput): Promise<FinalReplyResolutionResult> {
+  const candidates = collectFinalReplyCandidates(
+    input.answer,
+    input.streamSnapshots,
+    input.maxSnapshotReviews,
+  );
+  const candidateAnswer = candidates[0] || input.answer.trim();
+  const candidateReview = await reviewFinalAnswerWithModel({
+    question: input.question,
+    answer: candidateAnswer,
+    model: input.model,
+  });
+
+  if (candidateReview.ready) {
+    return {
+      ready: true,
+      action: "send",
+      answer: candidateAnswer,
+      reason: candidateReview.reason,
+      source: "candidate",
+      review: candidateReview,
+    };
+  }
+
+  for (const snapshot of candidates.slice(1)) {
+    const snapshotReview = await reviewFinalAnswerWithModel({
+      question: input.question,
+      answer: snapshot,
+      model: input.model,
+    });
+    if (snapshotReview.ready) {
+      return {
+        ready: true,
+        action: "send",
+        answer: snapshot,
+        reason: `当前最终候选未通过评审，已恢复流式过程中较早出现的可发送结论：${snapshotReview.reason}`,
+        source: "stream_snapshot",
+        review: snapshotReview,
+      };
+    }
+  }
+
+  return {
+    ready: false,
+    action: candidateReview.action,
+    answer: candidateAnswer,
+    reason: candidateReview.reason,
+    source: "unresolved",
+    review: candidateReview,
+  };
+}
+
+export function shouldSendFinalReply(resolution: FinalReplyResolutionResult) {
+  return resolution.ready && resolution.action === "send";
+}
+
 const INCOMPLETE_FINAL_NOTICE = "提示：以上不是最终结论，只是目前能搜索到的信息；完整结论还需要继续补齐证据闭环。";
 
 export function appendIncompleteFinalNotice(content: string) {
@@ -726,16 +815,34 @@ export function summarizeTodoList(todoList: RuntimeTodoList) {
     .join("; ");
 }
 
+const USER_FACING_TODO_TASKS: Record<string, string> = {
+  message_parsed: "接收并理解问题",
+  planner_checked: "分析处理思路",
+  tools_loaded: "查询相关信息",
+  analysis_finished: "整理分析结果",
+  final_checked: "确认回复完整性",
+  project_scope_audited: "核对目标范围",
+  sql_correctness_audited: "核对 SQL 或数据依据",
+  evidence_audited: "核对结论依据",
+  execution_flow_audited: "核对执行链路",
+  owner_contact_audited: "核对处理建议",
+  final_format_audited: "整理最终回复",
+};
+
+function getUserFacingTodoTask(item: RuntimeTodoItem) {
+  return USER_FACING_TODO_TASKS[item.id] || item.task;
+}
+
 // 面向用户展示的步骤清单渲染：done 打 ✓，未完成用中性标记 ○。
-// 心跳动画仅由独立的上方心跳行承载，步骤行不再使用心跳帧，保持步骤文案稳定可读。
+// 只展示用户能理解的任务阶段，不暴露 MCP、审核项 id、工具名等内部实现细节。
 export function renderTodoStepsForHeartbeat(todoList: RuntimeTodoList, _heartbeatFrame: string) {
   if (todoList.items.length === 0) return "";
   const lines = todoList.items.map(item => {
     const done = item.status === "done";
     const marker = done ? "✓" : "○";
-    return `${marker} ${item.task}`;
+    return `${marker} ${getUserFacingTodoTask(item)}`;
   });
-  return `【规划步骤】\n${lines.join("\n")}`;
+  return `【处理进度】\n${lines.join("\n")}`;
 }
 
 function getAuditTodoFailureGuide(item: RuntimeTodoItem) {
@@ -854,7 +961,7 @@ function sanitizeLlmAuditFallback(content: unknown) {
 export function buildUserFacingAuditFallbackMessage(question: string, items: RuntimeTodoItem[]) {
   const normalizedQuestion = question.trim();
   if (isImageAnalysisArtifact(normalizedQuestion)) {
-    return "已识别到图片里的报错信息，我会继续核实代码入口、参数映射和下游调用；这不是最终结论。";
+    return "已识别到图片里的报错信息，我会继续围绕接口路径、请求参数、代码入口和下游调用核实。";
   }
 
   const prefix = normalizedQuestion

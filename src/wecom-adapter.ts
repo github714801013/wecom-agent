@@ -47,7 +47,7 @@ import {
   buildDirectEvidenceFastPathInstruction,
   buildDirectEvidenceRuntimeInstruction,
   hasDirectEvidenceAnchors,
-  shouldUseDirectEvidenceFastPath,
+  shouldUseWeComDirectEvidenceFastPath,
 } from "./direct-evidence.js";
 import {
   buildFollowupQuestion,
@@ -58,7 +58,6 @@ import {
 } from "./interaction-control.js";
 import {
   applySqlAuditEvidence,
-  appendIncompleteFinalNotice,
   assertTodoListComplete,
   blockTodoItem,
   buildIncompleteAuditTodoMessage,
@@ -74,7 +73,9 @@ import {
   hasTodoItem,
   isSqlAuditEvidenceBlocking,
   renderTodoStepsForHeartbeat,
-  reviewFinalAnswerWithModel,
+  type FinalReplyResolutionResult,
+  resolveFinalReplyWithModel,
+  shouldSendFinalReply,
   syncRuntimeAuditTodoPlan,
   startTodoItem,
   summarizeTodoList,
@@ -345,6 +346,47 @@ export function buildHelpReply(headerCommands = listMcpHeaderCommands(config.mcp
   ].join("\n");
 }
 
+export interface FinalReplyDeliveryInput {
+  content: string;
+  finalResolution: FinalReplyResolutionResult;
+  humanLoopReply?: string | null;
+}
+
+export interface FinalReplyDeliveryResult {
+  content: string;
+  shouldSendFinal: boolean;
+  reason: string;
+  source: "reviewed" | "human_loop" | "blocked";
+}
+
+export function resolveFinalReplyDelivery(input: FinalReplyDeliveryInput): FinalReplyDeliveryResult {
+  if (shouldSendFinalReply(input.finalResolution)) {
+    return {
+      content: input.finalResolution.answer,
+      shouldSendFinal: true,
+      reason: input.finalResolution.reason,
+      source: "reviewed",
+    };
+  }
+
+  const humanLoopReply = input.humanLoopReply?.trim();
+  if (humanLoopReply) {
+    return {
+      content: humanLoopReply,
+      shouldSendFinal: true,
+      reason: "converted clarification content to human loop",
+      source: "human_loop",
+    };
+  }
+
+  return {
+    content: "",
+    shouldSendFinal: false,
+    reason: `最终回复闸门未通过：${input.finalResolution.reason}`,
+    source: "blocked",
+  };
+}
+
 export function shouldStartEarlyProgressBeforeParse(body: any) {
   const hasImageInMixed = (items: any[] = []) => items.some(item => item?.msgtype === "image");
   return body?.msgtype === MessageType.Image
@@ -515,7 +557,7 @@ export async function startBot(botConfig: BotConfig) {
       await bot.replyStreamWithCard(frame, streamId, buildThinkingHeartbeatContent("", [], Date.now()), false, {
         templateCard: {
           card_type: 'text_notice',
-          main_title: { title: '任务处理中', desc: 'AI 助手正在读取消息内容...' },
+          main_title: { title: '任务处理中', desc: '正在理解你的消息...' },
           task_id: `task_${body.msgid}`,
         }
       });
@@ -732,10 +774,10 @@ const runtimeTodoList = createRuntimeTodoList();
 
       if (!startEarlyProgress) {
         // 发送初始进度卡片
-        await bot.replyStreamWithCard(frame, streamId, "AI 正在思考中...", false, {
+        await bot.replyStreamWithCard(frame, streamId, "正在处理你的问题，请稍候。", false, {
           templateCard: {
             card_type: 'text_notice',
-            main_title: { title: '任务处理中', desc: 'AI 助手正在分析您的请求...' },
+            main_title: { title: '任务处理中', desc: '正在理解你的问题...' },
             task_id: `task_${body.msgid}`,
           }
         });
@@ -768,6 +810,17 @@ const runtimeTodoList = createRuntimeTodoList();
       let expiredStreamHistorySaved = false;
       let replyAckTimeoutReconnectTriggered = false;
       let replyStreamQueue = Promise.resolve();
+      const visibleStreamSnapshots: string[] = [];
+      const rememberVisibleStreamSnapshot = (content: string) => {
+        const visible = collapseProgressUpdates(stripProtocolNoise(content)).trim();
+        if (!visible) return;
+        const lastVisible = visibleStreamSnapshots[visibleStreamSnapshots.length - 1];
+        if (lastVisible === visible) return;
+        visibleStreamSnapshots.push(visible);
+        if (visibleStreamSnapshots.length > 20) {
+          visibleStreamSnapshots.shift();
+        }
+      };
       const saveExpiredStreamHistory = async () => {
         if (expiredStreamHistorySaved) return;
         expiredStreamHistorySaved = true;
@@ -813,6 +866,9 @@ const runtimeTodoList = createRuntimeTodoList();
 
         try {
           await bot.replyStream(frame, streamId, replyContent, final);
+          if (!final) {
+            rememberVisibleStreamSnapshot(safeContent);
+          }
           return true;
         } catch (error) {
           if (isWeComStreamExpiredError(error)) {
@@ -1039,7 +1095,7 @@ ${hypotheses}
       // 记录流式过程中的所有消息，用于容错恢复
       try {
         // 快路径只看用户本轮原始输入，避免拼接历史 AI 输出（含"原因分析/调用链/代码位置"等 section）误触发跳过工具加载。
-        if (shouldUseDirectEvidenceFastPath(originalUserQuestion)) {
+        if (shouldUseWeComDirectEvidenceFastPath(originalUserQuestion)) {
           startTodoItem(runtimeTodoList, "tools_loaded");
           completeTodoItem(runtimeTodoList, "tools_loaded", "direct evidence fast path: skipped MCP tool loading");
           startTodoItem(runtimeTodoList, "analysis_finished");
@@ -1417,38 +1473,41 @@ ${hypotheses}
       }
 
       startTodoItem(runtimeTodoList, "final_checked");
-      const finalReview = await reviewFinalAnswerWithModel({
+      const finalResolution = await resolveFinalReplyWithModel({
         question: currentQuestion,
         answer: fullContent,
+        streamSnapshots: visibleStreamSnapshots,
         model: await getBaseModel(),
       });
-      if (finalReview.ready) {
-        completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}; review=${finalReview.reason}`);
+      const isResumeTurn = (activePendingHumanLoop?.resumeCount ?? 0) > 0;
+      const clarificationRequest = shouldSendFinalReply(finalResolution) || isResumeTurn
+        ? null
+        : detectClarificationContent(fullContent, currentQuestion);
+      let humanLoopReply: string | null = null;
+      if (clarificationRequest) {
+        console.log(`[${botConfig.name}] Clarification content detected without human_loop protocol, converting to Human Loop for ${body.msgid}`);
+        const storedClarification = toStoredHumanLoopRequest(clarificationRequest, body.msgid);
+        sessionManager.setPendingHumanLoop(sessionKey, storedClarification);
+        humanLoopReply = buildHumanLoopReply(storedClarification);
+      }
+      const finalDelivery = resolveFinalReplyDelivery({
+        content: fullContent,
+        finalResolution,
+        humanLoopReply,
+      });
+      fullContent = finalDelivery.content;
+      if (finalDelivery.shouldSendFinal) {
+        completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}; source=${finalDelivery.source}; review=${finalDelivery.reason}`);
       } else {
-        // 兜底：LLM 未走 human_loop JSON 协议，但输出的是提问/澄清类内容，
-        // 转成 Human Loop 暂停等用户补充，而不是追加 notice 直接发送终止。
-        // 防死循环：如果当前是 Human Loop 恢复后的轮次（resumeCount > 0），说明用户刚补充过，
-        // 不再兜底转 Human Loop，而是追加检索提示强制 AI 继续查代码。
-        const isResumeTurn = (activePendingHumanLoop?.resumeCount ?? 0) > 0;
-        const clarificationRequest = isResumeTurn ? null : detectClarificationContent(fullContent, currentQuestion);
-        if (clarificationRequest) {
-          console.log(`[${botConfig.name}] Clarification content detected without human_loop protocol, converting to Human Loop for ${body.msgid}`);
-          const storedClarification = toStoredHumanLoopRequest(clarificationRequest, body.msgid);
-          sessionManager.setPendingHumanLoop(sessionKey, storedClarification);
-          fullContent = buildHumanLoopReply(storedClarification);
-          completeTodoItem(runtimeTodoList, "final_checked", "converted clarification content to human loop");
-        } else {
-          console.error(`[${botConfig.name}] Runtime TodoList blocked for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
-          fullContent = appendIncompleteFinalNotice(fullContent);
-          completeTodoItem(runtimeTodoList, "final_checked", `sent incomplete-answer notice with preserved content; review=${finalReview.reason}`);
-        }
+        console.error(`[${botConfig.name}] Final reply blocked for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}; ${finalDelivery.reason}`);
+        completeTodoItem(runtimeTodoList, "final_checked", finalDelivery.reason);
       }
       if (auditPassed) {
         assertTodoListComplete(runtimeTodoList);
         console.log(`[${botConfig.name}] Runtime TodoList completed for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
       }
       stopThinkingHeartbeat();
-      if (!shouldStopCurrentTask()) {
+      if (!shouldStopCurrentTask() && fullContent) {
         await safeReplyStream(fullContent || "未获取到有效回复", true);
       }
       if (activeTasks.get(sessionKey) === currentTask) {

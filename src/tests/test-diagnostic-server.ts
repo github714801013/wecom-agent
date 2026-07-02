@@ -8,8 +8,8 @@ const progressResult = evaluateDiagnosticCase("progress", {
 
 assert.equal(
   progressResult.streamContent,
-  "已定位候选文件，继续核实中。\n\n> 🔍 正在调用: query...",
-  "diagnostic progress case should expose actual progress collapse result",
+  "正在查询相关信息，请稍候。",
+  "diagnostic progress case should expose user-facing progress status",
 );
 
 const toolResult = evaluateDiagnosticCase("tool-context", {

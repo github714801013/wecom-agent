@@ -4,6 +4,7 @@ import {
   buildDirectEvidenceRuntimeInstruction,
   hasDirectEvidenceAnchors,
   shouldUseDirectEvidenceFastPath,
+  shouldUseWeComDirectEvidenceFastPath,
 } from "../direct-evidence.js";
 
 const question = `curl -X POST -d "sub_id=18117666&sub_check=2&TakeMobile=&mobile_basket_id=&confirmInfo=" "https://oa.dev.9ji.com/addOrder/subCheckOp"
@@ -21,6 +22,7 @@ assert.deepEqual(
 const rootCauseQuestion = `${question}
 根本原因/排查方向：第三方接口返回状态码导致拦截`;
 assert.equal(shouldUseDirectEvidenceFastPath(rootCauseQuestion), true, "should allow fast path for root-cause direct evidence");
+assert.equal(shouldUseWeComDirectEvidenceFastPath(rootCauseQuestion), false, "WeCom live flow should still query tools for direct evidence");
 
 const lookupQuestion = `${rootCauseQuestion}
 这个队列 cm_returned_imeis 是干啥的，谁消费？`;

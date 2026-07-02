@@ -4,8 +4,10 @@ import {
   buildIntermediateStreamContent,
   buildProgressStreamContent,
   buildThinkingHeartbeatContent,
+  buildUserFacingProgressContent,
   collapseProgressUpdates,
   getProcessingFrame,
+  USER_FACING_PROGRESS_TEXT,
 } from "../progress-updates.js";
 
 const longProgress = "已读取问题，当前缺少直接证据，继续核实中。已确认存在多个代码仓库，继续核实中。已获取仓库清单，继续核实中。";
@@ -17,9 +19,33 @@ assert.equal(
 );
 
 assert.equal(
-  buildProgressStreamContent(longProgress, ["> 正在调用: remote_gitnexus_query..."]),
-  "已获取仓库清单，继续核实中。\n\n> 正在调用: remote_gitnexus_query...",
-  "streaming content should show latest progress plus active tool call",
+  buildProgressStreamContent(longProgress, ["internal_tool_call"]),
+  USER_FACING_PROGRESS_TEXT.searching,
+  "streaming content should hide internal tool details and show user-facing query status",
+);
+
+assert.equal(
+  buildUserFacingProgressContent("已收到问题，正在识别意图和检索锚点，继续核实中。"),
+  USER_FACING_PROGRESS_TEXT.thinking,
+  "intent planning progress should map to user-facing thinking status",
+);
+
+assert.equal(
+  buildUserFacingProgressContent("正在加载 MCP 工具和项目范围，继续核实中。"),
+  USER_FACING_PROGRESS_TEXT.searching,
+  "technical tool loading progress should map to user-facing query status",
+);
+
+assert.equal(
+  buildUserFacingProgressContent("已获取到相关信息，正在整理回复。"),
+  USER_FACING_PROGRESS_TEXT.generating,
+  "reply generation progress should map to user-facing generating status",
+);
+
+assert.equal(
+  buildUserFacingProgressContent("结论：当前规则不允许切换。"),
+  "结论：当前规则不允许切换。",
+  "final-looking content should not be replaced by generic progress status",
 );
 
 assert.equal(
@@ -70,21 +96,15 @@ assert.equal(
 
 <agent_progress>
 已定位到 add-mixins.jsx，继续核实中。
-</agent_progress>`, ["> 🔍 正在调用: code_snippet..."]),
-  "已定位到 add-mixins.jsx，继续核实中。\n\n> 🔍 正在调用: code_snippet...",
-  "streaming content should keep latest agent_progress tag and preserve file dots",
+</agent_progress>`, ["internal_code_lookup"]),
+  USER_FACING_PROGRESS_TEXT.searching,
+  "streaming content should keep user-facing status and hide internal tool details",
 );
 
 assert.equal(
-  buildProgressStreamContent("<", ["> 🔍 正在调用: query..."]),
-  "> 🔍 正在调用: query...",
+  buildProgressStreamContent("<", ["internal_query"]),
+  USER_FACING_PROGRESS_TEXT.searching,
   "single protocol tag prefix should not be shown before content is available",
-);
-
-assert.equal(
-  buildProgressStreamContent("<agent_progress", ["> 🔍 正在调用: query..."]),
-  "> 🔍 正在调用: query...",
-  "non-heartbeat progress should not show processing state when only a tool call is visible",
 );
 
 assert.equal(
@@ -101,18 +121,12 @@ assert.equal(
 );
 
 assert.equal(
-  collapseProgressUpdates("<agent_progress>已读取问题，继续核实中。\n\n未打最终标签的结论：保留现有兜底。"),
-  "未打最终标签的结论：保留现有兜底。",
-  "fallback content after incomplete progress tag should still be available",
-);
-
-assert.equal(
   buildProgressStreamContent(
-    "已读取问题，当前缺少直接证据，继续核实中。\n\n> 🔍 正在调用: query...\n\n已命中候选入口，继续核实中。",
-    ["> 🔍 正在调用: code_snippet..."],
+    "已读取问题，当前缺少直接证据，继续核实中。\n\n已命中候选入口，继续核实中。",
+    ["internal_code_lookup"],
   ),
-  "已命中候选入口，继续核实中。\n\n> 🔍 正在调用: code_snippet...",
-  "streaming content should overwrite old progress and old active tool lines",
+  USER_FACING_PROGRESS_TEXT.searching,
+  "streaming content should overwrite old internal progress with user-facing query status",
 );
 
 assert.equal(getProcessingFrame(0), "◐", "processing frame should be deterministic by timestamp");
@@ -120,56 +134,44 @@ assert.equal(getProcessingFrame(1000), "◓", "processing frame should rotate to
 
 assert.equal(
   buildIntermediateStreamContent("已完成问题规划，继续核实中。", 0),
-  "◐ 已完成问题规划，继续核实中。",
-  "ordinary intermediate stream replies should carry the current processing icon",
+  `◐ ${USER_FACING_PROGRESS_TEXT.thinking}`,
+  "ordinary intermediate stream replies should carry user-facing stage text",
 );
 
 assert.equal(
-  buildIntermediateStreamContent("> 🔍 正在调用: query...", 1000),
-  "◓ > 🔍 正在调用: query...",
-  "tool-only intermediate stream replies should carry the current processing icon",
-);
-
-assert.equal(
-  buildIntermediateStreamContent("◐ 处理中：仍在分析中.", 2000),
-  "◐ 处理中：仍在分析中.",
-  "heartbeat replies should not receive a duplicate processing icon",
+  buildIntermediateStreamContent("internal query is running", 1000),
+  `◓ ${USER_FACING_PROGRESS_TEXT.searching}`,
+  "technical intermediate stream replies should hide internal details",
 );
 
 assert.equal(
   buildProgressStreamContent("已完成问题规划，继续核实中。"),
-  "已完成问题规划，继续核实中。",
-  "non-heartbeat progress should not include processing state",
+  USER_FACING_PROGRESS_TEXT.thinking,
+  "non-heartbeat progress should use user-facing thinking state",
 );
 
 assert.equal(
-  buildProgressStreamContent("已完成问题规划，继续核实中。", ["> 🔍 正在调用: query..."]),
-  "已完成问题规划，继续核实中。\n\n> 🔍 正在调用: query...",
-  "non-heartbeat progress with active tool calls should not include processing state",
+  buildProgressStreamContent("已完成问题规划，继续核实中。", ["internal_query"]),
+  USER_FACING_PROGRESS_TEXT.searching,
+  "non-heartbeat progress with active tool calls should use user-facing query state",
 );
 
 const firstHeartbeat = buildThinkingHeartbeatContent("", [], 0);
 const secondHeartbeat = buildThinkingHeartbeatContent("", [], 1000);
 assert.notEqual(firstHeartbeat, secondHeartbeat, "thinking heartbeat should change over time");
-assert.equal(firstHeartbeat, "◐ 处理中：仍在分析中.", "heartbeat should include dynamic dotted text when no content exists");
-assert.equal(secondHeartbeat, "◓ 处理中：仍在核实中..", "heartbeat should rotate text and dots");
+assert.equal(firstHeartbeat, `◐ ${USER_FACING_PROGRESS_TEXT.thinking}`, "heartbeat should include user-facing status when no content exists");
+assert.equal(secondHeartbeat, `◓ ${USER_FACING_PROGRESS_TEXT.searching}`, "heartbeat should rotate user-facing status text");
 
 assert.equal(
   buildThinkingHeartbeatContent("已完成问题规划，继续核实中。", [], 0),
-  "已完成问题规划，继续核实中。\n\n◐ 处理中：仍在分析中.",
-  "heartbeat should append dynamic thinking line after latest visible progress",
+  `◐ ${USER_FACING_PROGRESS_TEXT.thinking}`,
+  "heartbeat should collapse internal progress into a user-facing status",
 );
 
 assert.equal(
   buildProgressStreamContent("已完成问题规划，继续核实中。\n\n⠋ 处理中：仍在分析中.\n\n结论：可以取消。"),
   "结论：可以取消。",
   "real content should overwrite previous heartbeat dynamic text",
-);
-
-assert.equal(
-  buildProgressStreamContent("已完成问题规划，继续核实中。\n\n⠋ 处理中\n仍在分析中.\n\n结论：可以取消。"),
-  "结论：可以取消。",
-  "real content should overwrite previous legacy heartbeat dynamic text",
 );
 
 const emptyProtocolMarker = "[System: Empty message content sanitised to satisfy protocol]";
@@ -181,15 +183,15 @@ assert.equal(
 );
 
 assert.equal(
-  buildProgressStreamContent(`${emptyProtocolMarker}${emptyProtocolMarker}`, ["> 🔍 正在调用: query..."]),
-  "> 🔍 正在调用: query...",
-  "streaming progress should not expose empty protocol marker",
+  buildProgressStreamContent(`${emptyProtocolMarker}${emptyProtocolMarker}`, ["internal_query"]),
+  USER_FACING_PROGRESS_TEXT.searching,
+  "streaming progress should not expose empty protocol marker or tool details",
 );
 
 assert.equal(
   buildThinkingHeartbeatContent(emptyProtocolMarker, [], 0),
-  "◐ 处理中：仍在分析中.",
-  "thinking heartbeat should not expose empty protocol marker",
+  `◐ ${USER_FACING_PROGRESS_TEXT.thinking}`,
+  "thinking heartbeat should not expose empty protocol marker and should use user-facing status",
 );
 
 const adapterSource = readFileSync(new URL("../wecom-adapter.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
@@ -200,7 +202,7 @@ assert.doesNotMatch(
 );
 const heartbeatStartIndex = adapterSource.indexOf("heartbeatTimer = setInterval");
 const agentStreamIndex = adapterSource.indexOf("const stream = await agent.stream");
-const finalStopIndex = adapterSource.indexOf("stopThinkingHeartbeat();\n      if (!shouldStopCurrentTask())");
+const finalStopIndex = adapterSource.indexOf("await stopThinkingHeartbeatAndDrain();", agentStreamIndex);
 const heartbeatEndIndex = adapterSource.indexOf("}, THINKING_HEARTBEAT_INTERVAL_MS);", heartbeatStartIndex);
 const heartbeatBlock = heartbeatStartIndex >= 0 && heartbeatEndIndex > heartbeatStartIndex
   ? adapterSource.slice(heartbeatStartIndex, heartbeatEndIndex)

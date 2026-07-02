@@ -151,25 +151,40 @@ function isIncompleteProtocolTagPrefix(content: string): boolean {
 const PROCESSING_FRAMES = ["◐", "◓", "◑", "◒"];
 const LEGACY_PROCESSING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export const USER_FACING_PROGRESS_TEXT = {
+  thinking: "正在理解你的问题。",
+  searching: "正在查询相关信息，请稍候。",
+  generating: "正在整理回复。",
+  processing: "正在处理，请稍候。",
+} as const;
+
 const THINKING_HEARTBEAT_TEXTS = [
-  "仍在分析中",
-  "仍在核实中",
-  "仍在整理证据中",
-  "仍在等待模型响应",
+  USER_FACING_PROGRESS_TEXT.thinking,
+  USER_FACING_PROGRESS_TEXT.searching,
+  USER_FACING_PROGRESS_TEXT.generating,
+  USER_FACING_PROGRESS_TEXT.processing,
 ];
 
+const TECHNICAL_PROGRESS_PATTERN = /MCP|mcp|RAG|rag|Tool|tool|工具|预检索|检索|锚点|证据|代码|仓库|项目范围|业务分析节点|节点|调用|模型|stream|chunk|query|code_snippet|gitnexus|zoekt|runtime_todolist/u;
+const THINKING_PROGRESS_PATTERN = /收到问题|识别意图|理解|问题规划|规划|读取消息|分析请求/u;
+const GENERATING_PROGRESS_PATTERN = /整理回复|整理结果|输出结论|准备输出|生成回答|整理给你|给你整理/u;
+
 const HEARTBEAT_STRIP_FRAMES = [...PROCESSING_FRAMES, ...LEGACY_PROCESSING_FRAMES];
-const HEARTBEAT_FRAME_PREFIXES = HEARTBEAT_STRIP_FRAMES.map(frame => `${frame} 处理中`);
-const HEARTBEAT_FRAME_PATTERN = HEARTBEAT_STRIP_FRAMES.map(escapeRegExp).join("|");
-const HEARTBEAT_TEXT_PATTERN = THINKING_HEARTBEAT_TEXTS.map(escapeRegExp).join("|");
-const HEARTBEAT_FRAMED_PATTERN = new RegExp(`^(?:${HEARTBEAT_FRAME_PATTERN}) 处理中：(?:${HEARTBEAT_TEXT_PATTERN})\\.{1,3}$`, "u");
-const HEARTBEAT_PLAIN_PATTERN = new RegExp(`^(?:${HEARTBEAT_TEXT_PATTERN})\\.{1,3}$`, "u");
+const LEGACY_HEARTBEAT_TEXTS = ["仍在分析中", "仍在核实中", "仍在整理证据中", "仍在等待模型响应"];
+const HEARTBEAT_TEXT_STEMS = [...THINKING_HEARTBEAT_TEXTS, ...LEGACY_HEARTBEAT_TEXTS]
+  .map(text => text.replace(/[。.]$/u, ""));
 
 function isThinkingHeartbeatLine(line: string) {
   const trimmed = line.trim();
-  if (HEARTBEAT_FRAME_PREFIXES.includes(trimmed)) return true;
+  if (!trimmed) return false;
 
-  return HEARTBEAT_FRAMED_PATTERN.test(trimmed) || HEARTBEAT_PLAIN_PATTERN.test(trimmed);
+  const withoutFrame = HEARTBEAT_STRIP_FRAMES.reduce(
+    (current, frame) => current.startsWith(`${frame} `) ? current.slice(frame.length + 1).trim() : current,
+    trimmed,
+  );
+  const normalized = withoutFrame.replace(/^处理中[:：]\s*/u, "").replace(/\.{1,3}$/u, "").trim();
+  return HEARTBEAT_TEXT_STEMS.some(text => normalized.startsWith(text));
 }
 
 function stripThinkingHeartbeatContent(content: string) {
@@ -190,8 +205,34 @@ function hasProcessingFramePrefix(content: string) {
   return HEARTBEAT_STRIP_FRAMES.some(frame => trimmed.startsWith(`${frame} `));
 }
 
+function isUserFacingProgressText(content: string) {
+  const trimmed = content.trim();
+  return Object.values(USER_FACING_PROGRESS_TEXT).some(text => trimmed === text);
+}
+
+function isTechnicalOrInternalProgress(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  return TECHNICAL_PROGRESS_PATTERN.test(trimmed)
+    || PROGRESS_KEYWORDS.some(keyword => trimmed.includes(keyword));
+}
+
+export function buildUserFacingProgressContent(content: string, activeCalls: string[] = []) {
+  const displayContent = collapseProgressUpdates(content).trim();
+
+  if (activeCalls.length > 0) return USER_FACING_PROGRESS_TEXT.searching;
+  if (!displayContent) return "";
+  if (isUserFacingProgressText(displayContent)) return displayContent;
+
+  if (GENERATING_PROGRESS_PATTERN.test(displayContent)) return USER_FACING_PROGRESS_TEXT.generating;
+  if (THINKING_PROGRESS_PATTERN.test(displayContent)) return USER_FACING_PROGRESS_TEXT.thinking;
+  if (isTechnicalOrInternalProgress(displayContent)) return USER_FACING_PROGRESS_TEXT.searching;
+
+  return displayContent;
+}
+
 export function buildIntermediateStreamContent(content: string, now = Date.now()) {
-  const safeContent = stripProtocolNoise(content).trim();
+  const safeContent = buildUserFacingProgressContent(stripProtocolNoise(content)).trim();
   if (!safeContent || hasProcessingFramePrefix(safeContent)) return safeContent;
 
   return `${getProcessingFrame(now)} ${safeContent}`;
@@ -209,23 +250,13 @@ export function collapseProgressUpdates(content: string): string {
 }
 
 export function buildProgressStreamContent(content: string, activeCalls: string[] = []) {
-  const displayContent = collapseProgressUpdates(content);
-  const body = displayContent && activeCalls.length > 0
-    ? `${displayContent}\n\n${activeCalls.join("\n")}`
-    : displayContent || activeCalls.join("\n");
-
-  return body;
+  return buildUserFacingProgressContent(content, activeCalls);
 }
 
 export function buildThinkingHeartbeatContent(content: string, activeCalls: string[] = [], now = Date.now()) {
   const displayContent = collapseProgressUpdates(content);
+  const userFacingContent = buildUserFacingProgressContent(displayContent, activeCalls);
   const timeBucket = Math.floor(now / 1000);
-  const heartbeatText = THINKING_HEARTBEAT_TEXTS[timeBucket % THINKING_HEARTBEAT_TEXTS.length]!;
-  const dots = ".".repeat((timeBucket % 3) + 1);
-  const heartbeatLine = `${getProcessingFrame(now)} 处理中：${heartbeatText}${dots}`;
-  const bodyContent = displayContent ? `${displayContent}\n\n${heartbeatLine}` : heartbeatLine;
-  const body = activeCalls.length > 0
-    ? `${bodyContent}\n\n${activeCalls.join("\n")}`
-    : bodyContent;
-  return body;
+  const heartbeatText = userFacingContent || THINKING_HEARTBEAT_TEXTS[timeBucket % THINKING_HEARTBEAT_TEXTS.length]!;
+  return `${getProcessingFrame(now)} ${heartbeatText}`;
 }

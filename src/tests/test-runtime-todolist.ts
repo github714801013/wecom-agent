@@ -21,6 +21,8 @@ import {
   appendIncompleteFinalNotice,
   isSqlAuditEvidenceBlocking,
   reviewFinalAnswerWithModel,
+  resolveFinalReplyWithModel,
+  shouldSendFinalReply,
   syncRuntimeAuditTodoPlan,
   startTodoItem,
 } from "../runtime-todolist.js";
@@ -170,6 +172,40 @@ const imageArtifactReview = await reviewFinalAnswerWithModel({
 });
 assert.equal(imageArtifactReview.ready, false, "图片识别结果是否最终由模型评审决定");
 assert.equal(imageArtifactReview.action, "continue");
+
+const finalGateReplies = [
+  { ready: false, action: "continue", reason: "候选仍是阶段性进度" },
+  { ready: true, action: "send", reason: "快照已经回答问题" },
+];
+const restoredFinalReply = await resolveFinalReplyWithModel({
+  question: "StateAllowanceDeclaration 获取待申报提交订单的判断条件是什么？",
+  answer: "我会继续围绕现有项目锚点核实获取待申报订单的判断条件。\n\n提示：以上不是最终结论，只是目前能搜索到的信息；完整结论还需要继续补齐证据闭环。",
+  streamSnapshots: [
+    "结论：待申报提交订单会先按申报批次过滤，再排除已提交或已作废记录。",
+  ],
+  model: {
+    async invoke() {
+      return { content: finalGateReplies.shift() || { ready: false, action: "continue", reason: "unexpected extra review" } };
+    },
+  },
+});
+assert.equal(restoredFinalReply.ready, true);
+assert.equal(restoredFinalReply.source, "stream_snapshot");
+assert.match(restoredFinalReply.answer, /待申报提交订单/);
+assert.doesNotMatch(restoredFinalReply.answer, /不是最终结论/);
+
+assert.equal(
+  shouldSendFinalReply({
+    ready: false,
+    action: "continue",
+    answer: "我会继续核实，这不是最终结论。",
+    reason: "候选仍是阶段性进度",
+    source: "unresolved",
+    review: { ready: false, action: "continue", reason: "候选仍是阶段性进度" },
+  }),
+  false,
+  "最终闸门未通过时不能以 final=true 发送候选内容",
+);
 
 const incompleteFinalNotice = appendIncompleteFinalNotice("已识别到接口路径或请求参数锚点，我会继续围绕这些锚点核实代码入口。");
 assert.match(incompleteFinalNotice, /已识别到接口路径或请求参数锚点/);
@@ -589,8 +625,9 @@ const imageDiagnosticFallback = buildUserFacingAuditFallbackMessage(
 assert.doesNotMatch(imageDiagnosticFallback, /【图片识别结果】/);
 assert.doesNotMatch(imageDiagnosticFallback, /图片标题：发货扫描/);
 assert.doesNotMatch(imageDiagnosticFallback, /根据图片识别结果，这个报错已经能定位方向/);
+assert.doesNotMatch(imageDiagnosticFallback, /不是最终结论/);
 assert.match(imageDiagnosticFallback, /已识别到图片里的报错信息/);
-assert.match(imageDiagnosticFallback, /继续核实代码入口、参数映射和下游调用/);
+assert.match(imageDiagnosticFallback, /接口路径、请求参数、代码入口和下游调用/);
 
 const guardedCurlFallback = await generateUserFacingAuditFallbackMessage({
   question: `curl -k -i --raw -o 0.dat -X POST -d "sub_id=18117666&sub_check=2&TakeMobile=&mobile_basket_id=&confirmInfo=" "https://oa.dev.9ji.com/addOrder/subCheckOp"

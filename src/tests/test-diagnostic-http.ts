@@ -13,7 +13,35 @@ try {
   assert.equal(statusResponse.status, 200, "status endpoint should be callable without WeCom");
   const status = await statusResponse.json() as any;
   assert.equal(status.ok, true);
-  assert.deepEqual(status.cases, ["progress", "tool-context", "human-loop", "audit-fallback", "question-history", "agent-question"]);
+  assert.deepEqual(status.cases, ["progress", "tool-context", "human-loop", "audit-fallback", "question-history", "final-gate", "agent-question"]);
+
+  const finalGateResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case: "final-gate",
+      question: "StateAllowanceDeclaration 这个项目中，获取待申报提交的订单的判断条件是什么？",
+      candidateAnswer: `我会继续围绕现有项目锚点核实获取待申报订单的判断条件，包括相关查询逻辑和代码反推路径。
+
+如果方便的话，可以补充一点：这里的“待申报提交”是指在 StateAllowanceDeclaration 项目中哪个业务环节触发的？
+
+提示：以上不是最终结论，只是目前能搜索到的信息；完整结论还需要继续补齐证据闭环。`,
+      streamSnapshots: [
+        "结论：StateAllowanceDeclaration 中待申报提交订单由 state_allowance_declaration 表的状态字段和提交时间共同筛选，入口会先过滤当前申报批次，再排除已提交或已作废记录。",
+      ],
+      llmReplies: [
+        JSON.stringify({ ready: false, action: "continue", reason: "候选内容仍是阶段性进度" }),
+        JSON.stringify({ ready: true, action: "send", reason: "快照已经直接回答判断条件" }),
+      ],
+    }),
+  });
+  assert.equal(finalGateResponse.status, 200, "final-gate evaluate endpoint should be callable");
+  const finalGate = await finalGateResponse.json() as any;
+  assert.equal(finalGate.ready, true);
+  assert.equal(finalGate.source, "stream_snapshot");
+  assert.match(finalGate.answer, /待申报提交订单/);
+  assert.doesNotMatch(finalGate.answer, /不是最终结论/);
+  assert.doesNotMatch(finalGate.answer, /继续核实/);
 
   const evaluateResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
     method: "POST",
@@ -27,7 +55,7 @@ try {
   assert.equal(evaluateResponse.status, 200, "evaluate endpoint should be callable without WeCom");
   const evaluate = await evaluateResponse.json() as any;
   assert.equal(evaluate.collapsed, "已定位候选文件，继续核实中。");
-  assert.equal(evaluate.streamContent, "已定位候选文件，继续核实中。\n\n> 🔍 正在调用: query...");
+  assert.equal(evaluate.streamContent, "正在查询相关信息，请稍候。");
 
   const overwriteResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
     method: "POST",
@@ -40,7 +68,7 @@ try {
   });
   assert.equal(overwriteResponse.status, 200, "overwrite evaluate endpoint should be callable");
   const overwrite = await overwriteResponse.json() as any;
-  assert.equal(overwrite.streamContent, "已命中入口，继续核实中。\n\n> 🔍 正在调用: code_snippet...");
+  assert.equal(overwrite.streamContent, "正在查询相关信息，请稍候。");
 
   const thinkNoiseResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
     method: "POST",
@@ -129,7 +157,8 @@ try {
   assert.doesNotMatch(guardedCurlAuditFallback.reply, /TakeMobile.*是否应该有值/);
   assert.doesNotMatch(guardedCurlAuditFallback.reply, /mobile_basket_id.*basketid/);
   assert.doesNotMatch(guardedCurlAuditFallback.reply, /sub_check=1/);
-  assert.match(guardedCurlAuditFallback.reply, /接口路径或请求参数锚点|继续围绕 subCheckOp/);
+  assert.doesNotMatch(guardedCurlAuditFallback.reply, /不是最终结论/);
+  assert.match(guardedCurlAuditFallback.reply, /接口路径、请求参数、代码入口和下游调用|接口路径或请求参数锚点|继续围绕 subCheckOp/);
 
   const curlAuditFallbackResponse = await fetch("http://127.0.0.1:3011/__debug/evaluate", {
     method: "POST",

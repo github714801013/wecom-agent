@@ -13,6 +13,10 @@ export function shouldUseDirectEvidenceFastPath(question: string) {
     && !DIRECT_EVIDENCE_LOOKUP_INTENT_PATTERN.test(question);
 }
 
+export function shouldUseWeComDirectEvidenceFastPath(_question: string) {
+  return false;
+}
+
 export function buildDirectEvidenceRuntimeInstruction() {
   return `系统提示：【直接证据优先】
 当前问题里已经包含截图或历史上下文给出的候选调用链、代码位置、方法名、文件路径、行号或错误码含义。

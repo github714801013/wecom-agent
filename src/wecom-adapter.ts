@@ -15,6 +15,7 @@ import {
   isAmbiguousNewTopicWhilePending,
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
+  type HumanLoopRequest,
 } from "./human-loop.js";
 import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, getProcessingFrame, stripProtocolNoise } from "./progress-updates.js";
 import {
@@ -95,7 +96,36 @@ interface AgentStreamMetadata {
   flowControl?: FlowControlPatch;
 }
 
+interface BotReconnectState {
+  reconnectExhaustedTimer: NodeJS.Timeout | null;
+  reconnectWatchdogTimer: NodeJS.Timeout | null;
+}
+
 const THINKING_HEARTBEAT_INTERVAL_MS = 15000;
+const DEFAULT_RECONNECT_EXHAUSTED_DELAY_MS = 5000;
+const DEFAULT_RECONNECT_EXHAUSTED_WATCHDOG_MS = 60000;
+const WS_RECONNECT_EXHAUSTED_CODE = "WS_RECONNECT_EXHAUSTED";
+
+export function isWsReconnectExhaustedError(error: unknown) {
+  const err = error as { code?: unknown; name?: unknown; message?: unknown } | null | undefined;
+  return err?.code === WS_RECONNECT_EXHAUSTED_CODE
+    || err?.name === "WSReconnectExhaustedError"
+    || String(err?.message ?? "").includes("Max reconnect attempts exceeded");
+}
+
+export function getReconnectExhaustedDelayMs(envValue = process.env.WECOM_RECONNECT_EXHAUSTED_DELAY_MS) {
+  const parsed = Number(envValue);
+  return Number.isFinite(parsed) && parsed >= 1000
+    ? parsed
+    : DEFAULT_RECONNECT_EXHAUSTED_DELAY_MS;
+}
+
+export function getReconnectExhaustedWatchdogMs(envValue = process.env.WECOM_RECONNECT_EXHAUSTED_WATCHDOG_MS) {
+  const parsed = Number(envValue);
+  return Number.isFinite(parsed) && parsed >= 10000
+    ? parsed
+    : DEFAULT_RECONNECT_EXHAUSTED_WATCHDOG_MS;
+}
 
 function stripEmptyProtocolContent(content: string) {
   return stripProtocolNoise(content);
@@ -116,6 +146,35 @@ function reconnectBotAfterReplyAckTimeout(bot: WSClient, botName: string, msgid:
   } catch (error) {
     console.error(`[${botName}] Failed to reconnect WeCom WebSocket after reply ack timeout for ${msgid}:`, error);
   }
+}
+
+function scheduleReconnectAfterReconnectExhausted(
+  bot: WSClient,
+  botName: string,
+  reconnectState: BotReconnectState,
+) {
+  if (reconnectState.reconnectExhaustedTimer) return;
+
+  const delayMs = getReconnectExhaustedDelayMs();
+  console.error(`[${botName}] WeCom WebSocket reconnect exhausted; scheduling application-level reconnect in ${delayMs}ms.`);
+  reconnectState.reconnectExhaustedTimer = setTimeout(() => {
+    reconnectState.reconnectExhaustedTimer = null;
+    try {
+      console.warn(`[${botName}] Restarting WeCom WebSocket after reconnect exhausted.`);
+      bot.disconnect();
+      bot.connect();
+      if (!reconnectState.reconnectWatchdogTimer) {
+        const watchdogMs = getReconnectExhaustedWatchdogMs();
+        reconnectState.reconnectWatchdogTimer = setTimeout(() => {
+          console.error(`[${botName}] WeCom WebSocket did not authenticate within ${watchdogMs}ms after reconnect exhausted; exiting for container restart.`);
+          process.exit(1);
+        }, watchdogMs);
+      }
+    } catch (error) {
+      console.error(`[${botName}] Failed to restart WeCom WebSocket after reconnect exhausted; exiting for container restart.`, error);
+      process.exit(1);
+    }
+  }, delayMs);
 }
 
 /**
@@ -350,6 +409,7 @@ export interface FinalReplyDeliveryInput {
   content: string;
   finalResolution: FinalReplyResolutionResult;
   humanLoopReply?: string | null;
+  userQuestion?: string;
 }
 
 export interface FinalReplyDeliveryResult {
@@ -357,6 +417,83 @@ export interface FinalReplyDeliveryResult {
   shouldSendFinal: boolean;
   reason: string;
   source: "reviewed" | "human_loop" | "blocked";
+}
+
+function extractLikelyFieldNames(content: string) {
+  const fields = new Set<string>();
+  for (const match of content.matchAll(/\b([A-Za-z][A-Za-z0-9_]{1,})\s*字段/gmu)) {
+    const name = match[1]?.trim();
+    if (!name) continue;
+    if (/^(Java|Mapper|Entity|String|Long|Integer|BigInt|bigint|nvarchar)$/i.test(name)) continue;
+    fields.add(name);
+  }
+  return [...fields].sort((left, right) => Number(right.includes("_")) - Number(left.includes("_")) || left.length - right.length);
+}
+
+function buildUserFacingBlockedInsight(candidate: string) {
+  const normalized = candidate.replace(/\r\n/g, "\n").trim();
+  const likelyField = extractLikelyFieldNames(normalized)[0];
+  if (likelyField) {
+    return `当前线索指向 ${likelyField} 字段，但还没有完成数据库字段类型、实体字段类型和 Mapper 查询条件的一致性核对。`;
+  }
+
+  const sentences = normalized
+    .split(/(?<=[。.!！?？])\s*/u)
+    .map(item => item.trim())
+    .filter(Boolean);
+  const informativeSentence = sentences.find(sentence =>
+    !/(我会|我将|继续|暂不需要|需要你|请补充|尚未|不是最终结论|阶段性)/u.test(sentence)
+    && sentence.length >= 8
+  );
+  return informativeSentence || "当前已经获取到部分线索，但还不足以形成可直接采信的最终结论。";
+}
+
+function buildUserFacingBlockedMissingFacts(candidate: string) {
+  const missingFacts: string[] = [];
+  if (/数据库|列类型|字段类型|建表语句|表结构/u.test(candidate)) {
+    missingFacts.push("需要继续核对数据库真实列类型或表结构");
+  }
+  if (/Java|实体|JdProductConfig|Mapper|映射/u.test(candidate)) {
+    missingFacts.push("需要继续核对 Java 实体字段类型和 Mapper 查询映射");
+  }
+  if (/数据内容|含字母|nvarchar|bigint|类型转换/u.test(candidate)) {
+    missingFacts.push("需要继续核对实际数据内容与字段类型是否匹配");
+  }
+  return missingFacts.length > 0 ? missingFacts : ["需要继续补齐能够支撑最终结论的直接证据"];
+}
+
+function buildBlockedFinalReply(candidate: string) {
+  const insight = buildUserFacingBlockedInsight(candidate);
+  const missingFacts = buildUserFacingBlockedMissingFacts(candidate);
+  return [
+    "这次没有查到足够完整的证据，已先结束本轮等待，避免一直显示处理中。",
+    "",
+    "当前阶段性判断：",
+    insight,
+    "",
+    "还缺少的确认：",
+    ...missingFacts.map(item => `- ${item}`),
+    "",
+    "回复“继续”，我会基于当前上下文接着查；也可以直接补充仓库、表结构、字段截图或异常上下文。",
+  ].join("\n");
+}
+
+export function buildBlockedFinalHumanLoopRequest(input: FinalReplyDeliveryInput): HumanLoopRequest {
+  const candidate = input.content.trim();
+  return {
+    reason: "clarification_required",
+    question: buildBlockedFinalReply(candidate),
+    resumeInstruction: [
+      "用户希望基于上轮未完成结论继续排查。",
+      "继续时不要重复解释最终回复闸门、候选回答或内部审核机制。",
+      "优先基于已知阶段性线索补齐直接证据，并给出明确最终结论；如果仍缺证据，只输出最小缺口。",
+    ].join(""),
+    contextSnapshot: {
+      userQuestion: input.userQuestion || input.content,
+      knownFacts: candidate ? [buildUserFacingBlockedInsight(candidate)] : [],
+      missingFacts: buildUserFacingBlockedMissingFacts(candidate),
+    },
+  };
 }
 
 export function resolveFinalReplyDelivery(input: FinalReplyDeliveryInput): FinalReplyDeliveryResult {
@@ -379,19 +516,9 @@ export function resolveFinalReplyDelivery(input: FinalReplyDeliveryInput): Final
     };
   }
 
-  const reason = `最终回复闸门未通过：${input.finalResolution.reason}`;
-  const candidate = input.content.trim();
-  const blockedMessage = [
-    "这次没有形成足够明确的最终结论，已先停止本轮处理，避免一直停留在处理中。",
-    "",
-    `卡住原因：${reason}`,
-    candidate ? `\n已获得的阶段性内容：\n${candidate}` : "",
-    "",
-    "你可以补充更明确的字段、接口、仓库或异常上下文后重新提问。",
-  ].filter(Boolean).join("\n");
-
+  const reason = `final review blocked: ${input.finalResolution.reason}`;
   return {
-    content: blockedMessage,
+    content: buildBlockedFinalReply(input.content.trim()),
     shouldSendFinal: true,
     reason,
     source: "blocked",
@@ -524,6 +651,7 @@ export async function startBot(botConfig: BotConfig) {
     secret: botConfig.secret,
     wsUrl: botConfig.wsUrl, 
   });
+  const reconnectState: BotReconnectState = { reconnectExhaustedTimer: null, reconnectWatchdogTimer: null };
 
   // 用于消息去重的简单缓存（在多实例部署时建议改用 Redis）
   const processedMsgs = new Set<string>();
@@ -1501,11 +1629,19 @@ ${hypotheses}
         sessionManager.setPendingHumanLoop(sessionKey, storedClarification);
         humanLoopReply = buildHumanLoopReply(storedClarification);
       }
-      const finalDelivery = resolveFinalReplyDelivery({
+      const finalDeliveryInput: FinalReplyDeliveryInput = {
         content: fullContent,
         finalResolution,
         humanLoopReply,
-      });
+        userQuestion: currentQuestion,
+      };
+      const finalDelivery = resolveFinalReplyDelivery(finalDeliveryInput);
+      if (finalDelivery.source === "blocked") {
+        sessionManager.setPendingHumanLoop(
+          sessionKey,
+          toStoredHumanLoopRequest(buildBlockedFinalHumanLoopRequest(finalDeliveryInput), body.msgid),
+        );
+      }
       fullContent = finalDelivery.content;
       if (finalDelivery.shouldSendFinal) {
         completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}; source=${finalDelivery.source}; review=${finalDelivery.reason}`);
@@ -1535,8 +1671,19 @@ ${hypotheses}
   });
 
   bot.on("connected", () => console.log(`[${botConfig.name}] WeCom WebSocket connected.`));
-  bot.on("authenticated", () => console.log(`[${botConfig.name}] WeCom Authentication successful.`));
-  bot.on("error", (err) => console.error(`[${botConfig.name}] WeCom WebSocket error:`, err));
+  bot.on("authenticated", () => {
+    if (reconnectState.reconnectWatchdogTimer) {
+      clearTimeout(reconnectState.reconnectWatchdogTimer);
+      reconnectState.reconnectWatchdogTimer = null;
+    }
+    console.log(`[${botConfig.name}] WeCom Authentication successful.`);
+  });
+  bot.on("error", (err) => {
+    console.error(`[${botConfig.name}] WeCom WebSocket error:`, err);
+    if (isWsReconnectExhaustedError(err)) {
+      scheduleReconnectAfterReconnectExhausted(bot, botConfig.name, reconnectState);
+    }
+  });
 
   bot.connect();
   const contextWindow = getModelContextWindow();

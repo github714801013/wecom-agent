@@ -603,36 +603,148 @@ async function defaultToolIntentResolver(input: {
   return parseToolIntentDecision(response.content.toString());
 }
 
-export function extractMcpProjectCandidates(mcpServers: any[] = []) {
-  const projectNames = mcpServers.flatMap(server => typeof server?.headers?.projects === "string"
-    ? server.headers.projects.split(",")
-    : []);
+const PROJECT_SELECTION_MARKER_PATTERN = /项目|仓库|代码包|模块|repo|只查|在|从/iu;
 
-  return Array.from(new Set(projectNames.map(project => project.trim()).filter(Boolean)));
+const PROJECT_PREFIX_ALIASES: Record<string, string[]> = {
+  iteng: ["易腾", "iteng"],
+  yiteng: ["易腾", "yiteng"],
+  jxy: ["九讯云", "九讯", "jxy"],
+  jiuyun: ["九讯云", "九讯", "jiuyun"],
+};
+
+type RepoCandidate = {
+  repo: string;
+  latestIndex: number;
+  firstIndex: number;
+};
+
+type RepoCandidateMatch = RepoCandidate & {
+  score: number;
+  variantScore: number;
+};
+
+function splitProjectHeaderValue(value: unknown) {
+  return typeof value === "string"
+    ? value.split(",").map(project => project.trim()).filter(Boolean)
+    : [];
+}
+
+function uniqueRepoCandidatesWithLatest(repoCandidates: string[]) {
+  const byLower = new Map<string, { repo: string; latestIndex: number; firstIndex: number }>();
+  repoCandidates.forEach((candidate, index) => {
+    const repo = candidate.trim();
+    if (!repo) return;
+    const key = repo.toLowerCase();
+    const existing = byLower.get(key);
+    byLower.set(key, {
+      repo,
+      latestIndex: index,
+      firstIndex: existing?.firstIndex ?? index,
+    });
+  });
+  return Array.from(byLower.values());
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildRepoBoundaryPattern(repo: string) {
+  const escaped = escapeRegExp(repo);
+  return new RegExp(`(?:^|[^A-Za-z0-9_.-])${escaped}(?:[\\\\/]|\\b|[^A-Za-z0-9_.-]|$)`, "i");
+}
+
+function buildRepoPathAnchorPattern(repo: string) {
+  const escaped = escapeRegExp(repo);
+  return new RegExp(`(?:^|[^A-Za-z0-9_.-])${escaped}\\s*[\\\\/]`, "i");
+}
+
+function normalizeRepoKey(repo: string) {
+  return repo.trim().toLowerCase();
+}
+
+function isRepoVariantOf(candidateRepo: string, baseRepo: string) {
+  const candidate = normalizeRepoKey(candidateRepo);
+  const base = normalizeRepoKey(baseRepo);
+  return candidate === base || candidate.endsWith(`-${base}`) || candidate.endsWith(`_${base}`);
+}
+
+function getRepoPrefixTerms(repo: string, allCandidates: RepoCandidate[]) {
+  const lowerRepo = normalizeRepoKey(repo);
+  const terms = new Set<string>();
+
+  for (const candidate of allCandidates) {
+    const base = normalizeRepoKey(candidate.repo);
+    if (base === lowerRepo) continue;
+    if (lowerRepo.endsWith(`-${base}`) || lowerRepo.endsWith(`_${base}`)) {
+      const prefix = lowerRepo.slice(0, lowerRepo.length - base.length).replace(/[-_]+$/g, "");
+      prefix.split(/[-_]+/).filter(Boolean).forEach(term => terms.add(term));
+    }
+  }
+
+  lowerRepo.split(/[-_]+/).slice(0, -1).filter(Boolean).forEach(term => terms.add(term));
+  return Array.from(terms);
+}
+
+function calculateRepoVariantScore(userQuestion: string, repo: string, allCandidates: RepoCandidate[]) {
+  const lowerQuestion = userQuestion.toLowerCase();
+  return getRepoPrefixTerms(repo, allCandidates).reduce((score, term) => {
+    const aliases = PROJECT_PREFIX_ALIASES[term] ?? [];
+    return aliases.some(alias => lowerQuestion.includes(alias.toLowerCase()))
+      ? score + 500
+      : score;
+  }, 0);
+}
+
+export function extractMcpProjectCandidates(mcpServers: any[] = []) {
+  const projectNames = mcpServers.flatMap(server => [
+    ...splitProjectHeaderValue(server?.headers?.projects),
+    ...Object.values(server?.headerProfiles ?? {}).flatMap((profile: any) => splitProjectHeaderValue(profile?.projects)),
+  ]);
+
+  return uniqueRepoCandidatesWithLatest(projectNames).map(candidate => candidate.repo);
 }
 
 export function extractExplicitRepoHints(userQuestion: string, repoCandidates: string[] = []) {
-  const candidates = repoCandidates.filter(Boolean);
+  const candidates = uniqueRepoCandidatesWithLatest(repoCandidates);
   if (candidates.length === 0) return [];
 
-  const candidateByLower = new Map(candidates.map(candidate => [candidate.toLowerCase(), candidate]));
   const explicitRepoPattern = /(?:只查|在|从|某项目|某仓库|项目|仓库|repo)\s*([A-Za-z0-9_.\-/，,、和及与\s]+)|([A-Za-z0-9_.\-/]+)\s*(?:项目|仓库|repo)/gi;
-  const matches = Array.from(userQuestion.matchAll(explicitRepoPattern))
+  const explicitMatchKeys = new Set(Array.from(userQuestion.matchAll(explicitRepoPattern))
     .flatMap(match => (match[1] || match[2] || "").split(/[，,、和及与\s]+/))
-    .filter(Boolean);
-  const matchedRepos = matches
-    .map(match => candidateByLower.get(match.toLowerCase()))
-    .filter((match): match is string => Boolean(match));
+    .map(match => match.trim().toLowerCase())
+    .filter(Boolean));
+  const allowSemanticMatch = PROJECT_SELECTION_MARKER_PATTERN.test(userQuestion);
 
-  const pathAnchors = Array.from(new Set(
-    candidates.filter(candidate => {
-      const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const pattern = new RegExp(`(?:^|[^A-Za-z0-9_.-])${escaped}(?:[\\\\/]|\\b)`, "i");
-      return pattern.test(userQuestion);
-    }),
-  ));
+  const matches = candidates
+    .map(candidate => {
+      const key = normalizeRepoKey(candidate.repo);
+      const hasExplicitMatch = explicitMatchKeys.has(key);
+      const hasVariantMatch = Array.from(explicitMatchKeys).some(explicitKey => isRepoVariantOf(candidate.repo, explicitKey));
+      const boundaryScore = buildRepoBoundaryPattern(candidate.repo).test(userQuestion) ? 300 : 0;
+      const pathScore = buildRepoPathAnchorPattern(candidate.repo).test(userQuestion) ? 300 : 0;
+      const explicitScore = hasExplicitMatch ? 600 : hasVariantMatch ? 500 : 0;
+      const variantScore = calculateRepoVariantScore(userQuestion, candidate.repo, candidates);
+      const score = explicitScore + boundaryScore + pathScore;
+      return { ...candidate, score, variantScore };
+    })
+    .filter((match): match is RepoCandidateMatch => {
+      const matchedByRepo = match.score > 0 && (allowSemanticMatch || buildRepoPathAnchorPattern(match.repo).test(userQuestion));
+      return matchedByRepo || match.variantScore > 0;
+    });
 
-  return Array.from(new Set([...matchedRepos, ...pathAnchors]));
+  return matches
+    .sort((left, right) => {
+      const totalDiff = (right.score + right.variantScore) - (left.score + left.variantScore);
+      if (totalDiff !== 0) return totalDiff;
+      const scoreDiff = right.score - left.score;
+      if (scoreDiff !== 0) return scoreDiff;
+      const sameProjectVariant = isRepoVariantOf(left.repo, right.repo) || isRepoVariantOf(right.repo, left.repo);
+      return sameProjectVariant
+        ? right.latestIndex - left.latestIndex || left.firstIndex - right.firstIndex
+        : left.firstIndex - right.firstIndex;
+    })
+    .map(match => match.repo);
 }
 
 export function extractExplicitRepoHint(userQuestion: string, repoCandidates: string[] = []) {

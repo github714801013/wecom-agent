@@ -1260,7 +1260,7 @@ ${hypotheses}
         const defaultRepoHints = extractProjectsFromMcpHeaders(mcpHeaderOverrides);
         const explicitRepoHints = extractExplicitRepoHints(
           textToPlan,
-          Array.from(new Set([...extractMcpProjectCandidates(config.mcpServers), ...defaultRepoHints]))
+          [...extractMcpProjectCandidates(config.mcpServers), ...defaultRepoHints]
         );
         repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints, defaultRepoHints);
         const scopedEvidenceTools = scopeToolsToRepo(tools, repoHints);

@@ -330,8 +330,28 @@ async function runTest() {
     ["oa-pc", "oa-after"]
   );
   assert.deepEqual(
+    extractMcpProjectCandidates([{ headerProfiles: { "/oa": { projects: "oa-pc,oa-after" }, "/oa-dev": { projects: "oa-after,oa-pay" } } }]),
+    ["oa-pc", "oa-after", "oa-pay"]
+  );
+  assert.deepEqual(
     extractExplicitRepoHints("oa-pc 项目中, 个人业绩统计调用的后端接口是", extractMcpProjectCandidates([{ headers: { projects: "oa-pc,oa-after" } }])),
     ["oa-pc"]
+  );
+  assert.deepEqual(
+    extractExplicitRepoHints("只查 oa-pc、OA-PC 和 oa-after 项目短信模板来源", ["oa-pc", "oa-after", "oa-pc"]),
+    ["oa-pc", "oa-after"]
+  );
+  assert.deepEqual(
+    extractExplicitRepoHints("订单项目 支付逻辑", ["oa-pay", "oa-order", "oa-stock"]),
+    []
+  );
+  assert.deepEqual(
+    extractExplicitRepoHints("易腾相关 saasoanew 项目逻辑", ["saasoanew", "iteng-saasoanew"]),
+    ["iteng-saasoanew", "saasoanew"]
+  );
+  assert.deepEqual(
+    extractExplicitRepoHints("saasoanew 项目逻辑", ["saasoanew", "iteng-saasoanew"]),
+    ["saasoanew", "iteng-saasoanew"]
   );
 
   const scopedToolCalls: any[] = [];

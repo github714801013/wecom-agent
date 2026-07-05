@@ -28,8 +28,8 @@ fs.writeFileSync(tempConfigFile, JSON.stringify({
   },
   mcpServers: [{
     name: "gitnexus",
-    url: "http://127.0.0.1:1348/sse",
-    type: "sse",
+    url: "http://127.0.0.1:1348/api/mcp",
+    type: "http",
     headers: {
       "x-server": "gitnexus",
     },
@@ -58,12 +58,13 @@ fs.writeFileSync(tempConfigFile, JSON.stringify({
 }), "utf-8");
 
 const { resolveEnvPlaceholders, config } = await import("../config.js");
-const { buildMcpHeaders } = await import("../mcp-client.js");
+const { buildMcpHeaders, createMcpTransport, withMcpServerLoadTimeout } = await import("../mcp-client.js");
 
 assertEqual(config.llm.apiKey, "test-api-key", "config should resolve llm api key placeholder");
 assertEqual(config.bots[0]?.botId, "test-bot-id", "config should resolve bot id placeholder");
 assertEqual(config.mcpServers[0]?.headerProfiles["/oa"]?.projects, "oa-stock,jiuji-m,9ji-admin", "config should parse OA MCP header profile");
 assertEqual(config.mcpServers[0]?.headerProfiles["/neo"]?.projects, "small-oa,jiuyun-oa", "config should parse NEO MCP header profile");
+assertEqual(config.mcpServers[0]?.type, "http", "config should parse Streamable HTTP MCP transport type");
 assertEqual(config.bots[0]?.defaultMcpHeaderCommand, "/oa", "bot should configure default MCP header command");
 assertEqual(config.tools.cacheTtlMinutes, 15, "config should parse MCP tools cache TTL");
 assertEqual(config.tools.maxAgentToolResultsPerTurn, 64, "config should default max agent tool results per turn to 64");
@@ -106,6 +107,7 @@ const bot = {
   botId: "bot-id",
   secret: "secret",
   wsUrl: "wss://openws.work.weixin.qq.com",
+  defaultMcpHeaderCommand: "/oa",
   mcpHeaders: {
     gitnexus: {
       "x-overlap": "bot",
@@ -119,6 +121,9 @@ assertEqual(gitnexusHeaders["x-global"], "global", "server header should remain"
 assertEqual(gitnexusHeaders["x-overlap"], "bot", "bot header should override server header");
 assertEqual(gitnexusHeaders["x-robot"], "robot-a", "bot header should be added to matched MCP server");
 
+const defaultProfileHeaders = buildMcpHeaders(config.mcpServers[0]!, config.bots[0]);
+assertEqual(defaultProfileHeaders["projects"], "oa-stock,jiuji-m,9ji-admin", "default MCP header command should apply profile headers");
+
 const dbHeaders = buildMcpHeaders(dbServer, bot);
 assertEqual(dbHeaders["x-global"], "db-global", "unmatched MCP server should keep server header");
 assertEqual(dbHeaders["x-robot"], undefined, "unmatched MCP server should not receive bot header");
@@ -129,5 +134,17 @@ const overriddenHeaders = buildMcpHeaders(gitnexusServer, bot, {
   },
 });
 assertEqual(overriddenHeaders["projects"], "small-oa,jiuyun-oa", "session MCP header should override server and bot headers");
+
+const httpTransport = createMcpTransport(config.mcpServers[0]!, config.bots[0]);
+assertEqual(httpTransport?.constructor.name, "StreamableHTTPClientTransport", "http MCP server should use Streamable HTTP transport");
+
+try {
+  await withMcpServerLoadTimeout(new Promise(() => {}), "stuck MCP server", 1);
+  throw new Error("stuck MCP server should time out");
+} catch (error) {
+  if (!(error instanceof Error) || !error.message.includes("stuck MCP server timed out")) {
+    throw error;
+  }
+}
 
 console.log("配置解析与 MCP header 合并验证通过");

@@ -18,7 +18,7 @@ const booleanConfigSchema = z.preprocess(value => {
 export const mcpServerSchema = z.object({
   name: z.string(),
   url: z.string(),
-  type: z.enum(["sse", "stdio"]).default("sse"),
+  type: z.enum(["sse", "http", "stdio"]).default("sse"),
   headers: headerSchema.default({}),
   headerProfiles: z.record(z.string(), headerSchema).default({}),
 });

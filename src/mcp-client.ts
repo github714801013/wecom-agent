@@ -1,5 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { loadMcpTools } from "@langchain/mcp-adapters";
 import { config, type BotConfig, type McpServerConfig } from "./config.js";
 import { sessionManager } from "./session-manager.js";
@@ -26,13 +28,47 @@ const clearHistoryTool = {
 };
 
 export type McpHeaderOverrides = Record<string, Record<string, string>>;
+export const MCP_SERVER_LOAD_TIMEOUT_MS = 20_000;
 
 export function buildMcpHeaders(server: McpServerConfig, bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {
+  const defaultProfileHeaders = bot?.defaultMcpHeaderCommand
+    ? server.headerProfiles[bot.defaultMcpHeaderCommand] || {}
+    : {};
   return {
     ...server.headers,
+    ...defaultProfileHeaders,
     ...(bot?.mcpHeaders?.[server.name] || {}),
     ...(headerOverrides[server.name] || {}),
   };
+}
+
+export function createMcpTransport(server: McpServerConfig, bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}): Transport | null {
+  const headers = buildMcpHeaders(server, bot, headerOverrides);
+  const transportInit = Object.keys(headers).length > 0 ? { headers } as any : undefined;
+
+  if (server.type === "sse") {
+    return new SSEClientTransport(new URL(server.url), {
+      requestInit: transportInit,
+      eventSourceInit: transportInit,
+    });
+  }
+
+  if (server.type === "http") {
+    return new StreamableHTTPClientTransport(new URL(server.url), {
+      requestInit: transportInit,
+    }) as unknown as Transport;
+  }
+
+  return null;
+}
+
+export function withMcpServerLoadTimeout<T>(promise: Promise<T>, label: string, timeoutMs = MCP_SERVER_LOAD_TIMEOUT_MS) {
+  let timeout: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
 
 type McpTool = Awaited<ReturnType<typeof loadMcpTools>>[number];
@@ -94,34 +130,31 @@ async function loadFreshMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOver
   const allTools = [];
 
   for (const server of config.mcpServers) {
+    let client: Client | undefined;
     try {
       console.log(`Loading tools from MCP server: ${server.name} (${server.url})...`);
       
-      let transport;
-      if (server.type === "sse") {
-        const headers = buildMcpHeaders(server, bot, headerOverrides);
-        const transportInit = Object.keys(headers).length > 0 ? { headers } as any : undefined;
-        transport = new SSEClientTransport(new URL(server.url), {
-          requestInit: transportInit,
-          eventSourceInit: transportInit,
-        });
-      } else {
+      const transport = createMcpTransport(server, bot, headerOverrides);
+      if (!transport) {
         // Handle stdio if needed in the future
         console.warn(`Unsupported MCP transport type: ${server.type} for ${server.name}`);
         continue;
       }
 
-      const client = new Client(
+      client = new Client(
         { name: `wecom-agent-${server.name}-client`, version: "1.0.0" },
         { capabilities: {} }
       );
       
-      await client.connect(transport);
-      const tools = await loadMcpTools(server.name, client);
+      await withMcpServerLoadTimeout(client.connect(transport), `${server.name} MCP connect`);
+      const tools = await withMcpServerLoadTimeout(loadMcpTools(server.name, client), `${server.name} MCP tools load`);
       
       console.log(`Successfully loaded ${tools.length} tools from ${server.name} MCP.`);
       allTools.push(...tools);
     } catch (error) {
+      await client?.close().catch(closeError => {
+        console.warn(`Failed to close ${server.name} MCP client after load failure:`, closeError);
+      });
       console.error(`Failed to load tools from ${server.name} MCP:`, error);
     }
   }

@@ -758,8 +758,10 @@ function mergeScopedToolResults(results: unknown[], repoHints: string[]) {
 }
 
 function shouldScopeToolToRepo(tool: any) {
+  const keys = getToolSchemaKeys(tool);
   return Boolean(
     chooseQueryArgName(tool)
+    && keys.includes("repo")
     && /query|search|zoekt|gitnexus/i.test(tool?.name || "")
   );
 }

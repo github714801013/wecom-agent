@@ -15,8 +15,8 @@
   "mcpServers": [
     {
       "name": "gitnexus",
-      "url": "http://127.0.0.1:1348/sse",
-      "type": "sse",
+      "url": "http://127.0.0.1:1348/api/mcp",
+      "type": "http",
       "headers": {
         "x-server": "gitnexus"
       },

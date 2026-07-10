@@ -81,8 +81,16 @@ assertIncludes(prompt, "不要使用固定四段模板", "business prompt should
 assertIncludes(prompt, "读取需求、GitNexus 检索、代码片段核实、数据库查询、生产 SQL 等待用户执行、测试或部署验证", "business prompt should list key operation summary scenarios");
 assertIncludes(prompt, "阶段性进度消息必须覆盖式表达", "business prompt should require overwrite-style progress updates");
 assertIncludes(prompt, "不要把多轮检索状态连续追加成一长段", "business prompt should forbid appending many progress updates");
-assertIncludes(prompt, "关键入口、接口路径、匹配项目", "business prompt should require key anchors in answers");
-assertIncludes(prompt, "仓库或项目、入口文件或入口方法、接口路径或页面路由", "business prompt should require returned matched evidence anchors");
+assertIncludes(prompt, "默认短答案优先", "business prompt should prefer concise final answers");
+assertIncludes(prompt, "能 1~3 行说清的不要展开", "business prompt should avoid over-expanding simple answers");
+assertIncludes(prompt, "工具过程、内部审核项、自检清单或 TodoList", "business prompt should hide internal process noise");
+assertIncludes(prompt, "项目名称和入口类名", "business prompt should expose only project and entry class for technical evidence");
+assertIncludes(prompt, "其余实现描述改成业务语言", "business prompt should translate implementation details to business language");
+assertIncludes(prompt, "相关项目名称、主要入口类名", "business prompt should use business-readable evidence anchors");
+assertIncludes(prompt, "按问题类型选择最短结构", "business prompt should choose compact structure by intent");
+assertIncludes(prompt, "【结论】", "business prompt should use conclusion-first final structure");
+assertIncludes(prompt, "1~3条最小证据", "business prompt should keep evidence compact");
+assertIncludes(prompt, "项目名称和入口类名", "business prompt should require business-readable technical anchors");
 assertNotIncludes(prompt, "已做：", "business prompt should not use verbose operation summary action field");
 assertNotIncludes(prompt, "得到：", "business prompt should not use verbose operation summary evidence field");
 assertNotIncludes(prompt, "影响：", "business prompt should not use verbose operation summary impact field");
@@ -111,6 +119,9 @@ assertIncludes(basePrompt, "<flow_control>", "base routed prompt should require 
 assertIncludes(basePrompt, "runSqlAudit", "base routed prompt should expose runSqlAudit control");
 assertIncludes(basePrompt, "skipAuditItems", "base routed prompt should expose skipped audit node control");
 assertIncludes(basePrompt, "coverPrevious", "base routed prompt should expose coverPrevious control");
+assertIncludes(basePrompt, "最终回答压缩规则", "base routed prompt should define compact final answer rules");
+assertIncludes(basePrompt, "默认采用“结论 + 依据 + 建议/下一步”的短结构", "base routed prompt should use compact final structure");
+assertIncludes(basePrompt, "不罗列无证据猜测", "base routed prompt should avoid unsupported speculation");
 assertIncludes(basePrompt, "候选项目/文件匹配度接近", "base routed prompt should compare git recency when project candidates are similar");
 assertIncludes(basePrompt, "Git 最近迭代时间", "base routed prompt should require git recency evidence for similar project candidates");
 assertIncludes(basePrompt, "最近有实际业务迭代", "base routed prompt should prefer recently iterated business evidence");

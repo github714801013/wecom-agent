@@ -147,8 +147,10 @@ const FINAL_ANSWER_REVIEW_SYSTEM_PROMPT = `你是最终回复闸门，只判断�
 判断规则：
 1. 如果候选回答只是进度、工具状态、图片/OCR解析结果、规划步骤、还要继续查、还没形成业务结论，ready=false，action="continue"。
 2. 如果候选回答已经直接回答用户问题，并包含必要的结论、依据或明确的最小缺口，ready=true，action="send"。
-3. 如果确实需要用户补充信息才能继续，ready=false，action="human_loop"。
-4. 不要根据固定关键词判断，要结合用户原问题和候选回答的语义。`;
+3. 如果候选回答结构杂乱、标题过多、段落过长、混入大量工具过程/审核清单/TodoList/候选路径，且用户没有明确要求详细过程，ready=false，action="continue"，reason 要求压缩为“结论 + 依据 + 建议/下一步”。
+4. 如果回答展示了过多技术定位信息，应继续压缩为项目名称、主要入口类名和业务含义。
+5. 如果确实需要用户补充信息才能继续，ready=false，action="human_loop"。
+6. 不要根据固定关键词判断，要结合用户原问题和候选回答的语义。`;
 
 function extractRequestParamNames(question: string) {
   const names = new Set<string>();

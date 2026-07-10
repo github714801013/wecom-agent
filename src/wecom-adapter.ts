@@ -451,30 +451,36 @@ function buildUserFacingBlockedInsight(candidate: string) {
 function buildUserFacingBlockedMissingFacts(candidate: string) {
   const missingFacts: string[] = [];
   if (/数据库|列类型|字段类型|建表语句|表结构/u.test(candidate)) {
-    missingFacts.push("需要继续核对数据库真实列类型或表结构");
+    missingFacts.push("数据库真实列类型或表结构");
   }
   if (/Java|实体|JdProductConfig|Mapper|映射/u.test(candidate)) {
-    missingFacts.push("需要继续核对 Java 实体字段类型和 Mapper 查询映射");
+    missingFacts.push("Java 实体字段类型和 Mapper 查询映射");
   }
   if (/数据内容|含字母|nvarchar|bigint|类型转换/u.test(candidate)) {
-    missingFacts.push("需要继续核对实际数据内容与字段类型是否匹配");
+    missingFacts.push("实际数据内容与字段类型是否匹配");
   }
-  return missingFacts.length > 0 ? missingFacts : ["需要继续补齐能够支撑最终结论的直接证据"];
+  return missingFacts.length > 0 ? missingFacts : ["能够支撑最终结论的直接证据"];
 }
 
-function buildBlockedFinalReply(candidate: string) {
+function buildBlockedFinalReply(candidate: string, action: FinalReplyResolutionResult["action"]) {
   const insight = buildUserFacingBlockedInsight(candidate);
   const missingFacts = buildUserFacingBlockedMissingFacts(candidate);
+  const needsHumanInput = action === "human_loop";
+
   return [
-    "这次没有查到足够完整的证据，已先结束本轮等待，避免一直显示处理中。",
+    needsHumanInput
+      ? "当前已核实到部分线索，但继续判断需要你补充外部信息。"
+      : "已自动继续核实，但本轮仍未获得足够完整的直接证据。",
     "",
-    "当前阶段性判断：",
+    "当前已确认的线索：",
     insight,
     "",
-    "还缺少的确认：",
+    needsHumanInput ? "需要你补充：" : "仍缺少的直接证据：",
     ...missingFacts.map(item => `- ${item}`),
     "",
-    "回复“继续”，我会基于当前上下文接着查；也可以直接补充仓库、表结构、字段截图或异常上下文。",
+    needsHumanInput
+      ? "请直接补充上述最小信息；收到后会基于当前上下文继续核对。"
+      : "本轮已停止无进展重试，避免重复调用相同工具；如能提供上述外部证据，可直接补充后继续核对。",
   ].join("\n");
 }
 
@@ -482,11 +488,11 @@ export function buildBlockedFinalHumanLoopRequest(input: FinalReplyDeliveryInput
   const candidate = input.content.trim();
   return {
     reason: "clarification_required",
-    question: buildBlockedFinalReply(candidate),
+    question: buildBlockedFinalReply(candidate, "human_loop"),
     resumeInstruction: [
-      "用户希望基于上轮未完成结论继续排查。",
-      "继续时不要重复解释最终回复闸门、候选回答或内部审核机制。",
-      "优先基于已知阶段性线索补齐直接证据，并给出明确最终结论；如果仍缺证据，只输出最小缺口。",
+      "用户补充缺失信息后，基于上轮上下文继续排查。",
+      "不要重复解释最终回复闸门、候选回答或内部审核机制。",
+      "优先使用新增信息和已知线索补齐直接证据，并给出明确最终结论；如果仍缺证据，只输出最小缺口。",
     ].join(""),
     contextSnapshot: {
       userQuestion: input.userQuestion || input.content,
@@ -518,7 +524,7 @@ export function resolveFinalReplyDelivery(input: FinalReplyDeliveryInput): Final
 
   const reason = `final review blocked: ${input.finalResolution.reason}`;
   return {
-    content: buildBlockedFinalReply(input.content.trim()),
+    content: buildBlockedFinalReply(input.content.trim(), input.finalResolution.action),
     shouldSendFinal: true,
     reason,
     source: "blocked",
@@ -1334,6 +1340,7 @@ ${hypotheses}
             }
             if (streamMetadata?.answerReview?.resetContent) {
               fullContent = "";
+              visibleStreamSnapshots.length = 0;
             }
             if (streamMetadata?.flowControl) {
               applyFlowControlPatch(streamMetadata.flowControl);
@@ -1636,7 +1643,7 @@ ${hypotheses}
         userQuestion: currentQuestion,
       };
       const finalDelivery = resolveFinalReplyDelivery(finalDeliveryInput);
-      if (finalDelivery.source === "blocked") {
+      if (finalDelivery.source === "blocked" && finalResolution.action === "human_loop") {
         sessionManager.setPendingHumanLoop(
           sessionKey,
           toStoredHumanLoopRequest(buildBlockedFinalHumanLoopRequest(finalDeliveryInput), body.msgid),

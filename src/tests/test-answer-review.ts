@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import { createReviewedAgent, enforceFinalAnswerCompleteness, parseAnswerReviewResult } from "../graph.js";
+import { createReviewedAgent, enforceFinalAnswerCompleteness, getConfiguredMaxReviewRounds, parseAnswerReviewResult } from "../graph.js";
 import type { AnswerReviewResult } from "../graph.js";
 
 function getText(message: unknown) {
@@ -75,15 +75,56 @@ const passAgent = createReviewedAgent({
   maxReviewRounds: 2,
   reviewer: async (): Promise<AnswerReviewResult> => {
     passReviewCalls += 1;
-    throw new Error("reviewer should be merged into business prompt");
+    return {
+      passed: true,
+      status: "passed",
+      reason: "证据充分",
+      issues: [],
+      correction_instruction: "",
+    };
   },
 });
 
 const passOutputs = await collect(passAgent);
 assert.equal(passCalls, 1);
-assert.equal(passReviewCalls, 0);
+assert.equal(passReviewCalls, 1);
 assert.equal(passOutputs.length, 1);
 assert.equal(getText(passOutputs[0]![0]), "已验证结论");
+
+const originalReviewRounds = process.env.ANSWER_REVIEW_MAX_ROUNDS;
+delete process.env.ANSWER_REVIEW_MAX_ROUNDS;
+assert.equal(getConfiguredMaxReviewRounds(), 5, "未配置时默认应允许 5 轮自主查证");
+let defaultRoundCalls = 0;
+const defaultRoundAgent = createReviewedAgent({
+  async *stream() {
+    defaultRoundCalls += 1;
+    yield [new AIMessage(`默认第 ${defaultRoundCalls} 轮`), {}];
+  },
+}, {
+  reviewer: async (): Promise<AnswerReviewResult> => defaultRoundCalls < 5
+    ? {
+        passed: false,
+        status: "needs_correction",
+        reason: "仍有可自主核实路径",
+        issues: ["代码调用链尚未查完"],
+        correction_instruction: "继续使用现有工具补齐证据",
+      }
+    : {
+        passed: true,
+        status: "passed",
+        reason: "第五轮证据闭环",
+        issues: [],
+        correction_instruction: "",
+      },
+});
+const defaultRoundOutputs = await collect(defaultRoundAgent);
+assert.equal(defaultRoundCalls, 5, "默认配置不得在第 2 轮提前结束自主查证");
+assert.equal(getText(defaultRoundOutputs[defaultRoundOutputs.length - 1]![0]), "默认第 5 轮");
+if (originalReviewRounds === undefined) {
+  delete process.env.ANSWER_REVIEW_MAX_ROUNDS;
+} else {
+  process.env.ANSWER_REVIEW_MAX_ROUNDS = originalReviewRounds;
+}
 
 let correctionCalls = 0;
 let reviewCalls = 0;
@@ -115,14 +156,18 @@ const correctionAgent = createReviewedAgent({
 });
 
 const correctionOutputs = await collect(correctionAgent);
-assert.equal(correctionCalls, 1);
-assert.equal(reviewCalls, 0);
-assert.equal(correctionOutputs.length, 1);
+assert.equal(correctionCalls, 2);
+assert.equal(reviewCalls, 2);
 assert.equal(getText(correctionOutputs[0]![0]), "可能是 A");
+const correctionReset = correctionOutputs.find(([, metadata]) => metadata?.answerReview?.resetContent);
+assert.ok(correctionReset, "自动纠正轮开始前必须通知企微覆盖上一版内容");
+assert.equal(correctionReset?.[1]?.answerReview?.progress, true);
+assert.match(getText(correctionReset?.[0]), /自动补查/);
+assert.equal(getText(correctionOutputs[correctionOutputs.length - 1]![0]), "已核实接口逻辑，结论是 B");
 assert.equal(
-  correctionOutputs.some(([message]) => getText(message).includes("审核未通过") || getText(message).includes("审核发现")),
+  correctionOutputs.some(([message], index) => index !== correctionOutputs.indexOf(correctionReset!) && getText(message).includes("审核未通过")),
   false,
-  "review result text should not exist after review node is merged",
+  "审核详情只能作为下一轮内部输入，不得混入普通回答流",
 );
 
 let maxRoundCalls = 0;
@@ -143,14 +188,41 @@ const maxRoundAgent = createReviewedAgent({
 });
 
 const maxRoundOutputs = await collect(maxRoundAgent);
-assert.equal(maxRoundCalls, 1);
+assert.equal(maxRoundCalls, 2, "最大审核轮次为 2 时最多执行两轮业务 Agent");
 assert.ok(maxRoundOutputs.length > 0);
-assert.equal(getText(maxRoundOutputs[maxRoundOutputs.length - 1]![0]), "第 1 版回答");
+assert.equal(getText(maxRoundOutputs[maxRoundOutputs.length - 1]![0]), "第 2 版回答");
 assert.equal(
-  maxRoundOutputs.some(([message]) => getText(message).includes("审核未通过")),
-  false,
-  "final result should come from business node after one correction",
+  maxRoundOutputs.filter(([, metadata]) => metadata?.answerReview?.resetContent).length,
+  1,
+  "达到最大轮次后不得继续发起第三轮纠正",
 );
+
+let humanLoopCalls = 0;
+let humanLoopReviewCalls = 0;
+const humanLoopAgent = createReviewedAgent({
+  async *stream() {
+    humanLoopCalls += 1;
+    yield [new AIMessage("需要生产库实际查询结果才能确认。"), {}];
+  },
+}, {
+  maxReviewRounds: 3,
+  reviewer: async (): Promise<AnswerReviewResult> => {
+    humanLoopReviewCalls += 1;
+    return {
+      passed: false,
+      status: "needs_human_input",
+      reason: "缺少只能由用户提供的生产数据",
+      issues: ["生产数据不可自主访问"],
+      correction_instruction: "请用户提供查询结果",
+    };
+  },
+});
+
+const humanLoopOutputs = await collect(humanLoopAgent);
+assert.equal(humanLoopCalls, 1);
+assert.equal(humanLoopReviewCalls, 1);
+assert.equal(humanLoopOutputs.filter(([, metadata]) => metadata?.answerReview?.resetContent).length, 0);
+assert.equal(getText(humanLoopOutputs[humanLoopOutputs.length - 1]![0]), "需要生产库实际查询结果才能确认。");
 
 let timeoutReviewCalls = 0;
 let timeoutNow = 0;

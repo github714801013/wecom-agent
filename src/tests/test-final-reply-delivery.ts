@@ -2,14 +2,17 @@ import assert from "node:assert/strict";
 import { buildBlockedFinalHumanLoopRequest, resolveFinalReplyDelivery } from "../wecom-adapter.js";
 import type { FinalReplyResolutionResult } from "../runtime-todolist.js";
 
-function unresolvedFinal(reason = "候选仍是阶段性进度"): FinalReplyResolutionResult {
+function unresolvedFinal(
+  reason = "候选仍是阶段性进度",
+  action: "continue" | "human_loop" = "continue",
+): FinalReplyResolutionResult {
   return {
     ready: false,
-    action: "continue",
+    action,
     answer: "我会继续核实，这不是最终结论。",
     reason,
     source: "unresolved",
-    review: { ready: false, action: "continue", reason },
+    review: { ready: false, action, reason },
   };
 }
 
@@ -21,18 +24,24 @@ const blockedInput = {
 };
 const blocked = resolveFinalReplyDelivery(blockedInput);
 
-assert.equal(blocked.shouldSendFinal, true, "最终闸门未通过且无法转 human loop 时也要发送兜底 final，避免企微停留在处理中");
-assert.match(blocked.content, /没有查到足够完整的证据/);
-assert.match(blocked.content, /当前阶段性判断/);
+assert.equal(blocked.shouldSendFinal, true, "自动续查达到本轮上限后仍要发送有界兜底，避免企微停留在处理中");
+assert.match(blocked.content, /已自动继续核实/);
+assert.match(blocked.content, /当前已确认的线索/);
 assert.match(blocked.content, /sku_id 字段/);
-assert.match(blocked.content, /回复“继续”/);
+assert.doesNotMatch(blocked.content, /回复“继续”|回复继续/);
 assert.doesNotMatch(blocked.content, /最终回复闸门|候选回答|卡住原因|我会继续/);
 assert.match(blocked.reason, /候选仍是阶段性进度/);
 
-const blockedHumanLoop = buildBlockedFinalHumanLoopRequest(blockedInput);
+const humanLoopInput = {
+  ...blockedInput,
+  content: "需要生产库查询 jingdongproductconfig 表的真实列类型后才能确认。",
+  finalResolution: unresolvedFinal("缺少只能由用户提供的生产数据", "human_loop"),
+};
+const blockedHumanLoop = buildBlockedFinalHumanLoopRequest(humanLoopInput);
 assert.equal(blockedHumanLoop.contextSnapshot.userQuestion, "这个是因为哪个字段出问题了");
-assert.match(blockedHumanLoop.question || "", /回复“继续”/);
-assert.match(blockedHumanLoop.resumeInstruction, /继续排查/);
+assert.match(blockedHumanLoop.question || "", /需要你补充/);
+assert.doesNotMatch(blockedHumanLoop.question || "", /回复“继续”|回复继续/);
+assert.match(blockedHumanLoop.resumeInstruction, /补充缺失信息/);
 
 const sendable = resolveFinalReplyDelivery({
   content: "阶段性候选",

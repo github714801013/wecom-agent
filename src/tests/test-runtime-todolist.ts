@@ -152,6 +152,8 @@ const progressFinalReview = await reviewFinalAnswerWithModel({
 assert.equal(progressFinalReview.ready, false);
 assert.equal(progressFinalReview.action, "continue");
 assert.match(progressReviewCalls[0]!, /只判断候选回答是否已经可以作为最终回复发送/);
+assert.match(progressReviewCalls[0]!, /结构杂乱/);
+assert.match(progressReviewCalls[0]!, /结论 \+ 依据 \+ 建议\/下一步/);
 
 const readyFinalReview = await reviewFinalAnswerWithModel({
   question: "权限值是什么",

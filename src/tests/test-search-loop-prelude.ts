@@ -210,6 +210,63 @@ async function runTest() {
   assert.equal(queryIntentCalls.length, 1);
   assert.match(queryIntentPrelude, /query intent evidence/);
 
+  const rewriteCalls: any[] = [];
+  const rewrittenPrelude = await runSearchLoopPrelude({
+    userQuestion: "短信模板从哪里发送？",
+    plannerResult: {
+      ...plannerResult,
+      queries: [
+        { query: "sms template", type: "keyword", priority: 1, reason: "先定位模板" },
+      ],
+    },
+    toolIntentResolver: async () => ({ toolName: "gitnexus_query", shouldRunPrelude: true }),
+    tools: [{
+      name: "gitnexus_query",
+      description: "Search code by query",
+      schema: { shape: { query: {} } },
+      invoke: async (args: any) => {
+        rewriteCalls.push(args);
+        return { filePath: `src/${rewriteCalls.length}.ts`, content: `evidence ${args.query}` };
+      },
+    }],
+    compressor: async (input: CompressorInput) => ({
+      status: "ok",
+      intent: "FLOW",
+      partial: input.search_results.length === 1,
+      compressed_sections: input.search_results.map((item, index) => ({
+        section_id: `rw${index}`,
+        file_path: item.file_path || "",
+        symbol: "SmsService.sendSms",
+        kind: "code",
+        lines: "1-20",
+        score: 1,
+        reason: "Agentic RAG 补查证据",
+        anchors: [],
+        content: item.content,
+        merged_from: [item.id],
+      })),
+      call_chain: [],
+      key_evidence: input.search_results.map(item => item.content),
+      dropped: [],
+      missing_info: input.search_results.length === 1 ? ["缺少发送调用"] : [],
+      warnings: [],
+      errors: [],
+      budget: { input_est: 0, output_est: 0, target: 1000, mode: "balanced" },
+    }),
+    queryRewriter: async input => {
+      assert.deepEqual(input.grade.missingInfo, ["缺少发送调用"]);
+      return { query: "sendSms invocation", type: "symbol", priority: 1, reason: "补查真实发送调用" };
+    },
+    maxIterations: 3,
+    maxRewrites: 1,
+  });
+
+  assert.deepEqual(rewriteCalls.map(call => call.query), ["sms template", "sendSms invocation"]);
+  assert.match(rewrittenPrelude, /查询改写/);
+  assert.match(rewrittenPrelude, /sendSms invocation/);
+  assert.match(rewrittenPrelude, /停止原因:\n- 证据已充分/);
+  assert.match(rewrittenPrelude, /第 1 轮 rewrite/);
+
   const gitnexusQueryCalls: any[] = [];
   const skippedGitnexusPrelude = await runSearchLoopPrelude({
     userQuestion: "oa-pc项目 备用机 押金支付 支持哪些支付方式逻辑",

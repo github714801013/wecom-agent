@@ -29,9 +29,24 @@
 - [x] 最终回复闸门能识别结构杂乱、过程过多、标题过多、与问题不相关内容过多的候选回答，并要求继续压缩或修正。
 - [x] 测试覆盖业务提示词、审核提示词和最终回复闸门提示词中的简洁输出约束。
 
+## 2026-07-14 迭代补充：最终回复循环判定
+
+### 用户补充原文
+
+> 当前已核实到部分线索，但继续判断需要你补充外部信息。这种回复没有用。这样判断是否最终回复：图记忆已经有相同输入输出，判断为重复，可以停下来提问；找不到最终答案时继续执行。
+
+### 新增验收断言
+
+- [x] 尚未得到最终答案，且图记忆未出现相同或高度相似的“用户输入 → Agent 输出”时，最终回复闸门必须返回 `continue`。
+- [x] 只有图记忆确认相同输入输出已重复，且确实存在用户独占信息缺口时，才允许返回 `human_loop`。
+- [x] 模型误判 `human_loop` 时，程序化硬闸门必须将其降级为 `continue`，不能直接向用户索要可自主检索的信息。
+- [x] 重复判断必须基于历史用户消息与其后 Agent 回复的配对关系，不能仅因出现相同关键词就判定循环。
+- [x] 自动化测试覆盖：未重复时拦截 Human Loop、重复时允许 Human Loop、不同问题或不同输出不构成重复。
+
 ## 实现与验证证据
 
 - 提示词约束：`src/prompts/business-base-prompt.md`、`src/prompts/business-prompt.md`、`src/prompts/review-prompt.md`。
 - 最终回复闸门：`src/runtime-todolist.ts`。
+- 图记忆：`src/session-memory-graph.ts`、`src/session-manager.ts`。
 - 正式测试：`src/tests/test-business-prompt.ts`、`src/tests/test-review-prompt.ts`、`src/tests/test-runtime-todolist.ts`。
-- TypeScript 编译与相关测试已通过，变更与需求断言一致。
+- 2026-07-14 验证：`node --loader ts-node/esm src/tests/test-runtime-todolist.ts` 通过；`npx tsc --noEmit --pretty false` 通过。

@@ -1,4 +1,5 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { stringifyModelContent } from "./model-content.js";
 
 const PRIORITY_ANCHOR_HEADER_PATTERN = /优先锚点[^\n]*：\n([\s\S]*?)(?:\n旁证\/已排除锚点|\n其他已确认锚点|\n当前问题：|$)/;
 const CODE_LEVEL_ANCHOR_PATTERN = /(?:\.java\b|[a-z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+)/;
@@ -43,5 +44,5 @@ export async function repairAnswerForMissingPriorityAnchors(input: {
     ].join("\n\n")),
   ]);
 
-  return String(response.content || "");
+  return stringifyModelContent(response.content);
 }

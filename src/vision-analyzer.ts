@@ -1,6 +1,7 @@
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { config } from "./config.js";
+import { stringifyModelContent } from "./model-content.js";
 
 export interface VisionAnalysisInput {
   question: string;
@@ -61,24 +62,6 @@ export const VISION_ANALYSIS_PROMPT = [
   "未识别清楚：...",
 ].join("\n");
 
-function stringifyModelContent(content: unknown): string {
-  if (typeof content === "string") return content.trim();
-  if (Array.isArray(content)) {
-    return content
-      .map(item => {
-        if (typeof item === "string") return item;
-        if (item && typeof item === "object" && "text" in item) {
-          return String((item as { text?: unknown }).text ?? "");
-        }
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n")
-      .trim();
-  }
-  return String(content ?? "").trim();
-}
-
 export function ensureVisionMarkedFocusSections(content: string): string {
   const normalized = content.trim().startsWith("【图片识别结果】")
     ? content.trim()
@@ -132,7 +115,7 @@ export async function analyzeImageForQuestion(input: VisionAnalysisInput): Promi
     }),
   ]);
 
-  const content = stringifyModelContent(response.content);
+  const content = stringifyModelContent(response.content).trim();
   if (!content) {
     return ensureVisionMarkedFocusSections("【图片识别结果】\n未识别到有效图片内容，已保留原图供主模型参考。");
   }

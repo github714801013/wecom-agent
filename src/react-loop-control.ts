@@ -1,4 +1,5 @@
 import { parseArgs, type ToolContextRecord } from "./tool-context-filter.js";
+import { stringifyModelContent } from "./model-content.js";
 
 export type ReactLoopNode = "START" | "init" | "plan" | "act" | "evaluateAction" | "executeTool" | "observeUpdate" | "evaluateProgress" | "final" | "askUser" | "revisePlan" | "abort" | "END";
 export type ReactActionType = "tool" | "final" | "askUser" | "revisePlan" | "abort";
@@ -80,7 +81,9 @@ function stringifyArgs(args: unknown) {
 
 function stringifyToolResult(result: unknown) {
   if (typeof result === "string") return result;
-  if (result && typeof result === "object" && "content" in result) return String((result as { content?: unknown }).content ?? "");
+  if (result && typeof result === "object" && "content" in result) {
+    return stringifyModelContent((result as { content?: unknown }).content);
+  }
   try {
     return JSON.stringify(result);
   } catch {

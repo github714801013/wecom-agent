@@ -29,13 +29,18 @@ const otherBot = {
 
 assert.equal(
   buildMcpToolsCacheKey(bot),
-  "bot-a:{\"gitnexus\":{\"x-project\":\"project-a\"}}",
-  "缓存 key 应区分机器人和 MCP header",
+  "bot-a:{\"gitnexus\":{\"x-project\":\"project-a\"}}:{}",
+  "缓存 key 应区分机器人、MCP header 和会话 header override",
 );
 assert.notEqual(
   buildMcpToolsCacheKey(bot),
   buildMcpToolsCacheKey(otherBot),
   "不同机器人和 MCP header 应生成不同缓存 key",
+);
+assert.notEqual(
+  buildMcpToolsCacheKey(bot, { gitnexus: { projects: "oa-stock,oa-order" } }),
+  buildMcpToolsCacheKey(bot, { gitnexus: { projects: "small-oa,neo-oa" } }),
+  "不同会话 projects override 应生成不同缓存 key，避免复用错误的 queryable 项目列表",
 );
 
 let now = 1_000;

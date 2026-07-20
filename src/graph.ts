@@ -3,13 +3,14 @@ import { createAgent } from "langchain";
 import { getModelContextSize } from "@langchain/core/language_models/base";
 import { AIMessage, HumanMessage, SystemMessage, BaseMessage } from "@langchain/core/messages";
 import { getAllMcpTools } from "./mcp-client.js";
-import { config } from "./config.js";
+import { config, type AgentConfig } from "./config.js";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { buildRelationshipIndex, formatRelationshipIndex } from "./relationship-index.js";
 import { buildAnalyzedCodeRangeIndex, formatAnalyzedCodeRangeIndex } from "./analyzed-code-range-index.js";
 import { PROGRESS_KEYWORDS } from "./progress-updates.js";
 import { createReactLoopController, wrapToolsWithReactLoopControl } from "./react-loop-control.js";
+import { stringifyModelContent } from "./model-content.js";
 import {
   runAgenticRag,
   type AgenticRagGrade,
@@ -42,14 +43,36 @@ export function getModelContextWindow() {
   return mappedSize || 4096;
 }
 
+export function resolveLlmApiMode({
+  apiMode,
+  baseUrl,
+  modelName,
+}: Pick<AgentConfig["llm"], "apiMode" | "baseUrl" | "modelName">) {
+  if (apiMode !== "auto") return apiMode;
+
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "").toLowerCase();
+  const usesResponsesEndpoint =
+    /(^|\/)codex(?:\/v\d+)?$|(^|\/)responses(?:\/v\d+)?$/.test(normalizedBaseUrl);
+  const usesResponsesModel =
+    /^gpt-5\.6-luna$/i.test(modelName) || /codex/i.test(modelName);
+
+  return usesResponsesEndpoint || usesResponsesModel
+    ? "responses"
+    : "chat_completions";
+}
+
 export async function getBaseModel() {
+  const apiMode = resolveLlmApiMode(config.llm);
+
   return new ChatOpenAI({
     modelName: config.llm.modelName,
     apiKey: config.llm.apiKey,
     configuration: {
       baseURL: config.llm.baseUrl,
     },
-    temperature: 0,
+    ...(apiMode === "responses"
+      ? { useResponsesApi: true, streaming: true }
+      : { temperature: 0 }),
   });
 }
 
@@ -289,7 +312,7 @@ export async function runPlanner(userQuestion: string): Promise<PlannerResult | 
   ]);
 
   try {
-    const content = response.content.toString();
+    const content = stringifyModelContent(response.content);
     // 简单提取 JSON 部分，防止 LLM 输出多余文字
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -302,7 +325,7 @@ export async function runPlanner(userQuestion: string): Promise<PlannerResult | 
     return null;
   } catch (err) {
     console.error("Failed to parse planner response:", err);
-    console.error("Raw response content:", response.content.toString());
+    console.error("Raw response content:", stringifyModelContent(response.content));
     return null;
   }
 }
@@ -330,7 +353,7 @@ export async function runCompressor(input: CompressorInput): Promise<CompressorR
   ]);
 
   try {
-    const content = response.content.toString();
+    const content = stringifyModelContent(response.content);
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const jsonStr = jsonMatch[0]
@@ -342,7 +365,7 @@ export async function runCompressor(input: CompressorInput): Promise<CompressorR
     return null;
   } catch (err) {
     console.error("Failed to parse compressor response:", err);
-    console.error("Raw response content:", response.content.toString());
+    console.error("Raw response content:", stringifyModelContent(response.content));
     return null;
   }
 }
@@ -531,7 +554,7 @@ export async function runAgenticSearchQueryRewriter(input: SearchQueryRewriteInp
       })),
     ]);
 
-    return parseRewrittenSearchQuery(response.content.toString());
+    return parseRewrittenSearchQuery(stringifyModelContent(response.content));
   } catch (error) {
     console.error("Agentic RAG query rewrite failed:", error);
     return null;
@@ -784,7 +807,7 @@ async function defaultToolIntentResolver(input: {
     })),
   ]);
 
-  return parseToolIntentDecision(response.content.toString());
+  return parseToolIntentDecision(stringifyModelContent(response.content));
 }
 
 const PROJECT_SELECTION_MARKER_PATTERN = /项目|仓库|代码包|模块|repo|只查|在|从/iu;
@@ -1283,17 +1306,7 @@ export function getConfiguredMaxReviewRounds() {
 }
 
 function stringifyMessageContent(content: unknown) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content.map(item => {
-      if (typeof item === "string") return item;
-      if (item && typeof item === "object" && "text" in item) {
-        return String((item as { text?: unknown }).text ?? "");
-      }
-      return "";
-    }).filter(Boolean).join("\n");
-  }
-  return content == null ? "" : String(content);
+  return stringifyModelContent(content);
 }
 
 function normalizeReviewStatus(status: unknown, passed: boolean): AnswerReviewStatus {
@@ -1356,7 +1369,7 @@ export async function runAnswerReview(input: {
     })),
   ]);
 
-  return parseAnswerReviewResult(response.content.toString());
+  return parseAnswerReviewResult(stringifyModelContent(response.content));
 }
 
 export function buildReviewCorrectionMessage(review: AnswerReviewResult) {

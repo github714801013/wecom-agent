@@ -27,6 +27,7 @@ import {
   type RuntimeTodoItem,
 } from "./runtime-todolist.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
+import { stringifyModelContent } from "./model-content.js";
 import {
   buildDirectEvidenceFastPathInstruction,
   buildDirectEvidenceRuntimeInstruction,
@@ -177,7 +178,7 @@ async function evaluateDiagnosticCaseAsync(caseName: EvaluateCase, input: Record
   const model = typeof input.llmReply === "string"
     ? {
       async invoke() {
-        return { content: String(input.llmReply) };
+        return { content: stringifyModelContent(input.llmReply) };
       },
     }
     : await getBaseModel();
@@ -198,7 +199,7 @@ function getMessageType(message: BaseMessage) {
 }
 
 function appendAnswerContent(current: string, content: unknown) {
-  const delta = String(content || "").replace(/\[System: Empty message content sanitised to satisfy protocol\]/g, "");
+  const delta = stringifyModelContent(content).replace(/\[System: Empty message content sanitised to satisfy protocol\]/g, "");
   if (!delta) return current;
   if (current && delta.startsWith(current)) return delta;
   return current + delta;
@@ -225,7 +226,7 @@ function normalizeDiagnosticHistory(input: unknown): ConversationContextItem[] {
     if (!item || typeof item !== "object") return [];
     const record = item as Record<string, unknown>;
     const role = record.role === "assistant" || record.role === "system" ? record.role : "user";
-    const content = String(record.content || "").trim();
+    const content = stringifyModelContent(record.content).trim();
     return content ? [{ role, content }] : [];
   });
 }
@@ -268,7 +269,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
       question,
       rawQuestion,
       historyCount: diagnosticHistory.length,
-      answer: sanitizeDiagnosticAnswer(String(response.content || "")),
+      answer: sanitizeDiagnosticAnswer(stringifyModelContent(response.content)),
       toolResultCount: 0,
       toolNames: [],
       repoHints,
@@ -323,7 +324,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
             id,
             name: entry.name || "unknown_tool",
             args: entry.args,
-            content: String(toolMsg.content || ""),
+            content: stringifyModelContent(toolMsg.content),
           };
           toolRecords.push(record);
           const decision = guard.recordToolResult(record);
@@ -391,7 +392,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
           question,
           rawQuestion,
           historyCount: diagnosticHistory.length,
-          answer: await repairDiagnosticAnswerIfNeeded(question, sanitizeDiagnosticAnswer(ensureRecoverySqlAuditMarker(recoveryResponse.content.toString()))),
+          answer: await repairDiagnosticAnswerIfNeeded(question, sanitizeDiagnosticAnswer(ensureRecoverySqlAuditMarker(stringifyModelContent(recoveryResponse.content)))),
           toolResultCount: toolRecords.length,
           toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
           repoHints,

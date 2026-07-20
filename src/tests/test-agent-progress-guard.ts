@@ -1,5 +1,10 @@
 import { strict as assert } from "node:assert";
-import { createAgentProgressGuard, createAgentProgressLimitError } from "../agent-progress-guard.js";
+import {
+  buildAgentToolErrorLimitReply,
+  createAgentProgressGuard,
+  createAgentProgressLimitError,
+  createAgentToolErrorLimitError,
+} from "../agent-progress-guard.js";
 
 const guard = createAgentProgressGuard({ maxToolResults: 99, maxRepeatedToolCalls: 2 });
 
@@ -95,7 +100,75 @@ const defaultLimitDecision = defaultLimitGuard.recordToolResult({
 });
 assert.equal(defaultLimitDecision.shouldStop, true, "默认工具上限应在第 64 个证据工具结果触发");
 
+const toolErrorGuard = createAgentProgressGuard({
+  maxToolResults: 99,
+  maxRepeatedToolCalls: 99,
+  maxToolErrors: 3,
+});
+assert.equal(
+  toolErrorGuard.recordToolResult({
+    id: "error-1",
+    name: "query",
+    args: "{\"query\":\"订单状态\"}",
+    content: "Error: MCP connection timeout\n Please fix your mistakes.",
+    status: "error",
+  }).shouldStop,
+  false,
+  "first tool error should not stop the current turn",
+);
+assert.equal(
+  toolErrorGuard.recordToolResult({
+    id: "success-1",
+    name: "query",
+    args: "{\"query\":\"订单状态 fallback\"}",
+    content: "Error rate dashboard is healthy",
+    status: "success",
+  }).shouldStop,
+  false,
+  "successful tool result containing the word Error must not be counted as a tool failure",
+);
+assert.equal(
+  toolErrorGuard.recordToolResult({
+    id: "error-2",
+    name: "code_snippet",
+    args: "{\"filePath\":\"src/order.ts\"}",
+    content: "Error: repository index unavailable",
+    status: "error",
+  }).shouldStop,
+  false,
+  "second tool error should still allow one final attempt",
+);
+assert.equal(
+  toolErrorGuard.recordToolResult({
+    id: "todo-error",
+    name: "runtime_todolist_update",
+    args: "{}",
+    content: "Error: todo update rejected",
+    status: "error",
+  }).shouldStop,
+  false,
+  "runtime todolist errors should not consume the business tool error budget",
+);
+const thirdToolErrorDecision = toolErrorGuard.recordToolResult({
+  id: "error-3",
+  name: "read_query",
+  args: "{\"database_name\":\"dev\"}",
+  content: "Error: database permission denied",
+  status: "error",
+});
+assert.equal(thirdToolErrorDecision.shouldStop, true, "third business tool error should stop further tool calls");
+assert.equal(thirdToolErrorDecision.errorCode, "AGENT_TOOL_ERROR_LIMIT");
+assert.match(thirdToolErrorDecision.reason, /3\/3/, "tool error stop reason should include the configured threshold");
+assert.match(thirdToolErrorDecision.reason, /read_query/, "tool error stop reason should identify the latest failed tool");
+assert.match(thirdToolErrorDecision.reason, /database permission denied/, "tool error stop reason should include a bounded error summary");
+
 const limitError = createAgentProgressLimitError("limit");
 assert.equal((limitError as Error & { lc_error_code?: string }).lc_error_code, "AGENT_TOOL_PROGRESS_LIMIT");
+const toolErrorLimitError = createAgentToolErrorLimitError("tool error limit");
+assert.equal((toolErrorLimitError as Error & { lc_error_code?: string }).lc_error_code, "AGENT_TOOL_ERROR_LIMIT");
+const toolErrorReply = buildAgentToolErrorLimitReply(thirdToolErrorDecision.reason);
+assert.match(toolErrorReply, /已停止继续调用/, "user feedback should explicitly state that further tool calls were stopped");
+assert.match(toolErrorReply, /3\/3/, "user feedback should include the observed tool error threshold");
+assert.match(toolErrorReply, /检查对应 MCP、数据源或权限/, "user feedback should provide an actionable boundary");
 
 console.log("agent progress guard 验证通过");

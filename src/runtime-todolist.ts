@@ -2,6 +2,8 @@ import { tool } from "@langchain/core/tools";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { z } from "zod";
 import { parseArgs, type ToolContextRecord } from "./tool-context-filter.js";
+import type { SessionMemoryGraph, SessionMemoryRecord } from "./session-memory-graph.js";
+import { stringifyModelContent } from "./model-content.js";
 
 export type RuntimeTodoStatus = "pending" | "in_progress" | "done" | "blocked";
 
@@ -32,6 +34,7 @@ export interface FinalAnswerReviewInput {
   question: string;
   answer: string;
   model?: AuditFallbackModel | undefined;
+  memoryGraph?: SessionMemoryGraph | undefined;
 }
 
 export interface FinalReplyResolutionInput extends FinalAnswerReviewInput {
@@ -149,8 +152,8 @@ const FINAL_ANSWER_REVIEW_SYSTEM_PROMPT = `你是最终回复闸门，只判断�
 2. 如果候选回答已经直接回答用户问题，并包含必要的结论、依据或明确的最小缺口，ready=true，action="send"。
 3. 如果候选回答结构杂乱、标题过多、段落过长、混入大量工具过程/审核清单/TodoList/候选路径，且用户没有明确要求详细过程，ready=false，action="continue"，reason 要求压缩为“结论 + 依据 + 建议/下一步”。
 4. 如果回答展示了过多技术定位信息，应继续压缩为项目名称、主要入口类名和业务含义。
-5. 如果确实需要用户补充信息才能继续，ready=false，action="human_loop"。
-6. 不要根据固定关键词判断，要结合用户原问题和候选回答的语义。`;
+5. human_loop 只允许在两个条件同时满足时返回：图记忆已证明相同或高度相似的“用户输入 → Agent 输出”重复出现，且剩余缺口只能由用户提供。未检测到重复输入输出时，即使证据不足，也必须 action="continue"。
+6. 不要根据固定关键词判断，要结合用户原问题、候选回答和 repeated_input_output 判断。`;
 
 function extractRequestParamNames(question: string) {
   const names = new Set<string>();
@@ -353,8 +356,8 @@ export function assertTodoListComplete(todoList: RuntimeTodoList) {
 }
 
 function parseJsonObject(content: unknown) {
-  if (content && typeof content === "object") return content as Record<string, unknown>;
-  const text = String(content || "").trim();
+  if (content && typeof content === "object" && !Array.isArray(content)) return content as Record<string, unknown>;
+  const text = stringifyModelContent(content).trim();
   if (!text) return {};
 
   try {
@@ -371,6 +374,70 @@ function parseJsonObject(content: unknown) {
     }
     return {};
   }
+}
+
+function normalizeLoopComparisonText(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[\s，。；：、,.!?！？:;`'"“”‘’()（）\[\]【】{}<>《》_-]+/g, "")
+    .trim();
+}
+
+function textSimilarity(left: string, right: string) {
+  const normalizedLeft = normalizeLoopComparisonText(left);
+  const normalizedRight = normalizeLoopComparisonText(right);
+  if (!normalizedLeft || !normalizedRight) return 0;
+  if (normalizedLeft === normalizedRight) return 1;
+
+  const shorter = normalizedLeft.length <= normalizedRight.length ? normalizedLeft : normalizedRight;
+  const longer = normalizedLeft.length > normalizedRight.length ? normalizedLeft : normalizedRight;
+  if (shorter.length >= 24 && longer.includes(shorter)) {
+    return shorter.length / longer.length;
+  }
+
+  const grams = (value: string) => {
+    const result = new Set<string>();
+    for (let index = 0; index < value.length - 1; index += 1) {
+      result.add(value.slice(index, index + 2));
+    }
+    return result;
+  };
+  const leftGrams = grams(normalizedLeft);
+  const rightGrams = grams(normalizedRight);
+  if (!leftGrams.size || !rightGrams.size) return 0;
+  let intersection = 0;
+  for (const gram of leftGrams) {
+    if (rightGrams.has(gram)) intersection += 1;
+  }
+  return intersection / Math.max(leftGrams.size, rightGrams.size);
+}
+
+function findNextAssistantRecord(records: SessionMemoryRecord[], userIndex: number) {
+  for (let index = userIndex + 1; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    if (record.role === "user") return null;
+    if (record.role === "assistant") return record;
+  }
+  return null;
+}
+
+export function hasRepeatedInputOutput(
+  graph: SessionMemoryGraph | undefined,
+  question: string,
+  answer: string,
+) {
+  if (!graph || !question.trim() || !answer.trim()) return false;
+  const records = [...graph.records].sort((left, right) => left.createdAt - right.createdAt);
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record || record.role !== "user") continue;
+    if (textSimilarity(record.summary, question) < 0.92) continue;
+    const assistantRecord = findNextAssistantRecord(records, index);
+    if (!assistantRecord) continue;
+    if (textSimilarity(assistantRecord.summary, answer) >= 0.92) return true;
+  }
+  return false;
 }
 
 function normalizeFinalAnswerReview(content: unknown): FinalAnswerReviewResult {
@@ -404,9 +471,19 @@ export async function reviewFinalAnswerWithModel(input: FinalAnswerReviewInput):
       new HumanMessage(JSON.stringify({
         user_question: input.question,
         candidate_answer: input.answer,
+        repeated_input_output: hasRepeatedInputOutput(input.memoryGraph, input.question, input.answer),
       })),
     ]);
-    return normalizeFinalAnswerReview(response.content);
+    const review = normalizeFinalAnswerReview(response.content);
+    const repeatedInputOutput = hasRepeatedInputOutput(input.memoryGraph, input.question, input.answer);
+    if (review.action === "human_loop" && !repeatedInputOutput) {
+      return {
+        ready: false,
+        action: "continue",
+        reason: "图记忆未检测到重复输入输出，禁止提前进入 Human Loop，应继续自主核实",
+      };
+    }
+    return review;
   } catch (error) {
     console.error("Failed to review final answer with LLM:", error);
     return { ready: false, action: "continue", reason: "最终回复模型评审失败" };
@@ -443,6 +520,7 @@ export async function resolveFinalReplyWithModel(input: FinalReplyResolutionInpu
     question: input.question,
     answer: candidateAnswer,
     model: input.model,
+    memoryGraph: input.memoryGraph,
   });
 
   if (candidateReview.ready) {
@@ -461,6 +539,7 @@ export async function resolveFinalReplyWithModel(input: FinalReplyResolutionInpu
       question: input.question,
       answer: snapshot,
       model: input.model,
+      memoryGraph: input.memoryGraph,
     });
     if (snapshotReview.ready) {
       return {
@@ -954,7 +1033,7 @@ function formatAuditFallbackItems(items: RuntimeTodoItem[]) {
 }
 
 function sanitizeLlmAuditFallback(content: unknown) {
-  return String(content || "")
+  return stringifyModelContent(content)
     .replace(/```(?:json|markdown)?/giu, "")
     .replace(/```/gu, "")
     .trim();

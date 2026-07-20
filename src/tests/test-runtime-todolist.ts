@@ -18,6 +18,7 @@ import {
   getActiveAuditTodoItems,
   getIncompleteAuditTodoItems,
   getIncompleteTodoItems,
+  hasRepeatedInputOutput,
   appendIncompleteFinalNotice,
   isSqlAuditEvidenceBlocking,
   reviewFinalAnswerWithModel,
@@ -162,6 +163,49 @@ const readyFinalReview = await reviewFinalAnswerWithModel({
 });
 assert.equal(readyFinalReview.ready, true);
 assert.equal(readyFinalReview.action, "send");
+
+const repeatedQuestion = "这个接口为什么没有返回订单状态？";
+const repeatedAnswer = "当前已核实接口入口，但还需要补充 Java 实体字段类型和 Mapper 查询映射。";
+const repeatedMemoryGraph = {
+  records: [
+    { id: "u1", role: "user" as const, summary: repeatedQuestion, anchors: ["订单状态"], createdAt: 1 },
+    { id: "a1", role: "assistant" as const, summary: repeatedAnswer, anchors: ["Mapper"], createdAt: 2 },
+  ],
+  relationships: [],
+  analyzedRanges: [],
+  updatedAt: 2,
+};
+assert.equal(
+  hasRepeatedInputOutput(repeatedMemoryGraph, repeatedQuestion, repeatedAnswer),
+  true,
+  "图记忆存在相同用户输入及其后 Agent 输出时应判定为重复",
+);
+assert.equal(
+  hasRepeatedInputOutput(repeatedMemoryGraph, repeatedQuestion, "已找到 Mapper 映射，订单状态来自 status 字段。"),
+  false,
+  "同一问题但输出已推进时不能判定为重复",
+);
+assert.equal(
+  hasRepeatedInputOutput(repeatedMemoryGraph, "另一个接口为什么报错？", repeatedAnswer),
+  false,
+  "不同用户输入即使输出相同也不能判定为重复",
+);
+
+const prematureHumanLoopReview = await reviewFinalAnswerWithModel({
+  question: repeatedQuestion,
+  answer: repeatedAnswer,
+  model: finalReviewModel({ ready: false, action: "human_loop", reason: "需要用户补充实体字段" }),
+});
+assert.equal(prematureHumanLoopReview.action, "continue");
+assert.match(prematureHumanLoopReview.reason, /图记忆未检测到重复输入输出/);
+
+const repeatedHumanLoopReview = await reviewFinalAnswerWithModel({
+  question: repeatedQuestion,
+  answer: repeatedAnswer,
+  memoryGraph: repeatedMemoryGraph,
+  model: finalReviewModel({ ready: false, action: "human_loop", reason: "重复检索且剩余信息只能由用户提供" }),
+});
+assert.equal(repeatedHumanLoopReview.action, "human_loop");
 
 const imageArtifactReview = await reviewFinalAnswerWithModel({
   question: "这个接口报错是什么原因",

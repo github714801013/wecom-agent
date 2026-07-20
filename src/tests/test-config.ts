@@ -36,9 +36,14 @@ fs.writeFileSync(tempConfigFile, JSON.stringify({
     headerProfiles: {
       "/oa": {
         projects: "oa-stock,jiuji-m,9ji-admin",
+        env: "pro,iteng",
       },
       "/neo": {
         projects: "small-oa,jiuyun-oa",
+      },
+      "/oa-dev": {
+        projects: "oa-stock,jiuji-m,9ji-admin",
+        env: "dev",
       },
     },
   }],
@@ -63,6 +68,7 @@ const { buildMcpHeaders, createMcpTransport, withMcpServerLoadTimeout } = await 
 assertEqual(config.llm.apiKey, "test-api-key", "config should resolve llm api key placeholder");
 assertEqual(config.bots[0]?.botId, "test-bot-id", "config should resolve bot id placeholder");
 assertEqual(config.mcpServers[0]?.headerProfiles["/oa"]?.projects, "oa-stock,jiuji-m,9ji-admin", "config should parse OA MCP header profile");
+assertEqual(config.mcpServers[0]?.headerProfiles["/oa"]?.env, "pro,iteng", "config should parse OA environment header");
 assertEqual(config.mcpServers[0]?.headerProfiles["/neo"]?.projects, "small-oa,jiuyun-oa", "config should parse NEO MCP header profile");
 assertEqual(config.mcpServers[0]?.type, "http", "config should parse Streamable HTTP MCP transport type");
 assertEqual(config.bots[0]?.defaultMcpHeaderCommand, "/oa", "bot should configure default MCP header command");
@@ -134,6 +140,42 @@ const overriddenHeaders = buildMcpHeaders(gitnexusServer, bot, {
   },
 });
 assertEqual(overriddenHeaders["projects"], "small-oa,jiuyun-oa", "session MCP header should override server and bot headers");
+
+const switchedProfileHeaders = buildMcpHeaders(config.mcpServers[0]!, config.bots[0], {
+  gitnexus: {
+    projects: "small-oa,jiuyun-oa",
+  },
+});
+assertEqual(switchedProfileHeaders["projects"], "small-oa,jiuyun-oa", "explicit NEO profile should replace default OA projects");
+assertEqual(switchedProfileHeaders["env"], undefined, "explicit NEO profile should clear default OA-only env header");
+assertEqual(switchedProfileHeaders["x-server"], "gitnexus", "explicit profile switch should keep server static headers");
+
+const oaDevProfileHeaders = buildMcpHeaders(config.mcpServers[0]!, config.bots[0], {
+  gitnexus: config.mcpServers[0]!.headerProfiles["/oa-dev"]!,
+});
+assertEqual(oaDevProfileHeaders["env"], "dev", "explicit OA dev profile should use its own env header");
+assertEqual(oaDevProfileHeaders["projects"], "oa-stock,jiuji-m,9ji-admin", "explicit OA dev profile should keep its own projects header");
+
+const defaultOnlyServer = {
+  name: "oa-only-service",
+  url: "http://127.0.0.1:1350/sse",
+  type: "sse" as const,
+  headers: {
+    "x-global": "oa-only-global",
+  },
+  headerProfiles: {
+    "/oa": {
+      env: "pro",
+    },
+  },
+};
+const switchedDefaultOnlyHeaders = buildMcpHeaders(defaultOnlyServer, bot, {
+  gitnexus: {
+    projects: "small-oa,jiuyun-oa",
+  },
+});
+assertEqual(switchedDefaultOnlyHeaders["x-global"], "oa-only-global", "explicit global profile switch should keep unrelated server static headers");
+assertEqual(switchedDefaultOnlyHeaders["env"], undefined, "explicit global profile switch should not retain another server default OA profile");
 
 const httpTransport = createMcpTransport(config.mcpServers[0]!, config.bots[0]);
 assertEqual(httpTransport?.constructor.name, "StreamableHTTPClientTransport", "http MCP server should use Streamable HTTP transport");

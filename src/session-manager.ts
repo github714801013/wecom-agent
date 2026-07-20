@@ -3,6 +3,7 @@ import { runCompressor, getModelContextWindow } from "./graph.js";
 import type { StoredHumanLoopRequest } from "./human-loop.js";
 import { buildRelationshipIndex, formatRelationshipIndex } from "./relationship-index.js";
 import { buildAnalyzedCodeRangeIndex, formatAnalyzedCodeRangeIndex } from "./analyzed-code-range-index.js";
+import { stringifyModelContent } from "./model-content.js";
 import {
   appendCompressionToSessionMemoryGraph,
   appendMessagesToSessionMemoryGraph,
@@ -15,13 +16,14 @@ export interface Session {
   isCompressed?: boolean;
   currentRepoHints?: string[] | undefined;
   currentMcpHeaders?: Record<string, Record<string, string>> | undefined;
+  currentMcpHeaderCommand?: string | undefined;
   pendingHumanLoop?: StoredHumanLoopRequest | undefined;
   memoryGraph?: SessionMemoryGraph | undefined;
 }
 
 export class SessionManager {
   private sessions = new Map<string, Session>();
-  private readonly SESSION_EXPIRATION_MS = 30 * 60 * 1000; // 30 minutes
+  private readonly SESSION_EXPIRATION_MS = 60 * 60 * 1000; // 1 hour
   private readonly MAX_MESSAGES_PER_SESSION = 100; // Increased to allow more room for compression
   private readonly COMPRESSION_THRESHOLD_PERCENT = 0.6; // Trigger at 60% of context window
 
@@ -34,6 +36,7 @@ export class SessionManager {
       session.messages = [];
       session.currentRepoHints = undefined;
       session.currentMcpHeaders = undefined;
+      session.currentMcpHeaderCommand = undefined;
       session.pendingHumanLoop = undefined;
       session.isCompressed = false;
       session.memoryGraph = undefined;
@@ -58,6 +61,16 @@ export class SessionManager {
   clearSession(sessionKey: string) {
     console.log(`[Session] Clearing session for ${sessionKey}`);
     this.sessions.delete(sessionKey);
+  }
+
+  clearConversationHistory(sessionKey: string, retainedRepoHints: readonly string[] = []) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.messages = [];
+    session.currentRepoHints = [...retainedRepoHints];
+    session.pendingHumanLoop = undefined;
+    session.isCompressed = false;
+    session.memoryGraph = undefined;
+    session.lastActivity = Date.now();
   }
 
   setPendingHumanLoop(sessionKey: string, request: StoredHumanLoopRequest) {
@@ -115,6 +128,16 @@ export class SessionManager {
     session.lastActivity = Date.now();
   }
 
+  setActiveMcpHeaderCommand(sessionKey: string, command: string) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.currentMcpHeaderCommand = command;
+    session.lastActivity = Date.now();
+  }
+
+  resolveActiveMcpHeaderCommand(sessionKey: string) {
+    return this.getOrCreateSession(sessionKey, true).currentMcpHeaderCommand;
+  }
+
   resolveMcpHeaders(sessionKey: string) {
     const session = this.getOrCreateSession(sessionKey);
     return Object.fromEntries(
@@ -137,7 +160,7 @@ export class SessionManager {
   private estimateTokens(messages: BaseMessage[]): number {
     // Rough estimation: 1 token ≈ 4 characters for English, 1 token ≈ 1-2 characters for Chinese
     // We'll use a conservative 1 token ≈ 3 characters average
-    return messages.reduce((acc, msg) => acc + (msg.content.toString().length / 3), 0);
+    return messages.reduce((acc, msg) => acc + (stringifyModelContent(msg.content).length / 3), 0);
   }
 
   private async checkAndCompress(sessionKey: string, session: Session) {
@@ -149,7 +172,7 @@ export class SessionManager {
       
       try {
         const lastHumanMsg = [...session.messages].reverse().find(m => m instanceof HumanMessage);
-        const userQuestion = lastHumanMsg ? lastHumanMsg.content.toString() : "Summary of previous conversation";
+        const userQuestion = lastHumanMsg ? stringifyModelContent(lastHumanMsg.content) : "Summary of previous conversation";
 
         // Prepare input for compressor
         // Historical AI messages are summaries, not raw tool evidence.
@@ -159,7 +182,7 @@ export class SessionManager {
             id: `hist_${i}`,
             source: "local" as const,
             query: userQuestion,
-            content: `历史模型输出，仅可作为低可信上下文，不能等同于原始工具证据：\n${m.content.toString()}`,
+            content: `历史模型输出，仅可作为低可信上下文，不能等同于原始工具证据：\n${stringifyModelContent(m.content)}`,
             type: "historical_context",
             metadata: {
               trust_level: "low",

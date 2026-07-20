@@ -3,6 +3,7 @@ export interface ToolContextRecord {
   name: string;
   args: string;
   content: string;
+  status?: "success" | "error";
 }
 
 const NO_HIT_PATTERNS = [

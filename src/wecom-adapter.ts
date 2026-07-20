@@ -1,5 +1,5 @@
 import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
-import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt, extractExplicitRepoHints, extractMcpProjectCandidates, buildMessagesForCurrentTurn, scopeToolsToRepo } from "./graph.js";
+import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt, extractExplicitRepoHints, buildMessagesForCurrentTurn, scopeToolsToRepo } from "./graph.js";
 import { getMissingPriorityAnswerAnchors, repairAnswerForMissingPriorityAnchors } from "./answer-anchor-guard.js";
 import { config, type BotConfig } from "./config.js";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
@@ -26,11 +26,17 @@ import {
   type FlowControlPatch,
   mergeFlowControl,
 } from "./flow-control.js";
-import { createAgentProgressGuard, createAgentProgressLimitError } from "./agent-progress-guard.js";
+import {
+  buildAgentToolErrorLimitReply,
+  createAgentProgressGuard,
+  createAgentProgressLimitError,
+  createAgentToolErrorLimitError,
+} from "./agent-progress-guard.js";
 import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 import { buildProgressLimitRecoverySystemPrompt, ensureRecoverySqlAuditMarker } from "./recovery-synthesis.js";
 import { buildOriginalQuestionTool } from "./original-question-tool.js";
+import { stringifyModelContent } from "./model-content.js";
 import { buildSessionMemoryGraphTool } from "./session-memory-graph.js";
 import {
   buildStreamPauseResumeRequest,
@@ -38,10 +44,14 @@ import {
   isStreamPauseResumeRequest,
 } from "./stream-pause-resume.js";
 import {
+  buildMcpHeaderSwitchReply,
+  buildQueryableProjectsReply,
   extractProjectsFromHeaders,
   extractProjectsFromMcpHeaders,
+  isQueryableProjectsQuestion,
   listMcpHeaderCommands,
   parseMcpHeaderCommand,
+  prependMcpEnvironmentQueryNotice,
   resolveMcpHeaderCommand,
 } from "./mcp-header-commands.js";
 import {
@@ -58,6 +68,12 @@ import {
   type ConversationContextItem,
 } from "./interaction-control.js";
 import {
+  buildSensitiveRequestAuditEvent,
+  buildSensitiveRequestBlockedReply,
+  detectSensitiveCredentialRequest,
+  extractSensitiveRequestPreflightText,
+} from "./sensitive-request-guard.js";
+import {
   applySqlAuditEvidence,
   assertTodoListComplete,
   blockTodoItem,
@@ -71,6 +87,7 @@ import {
   completeTodoItem,
   createRuntimeTodoList,
   getIncompleteAuditTodoItems,
+  hasRepeatedInputOutput,
   hasTodoItem,
   isSqlAuditEvidenceBlocking,
   renderTodoStepsForHeartbeat,
@@ -682,6 +699,51 @@ export async function startBot(botConfig: BotConfig) {
       if (first) processedMsgs.delete(first);
     }
 
+    const chatType = body.chattype; // 'single' 或 'group'
+    const fromUser = body.from?.userid;
+    const chatId = body.chatid;
+    const sessionKey = chatType === "group" && chatId && fromUser
+      ? `group:${chatId}:${fromUser}`
+      : fromUser
+        ? `single:${fromUser}`
+        : chatId || fromUser || "unknown";
+    let session = sessionManager.getOrCreateSession(sessionKey, true);
+    const activeMcpHeaderCommand = sessionManager.resolveActiveMcpHeaderCommand(sessionKey);
+    const withMcpEnvironmentNotice = (content: string) => prependMcpEnvironmentQueryNotice(
+      content,
+      activeMcpHeaderCommand,
+      botConfig.defaultMcpHeaderCommand,
+    );
+
+    const sensitiveRequestText = extractSensitiveRequestPreflightText(body);
+    const sensitiveRequestDecision = detectSensitiveCredentialRequest(sensitiveRequestText);
+    if (sensitiveRequestDecision.blocked) {
+      const auditEvent = buildSensitiveRequestAuditEvent({
+        botName: botConfig.name,
+        botId: botConfig.botId,
+        msgId: body.msgid,
+        sessionKey,
+        ...(fromUser ? { userId: fromUser } : {}),
+        ...(chatId ? { chatId } : {}),
+        ...(chatType ? { chatType } : {}),
+      }, sensitiveRequestDecision);
+      console.warn(`[SECURITY_AUDIT] ${JSON.stringify(auditEvent)}`);
+      await bot.replyStreamWithCard(
+        frame,
+        body.msgid,
+        withMcpEnvironmentNotice(buildSensitiveRequestBlockedReply()),
+        true,
+        {
+          templateCard: {
+            card_type: "text_notice",
+            main_title: { title: "敏感请求已拦截", desc: "本次未调用任何查询工具" },
+            task_id: `task_${body.msgid}`,
+          },
+        },
+      );
+      return;
+    }
+
     const streamId = generateReqId("stream");
     const streamStartedAt = Date.now();
     const startEarlyProgress = shouldStartEarlyProgressBeforeParse(body);
@@ -699,7 +761,7 @@ export async function startBot(botConfig: BotConfig) {
     };
 
     if (startEarlyProgress) {
-      await bot.replyStreamWithCard(frame, streamId, buildThinkingHeartbeatContent("", [], Date.now()), false, {
+      await bot.replyStreamWithCard(frame, streamId, withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now())), false, {
         templateCard: {
           card_type: 'text_notice',
           main_title: { title: '任务处理中', desc: '正在理解你的消息...' },
@@ -707,7 +769,7 @@ export async function startBot(botConfig: BotConfig) {
         }
       });
       earlyProgressTimer = setInterval(() => {
-        void sendEarlyProgress(buildThinkingHeartbeatContent("", [], Date.now()));
+        void sendEarlyProgress(withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now())));
       }, THINKING_HEARTBEAT_INTERVAL_MS);
     }
 
@@ -719,22 +781,8 @@ export async function startBot(botConfig: BotConfig) {
       if (earlyProgressTimer) clearInterval(earlyProgressTimer);
       await earlyProgressQueue;
     }
-    const chatType = body.chattype; // 'single' 或 'group'
-    const fromUser = body.from?.userid;
-    const chatId = body.chatid;
-
-    // 生成唯一的会话 Key
-    let sessionKey = "";
-    if (chatType === "group" && chatId && fromUser) {
-      sessionKey = `group:${chatId}:${fromUser}`;
-    } else if (fromUser) {
-      sessionKey = `single:${fromUser}`;
-    } else {
-      sessionKey = chatId || fromUser || "unknown";
-    }
-
     // --- Session Handling Start ---
-    let session = sessionManager.getOrCreateSession(sessionKey, true);
+    const memoryGraphBeforeCurrentTurn = session.memoryGraph;
 
     // Handle high-priority system commands (Exact match only)
     const commandText = body.msgtype === MessageType.Text
@@ -750,11 +798,12 @@ export async function startBot(botConfig: BotConfig) {
     if (mcpHeaderCommand) {
       const projects = extractProjectsFromMcpHeaders(mcpHeaderCommand.headersByServer);
       sessionManager.setMcpHeaderOverrides(sessionKey, mcpHeaderCommand.headersByServer);
+      sessionManager.setActiveMcpHeaderCommand(sessionKey, mcpHeaderCommand.command);
       sessionManager.setRepoHints(sessionKey, projects);
       await bot.replyStreamWithCard(
         frame,
         body.msgid,
-        `已切换到 ${mcpHeaderCommand.label} 配置：${projects.length > 0 ? projects.join(", ") : JSON.stringify(mcpHeaderCommand.headersByServer)}`,
+        buildMcpHeaderSwitchReply(mcpHeaderCommand),
         true,
         {
           templateCard: {
@@ -862,7 +911,11 @@ export async function startBot(botConfig: BotConfig) {
       sessionManager.clearPendingHumanLoop(sessionKey);
     }
 
-    if (activePendingHumanLoop && isAmbiguousNewTopicWhilePending(pendingText)) {
+    if (
+      activePendingHumanLoop
+      && !isQueryableProjectsQuestion(originalUserQuestion)
+      && isAmbiguousNewTopicWhilePending(pendingText)
+    ) {
       await bot.replyStreamWithCard(
         frame,
         body.msgid,
@@ -892,14 +945,15 @@ export async function startBot(botConfig: BotConfig) {
             return { role: "user", content: extractTextContent(message.content as any) };
           }
           if (message instanceof AIMessage) {
-            return { role: "assistant", content: message.content.toString() };
+            return { role: "assistant", content: stringifyModelContent(message.content) };
           }
-          return { role: "system", content: message.content.toString() };
+          return { role: "system", content: stringifyModelContent(message.content) };
         });
       const relevance = classifyHistoryRelevance(historyItems, historyRelevanceText);
       if (relevance.decision === "independent") {
         console.log(`[Session] Auto clearing unrelated history for ${sessionKey}: ${relevance.reason}`);
-        sessionManager.clearSession(sessionKey);
+        const retainedProfileRepoHints = extractProjectsFromMcpHeaders(sessionManager.resolveMcpHeaders(sessionKey));
+        sessionManager.clearConversationHistory(sessionKey, retainedProfileRepoHints);
         session = sessionManager.getOrCreateSession(sessionKey, true);
       } else {
         effectiveParsedContent = buildQuestionWithHistory(historyItems, historyRelevanceText);
@@ -908,18 +962,46 @@ export async function startBot(botConfig: BotConfig) {
     // --- Session Handling End ---
 
     try {
+      if (isQueryableProjectsQuestion(originalUserQuestion)) {
+        const sessionMcpHeaderOverrides = sessionManager.resolveMcpHeaders(sessionKey);
+        const defaultMcpHeaderCommand = botConfig.defaultMcpHeaderCommand
+          ? resolveMcpHeaderCommand(botConfig.defaultMcpHeaderCommand, config.mcpServers)
+          : null;
+        const effectiveMcpHeaders = Object.keys(sessionMcpHeaderOverrides).length > 0
+          ? sessionMcpHeaderOverrides
+          : defaultMcpHeaderCommand?.headersByServer ?? {};
+        const queryableProjects = extractProjectsFromMcpHeaders(effectiveMcpHeaders);
+        const directReply = withMcpEnvironmentNotice(buildQueryableProjectsReply(queryableProjects));
+        console.log(`[${botConfig.name}] direct project scope fast path for ${body.msgid}: ${queryableProjects.join(",") || "none"}`);
+        await sessionManager.addMessages(sessionKey, [
+          new HumanMessage({ content: parsedContent as any }),
+          new AIMessage(directReply),
+        ]);
+        await bot.replyStreamWithCard(frame, streamId, directReply, true, {
+          templateCard: {
+            card_type: "text_notice",
+            main_title: {
+              title: "当前可查询项目",
+              desc: activeMcpHeaderCommand || botConfig.defaultMcpHeaderCommand || "当前环境",
+            },
+            task_id: `task_${body.msgid}`,
+          },
+        });
+        return;
+      }
+
       const currentQuestion = typeof effectiveParsedContent === "string"
         ? stripBoundaryMentions(effectiveParsedContent)
         : extractTextContent(effectiveParsedContent as any);
       const currentTask: ActiveTaskState = { msgid: body.msgid, cancelled: false, question: currentQuestion };
       activeTasks.set(sessionKey, currentTask);
-const runtimeTodoList = createRuntimeTodoList();
+      const runtimeTodoList = createRuntimeTodoList();
       startTodoItem(runtimeTodoList, "message_parsed");
       completeTodoItem(runtimeTodoList, "message_parsed", `msgid=${body.msgid}, type=${body.msgtype}`);
 
       if (!startEarlyProgress) {
         // 发送初始进度卡片
-        await bot.replyStreamWithCard(frame, streamId, "正在处理你的问题，请稍候。", false, {
+        await bot.replyStreamWithCard(frame, streamId, withMcpEnvironmentNotice("正在处理你的问题，请稍候。"), false, {
           templateCard: {
             card_type: 'text_notice',
             main_title: { title: '任务处理中', desc: '正在理解你的问题...' },
@@ -946,6 +1028,7 @@ const runtimeTodoList = createRuntimeTodoList();
       const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
       let repoHints: string[] = [];
       let recoveryAuditReason = "";
+      let toolErrorLimitReached = false;
       let lastUpdateTime = 0;
       let heartbeatInFlight = false;
       let lastHeartbeatTime = 0;
@@ -992,7 +1075,7 @@ const runtimeTodoList = createRuntimeTodoList();
         const safeContent = stripEmptyProtocolContent(content).trim();
         if (!safeContent && !final) return false;
         const replyContent = final
-          ? (safeContent || "未获取到有效回复")
+          ? withMcpEnvironmentNotice(safeContent || "未获取到有效回复")
           : buildIntermediateStreamContent(safeContent);
         if (isStreamExpired(streamStartedAt)) {
           await saveExpiredStreamHistory();
@@ -1000,7 +1083,7 @@ const runtimeTodoList = createRuntimeTodoList();
           if (!expiredStreamFinalSent) {
             expiredStreamFinalSent = true;
             try {
-              await bot.replyStream(frame, streamId, STREAM_EXPIRED_MESSAGE, true);
+              await bot.replyStream(frame, streamId, withMcpEnvironmentNotice(STREAM_EXPIRED_MESSAGE), true);
             } catch (error) {
               if (!isWeComStreamExpiredError(error)) throw error;
               console.warn(`[${botConfig.name}] WeCom stream already expired for ${body.msgid}; skip final pause update.`);
@@ -1042,6 +1125,7 @@ const runtimeTodoList = createRuntimeTodoList();
         replyStreamQueue = replyTask.then(() => undefined, () => undefined);
         return replyTask;
       };
+
       const sendStageProgress = async (content: string, force = false) => {
         if (shouldStopCurrentTask()) return;
         if (!force && Date.now() - lastUpdateTime <= 1000) return;
@@ -1250,7 +1334,7 @@ ${hypotheses}
             new SystemMessage(`${businessPrompt}\n\n${buildDirectEvidenceFastPathInstruction()}`),
             new HumanMessage(typeof finalContentForPrompt === "string" ? finalContentForPrompt : currentQuestion),
           ]);
-          fullContent = ensureRecoverySqlAuditMarker(String(fastPathResponse.content || ""));
+          fullContent = ensureRecoverySqlAuditMarker(stringifyModelContent(fastPathResponse.content));
           completeTodoItem(runtimeTodoList, "analysis_finished", `direct evidence fast path contentLength=${fullContent.length}`);
         } else {
         startTodoItem(runtimeTodoList, "tools_loaded");
@@ -1266,7 +1350,7 @@ ${hypotheses}
         const defaultRepoHints = extractProjectsFromMcpHeaders(mcpHeaderOverrides);
         const explicitRepoHints = extractExplicitRepoHints(
           textToPlan,
-          [...extractMcpProjectCandidates(config.mcpServers), ...defaultRepoHints]
+          defaultRepoHints,
         );
         repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints, defaultRepoHints);
         const scopedEvidenceTools = scopeToolsToRepo(tools, repoHints);
@@ -1346,7 +1430,7 @@ ${hypotheses}
               applyFlowControlPatch(streamMetadata.flowControl);
             }
             if (streamMetadata?.answerReview?.progress) {
-              await sendStageProgress(message.content.toString(), true);
+              await sendStageProgress(stringifyModelContent(message.content), true);
               continue;
             }
             const msg = message as BaseMessage;
@@ -1361,19 +1445,25 @@ ${hypotheses}
               const entry = toolCallMap.get(id);
               if (entry) {
                 entry.completed = true;
-                const toolRecord = {
-                  id,
-                  name: entry.name || "unknown_tool",
-                  args: entry.args,
-                  content: String(toolMsg.content),
-                };
-                toolContextRecords.push(toolRecord);
-                toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
-                console.log(`[Tool Call Success] Name: ${entry.name}, Args: ${entry.args}, Result Size: ${String(toolMsg.content).length}`);
-                const guardDecision = agentProgressGuard.recordToolResult(toolRecord);
-                if (guardDecision.shouldStop) {
-                  throw createAgentProgressLimitError(guardDecision.reason);
+              }
+              const toolRecord: ToolContextRecord = {
+                id,
+                name: entry?.name || toolMsg.name || "unknown_tool",
+                args: entry?.args || "",
+                content: stringifyModelContent(toolMsg.content),
+                ...(toolMsg.status === "success" || toolMsg.status === "error"
+                  ? { status: toolMsg.status }
+                  : {}),
+              };
+              toolContextRecords.push(toolRecord);
+              toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
+              console.log(`[Tool Call Result] Name: ${toolRecord.name}, Status: ${toolRecord.status || "unknown"}, Args: ${toolRecord.args}, Result Size: ${stringifyModelContent(toolMsg.content).length}`);
+              const guardDecision = agentProgressGuard.recordToolResult(toolRecord);
+              if (guardDecision.shouldStop) {
+                if (guardDecision.errorCode === "AGENT_TOOL_ERROR_LIMIT") {
+                  throw createAgentToolErrorLimitError(guardDecision.reason);
                 }
+                throw createAgentProgressLimitError(guardDecision.reason);
               }
               continue;
             }
@@ -1432,7 +1522,7 @@ ${hypotheses}
               }
 
               if (aiMsg.content) {
-                const extractedDelta = consumeFlowControlDelta(stripEmptyProtocolContent(aiMsg.content.toString()), flowControlStreamState);
+                const extractedDelta = consumeFlowControlDelta(stripEmptyProtocolContent(stringifyModelContent(aiMsg.content)), flowControlStreamState);
                 if (extractedDelta.hasControl) {
                   applyFlowControlPatch(extractedDelta.control);
                 }
@@ -1471,8 +1561,12 @@ ${hypotheses}
         console.error(`Agent execution error for ${body.msgid}:`, err);
         blockTodoItem(runtimeTodoList, "analysis_finished", err instanceof Error ? err.message : String(err));
         
+        if (err.lc_error_code === "AGENT_TOOL_ERROR_LIMIT") {
+          toolErrorLimitReached = true;
+          fullContent = buildAgentToolErrorLimitReply(err.message || "工具查询多次失败");
+          completeTodoItem(runtimeTodoList, "analysis_finished", "tool error limit reached, sent direct user feedback");
         // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
-        if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.lc_error_code === 'AGENT_TOOL_PROGRESS_LIMIT' || err.message?.includes('Recursion limit')) {
+        } else if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.lc_error_code === 'AGENT_TOOL_PROGRESS_LIMIT' || err.message?.includes('Recursion limit')) {
           try {
             console.log(`[${botConfig.name}] [Recovery] Agent progress limit reached for ${body.msgid}, attempting fallback synthesis...`);
             const baseModel = await getBaseModel();
@@ -1492,7 +1586,7 @@ ${hypotheses}
             ];
 
             const recoveryResponse = await baseModel.invoke(recoveryMessages);
-            fullContent = ensureRecoverySqlAuditMarker(recoveryResponse.content.toString());
+            fullContent = ensureRecoverySqlAuditMarker(stringifyModelContent(recoveryResponse.content));
             recoveryAuditReason = err.lc_error_code === "AGENT_TOOL_PROGRESS_LIMIT"
               ? "工具调用达到进展守卫上限后的恢复总结"
               : "LangGraph 递归上限后的恢复总结";
@@ -1523,6 +1617,24 @@ ${hypotheses}
         fullContent = "";
       }
 
+      if (toolErrorLimitReached && fullContent) {
+        fullContent = collapseProgressUpdates(stripEmptyProtocolContent(fullContent));
+        const toolContextSummary = buildToolContextSummary(toolContextRecords);
+        await sessionManager.addMessages(sessionKey, [
+          new HumanMessage({ content: effectiveParsedContent as any }),
+          ...(toolContextSummary ? [new SystemMessage(toolContextSummary)] : []),
+          new AIMessage(fullContent),
+        ]);
+        stopThinkingHeartbeat();
+        if (!shouldStopCurrentTask()) {
+          await safeReplyStream(fullContent, true);
+        }
+        if (activeTasks.get(sessionKey) === currentTask) {
+          activeTasks.delete(sessionKey);
+        }
+        return;
+      }
+
       if (fullContent) {
         const missingPriorityAnchors = typeof finalContentForPrompt === "string"
           ? getMissingPriorityAnswerAnchors(finalContentForPrompt, fullContent)
@@ -1544,10 +1656,18 @@ ${hypotheses}
         }
 
         const humanLoopRequest = detectHumanLoopRequest(fullContent);
-        if (humanLoopRequest) {
+        const proposedHumanLoopReply = humanLoopRequest ? buildHumanLoopReply(humanLoopRequest) : "";
+        const repeatedHumanLoopOutput = hasRepeatedInputOutput(
+          memoryGraphBeforeCurrentTurn,
+          currentQuestion,
+          proposedHumanLoopReply,
+        );
+        if (humanLoopRequest && repeatedHumanLoopOutput) {
           const storedRequest = toStoredHumanLoopRequest(humanLoopRequest, body.msgid);
           sessionManager.setPendingHumanLoop(sessionKey, storedRequest);
           fullContent = buildHumanLoopReply(storedRequest);
+        } else if (humanLoopRequest) {
+          fullContent = "当前信息仍未形成最终结论，且图记忆未检测到重复输入输出，将继续基于现有线索核实。";
         } else if (activePendingHumanLoop) {
           sessionManager.clearPendingHumanLoop(sessionKey);
         }
@@ -1624,9 +1744,15 @@ ${hypotheses}
         answer: fullContent,
         streamSnapshots: visibleStreamSnapshots,
         model: await getBaseModel(),
+        memoryGraph: memoryGraphBeforeCurrentTurn,
       });
       const isResumeTurn = (activePendingHumanLoop?.resumeCount ?? 0) > 0;
-      const clarificationRequest = shouldSendFinalReply(finalResolution) || isResumeTurn
+      const repeatedClarificationOutput = hasRepeatedInputOutput(
+        memoryGraphBeforeCurrentTurn,
+        currentQuestion,
+        fullContent,
+      );
+      const clarificationRequest = shouldSendFinalReply(finalResolution) || isResumeTurn || !repeatedClarificationOutput
         ? null
         : detectClarificationContent(fullContent, currentQuestion);
       let humanLoopReply: string | null = null;

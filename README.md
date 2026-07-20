@@ -26,6 +26,7 @@
 | `CONFIG_FILE` | 可选，指定 JSON 配置文件路径 | `config/wecom-agent.config.json` |
 | `llm.apiKey` | 大模型 API Key，建议写 `${LLM_API_KEY}` | `${LLM_API_KEY}` |
 | `llm.baseUrl` | 大模型接口 Base URL，建议写 `${LLM_BASE_URL}` | `${LLM_BASE_URL}` |
+| `llm.apiMode` | 模型接口协议：`auto` 自动判断，或显式指定 `responses` / `chat_completions` | `auto` |
 | `mcpServers[]` | MCP 服务器列表 | `{"name":"gitnexus","url":"http://ip:1348/sse"}` |
 | `bots[]` | 企业微信机器人列表 | `{"name":"robot-a","botId":"${WECOM_ROBOT_A_BOT_ID}"}` |
 | `mcpServers[].headerProfiles` | 以指令为 key 的可切换 MCP headers；多个 MCP 使用相同 key 时会同步切换 | `{"/neo":{"projects":"small-oa,jiuyun-oa"}}` |
@@ -38,6 +39,11 @@ MCP header 指令：
 - `/oa`：切换到 `mcpServers[].headerProfiles["/oa"]` 中的项目范围。
 - `/neo`：切换到 `mcpServers[].headerProfiles["/neo"]` 中的项目范围。
 - 当前会话发送切换指令后，会话生效期间后续问题都会沿用该指令对应的 MCP headers，直到再次发送其它切换指令或清理会话。
+- 显式切换到 `/neo`、`/oa-dev` 等非默认指令时，该 profile 整体替换默认 profile；未在当前 profile 中声明的默认环境 header 会被清除，不会继续继承。
+- 切换指令只做简要确认；后续每个业务问题在非默认环境下执行时，首次处理中回复和最终回复都会显示 `当前按 /neo 环境查询`（按实际指令替换）。
+- 默认环境不增加环境提示；环境提示只显示指令名，不展示任何 header 值。
+- 系统自动识别为独立新问题并清理历史上下文时，会保留当前显式环境；只有用户明确清理会话、再次切换指令或会话过期后才改变环境。
+- 用户询问“现在能查哪些项目”“当前查询范围是什么”等配置事实时，直接从当前 profile 的 `projects` 返回列表，不进入 Planner、MCP、Agent、TodoList 或证据审核流程。
 - 后续新增 `/pay`、`/front` 等指令时，只需要在相关 MCP 的 `headerProfiles` 中增加同名 key。
 
 多 MCP 同名指令和 bot 默认指令配置示例：
@@ -99,7 +105,8 @@ MCP header 合并规则：
 - `mcpServers[].headers` 是 MCP server 静态基础 headers。
 - `bots[].mcpHeaders[serverName]` 是该机器人对指定 MCP server 的静态 headers。
 - `mcpServers[].headerProfiles["/指令"]` 是可切换 headers。
-- 同名 header 合并优先级：会话/默认指令 profile headers > 机器人静态 headers > MCP server 静态 headers。
+- 同名 header 合并优先级：当前生效 profile headers > 机器人静态 headers > MCP server 静态 headers。
+- 当前会话没有显式切换时，当前生效 profile 为 `defaultMcpHeaderCommand`；存在显式切换时，所有 MCP server 都停止应用默认 profile，仅使用同名切换 profile（未配置同名 profile 的 server 只保留静态 headers）。
 - 未出现在 `mcpHeaders` 中的 MCP server 不会收到该机器人的自定义 headers。
 
 旧的单机器人环境变量配置不再作为运行入口；如需继续使用原密钥名，可以在 JSON 中通过 `${ENV_NAME}` 引用。

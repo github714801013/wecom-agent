@@ -13,6 +13,7 @@ import {
   type AnalyzedCodeRange,
   type CompressionSectionLike,
 } from "./analyzed-code-range-index.js";
+import { stringifyModelContent } from "./model-content.js";
 
 export interface SessionMemoryRecord {
   id: string;
@@ -62,17 +63,7 @@ const GENERIC_TOKENS = new Set([
 ]);
 
 function stringifyMessageContent(content: unknown) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content.map(item => {
-      if (typeof item === "string") return item;
-      if (item && typeof item === "object" && "text" in item) {
-        return String((item as { text?: unknown }).text ?? "");
-      }
-      return "";
-    }).filter(Boolean).join("\n");
-  }
-  return content == null ? "" : String(content);
+  return stringifyModelContent(content);
 }
 
 function compactText(text: string, maxLength = MAX_RECORD_SUMMARY_LENGTH) {
@@ -168,7 +159,7 @@ export function appendCompressionToSessionMemoryGraph(
     ...input.keyEvidence,
     ...sectionTexts,
     ...input.sections.map(section => {
-      const content = "content" in section ? String((section as { content?: unknown }).content ?? "") : "";
+      const content = "content" in section ? stringifyModelContent((section as { content?: unknown }).content) : "";
       return content;
     }),
   ].filter(text => text.trim());

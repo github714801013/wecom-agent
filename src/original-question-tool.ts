@@ -1,6 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import { BaseMessage, HumanMessage } from "@langchain/core/messages";
 import { z } from "zod";
+import { stringifyModelContent } from "./model-content.js";
 
 export interface OriginalQuestionToolInput {
   originalUserQuestion: string;
@@ -9,17 +10,7 @@ export interface OriginalQuestionToolInput {
 }
 
 function stringifyMessageContent(content: unknown) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content.map(item => {
-      if (typeof item === "string") return item;
-      if (item && typeof item === "object" && "text" in item) {
-        return String((item as { text?: unknown }).text ?? "");
-      }
-      return "";
-    }).filter(Boolean).join("\n");
-  }
-  return content == null ? "" : String(content);
+  return stringifyModelContent(content);
 }
 
 function getSessionFirstUserQuestion(messages: BaseMessage[]) {

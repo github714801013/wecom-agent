@@ -37,6 +37,7 @@ const agentConfigSchema = z.object({
     apiKey: z.string(),
     baseUrl: z.string(),
     modelName: z.string().default("MiniMax-M2.5"),
+    apiMode: z.enum(["auto", "chat_completions", "responses"]).default("auto"),
     recursionLimit: z.coerce.number().default(25),
     contextWindow: z.coerce.number().default(0),
   }),

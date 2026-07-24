@@ -241,6 +241,7 @@ repo=oa-api filePath=oaapi-service/src/main/java/com/jiuji/oaapi/service/impl/Su
   const askValidation = await askValidationResponse.json() as any;
   assert.equal(askValidation.ok, false);
   assert.match(askValidation.error, /question is required/);
+  assert.equal(askValidation.answer, "处理请求时发生异常：question is required");
 } finally {
   await stopDiagnosticServer(server);
 }

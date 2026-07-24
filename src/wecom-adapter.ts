@@ -37,6 +37,7 @@ import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolConte
 import { buildProgressLimitRecoverySystemPrompt, ensureRecoverySqlAuditMarker } from "./recovery-synthesis.js";
 import { buildOriginalQuestionTool } from "./original-question-tool.js";
 import { stringifyModelContent } from "./model-content.js";
+import { buildUserFacingErrorReply } from "./error-response.js";
 import { buildSessionMemoryGraphTool } from "./session-memory-graph.js";
 import {
   buildStreamPauseResumeRequest,
@@ -1593,12 +1594,20 @@ ${hypotheses}
             completeTodoItem(runtimeTodoList, "analysis_finished", `recovery contentLength=${fullContent.length}`);
           } catch (recoveryErr) {
             console.error(`Recovery synthesis failed for ${body.msgid}:`, recoveryErr);
-            fullContent = fullContent || "抱歉，由于问题过于复杂且处理达到限制，我暂时无法给出完整回答。您可以尝试缩小查询范围。";
-            completeTodoItem(runtimeTodoList, "analysis_finished", "recovery failed, sent bounded fallback");
+            const errorFallback = `${buildUserFacingErrorReply(err)}
+
+${buildUserFacingErrorReply(recoveryErr, "恢复处理时发生异常")}`;
+            fullContent = fullContent ? `${fullContent}
+
+${errorFallback}` : errorFallback;
+            completeTodoItem(runtimeTodoList, "analysis_finished", "recovery failed, sent actual error fallback");
           }
         } else {
-          fullContent = fullContent || "抱歉，处理您的请求时遇到了意外错误，请稍后重试。";
-          completeTodoItem(runtimeTodoList, "analysis_finished", "agent error, sent bounded fallback");
+          const errorFallback = buildUserFacingErrorReply(err);
+          fullContent = fullContent ? `${fullContent}
+
+${errorFallback}` : errorFallback;
+          completeTodoItem(runtimeTodoList, "analysis_finished", "agent error, sent actual error fallback");
         }
       }
 

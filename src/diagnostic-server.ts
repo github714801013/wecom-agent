@@ -28,6 +28,7 @@ import {
 } from "./runtime-todolist.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
 import { stringifyModelContent } from "./model-content.js";
+import { buildDiagnosticErrorFields, buildUserFacingErrorReply, getErrorMessage, sanitizeErrorMessage } from "./error-response.js";
 import {
   buildDirectEvidenceFastPathInstruction,
   buildDirectEvidenceRuntimeInstruction,
@@ -208,6 +209,15 @@ function appendAnswerContent(current: string, content: unknown) {
 function sanitizeDiagnosticAnswer(content: string) {
   const withoutEmptyProtocolContent = content.replace(/\[System: Empty message content sanitised to satisfy protocol\]/g, "");
   return extractFlowControl(collapseProgressUpdates(withoutEmptyProtocolContent)).content.trim();
+}
+
+function buildDiagnosticFailureAnswer(answer: string, error: unknown, recoveryError?: unknown) {
+  const details = [
+    buildUserFacingErrorReply(error),
+    recoveryError === undefined ? "" : buildUserFacingErrorReply(recoveryError, "恢复处理时发生异常"),
+  ].filter(Boolean).join("\n\n");
+  const content = sanitizeDiagnosticAnswer(answer);
+  return content ? `${content}\n\n${details}` : details;
 }
 
 async function repairDiagnosticAnswerIfNeeded(question: string, answer: string) {
@@ -405,13 +415,14 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
         return {
           ok: false,
           recovered: false,
-          error: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
-          originalError: error instanceof Error ? error.message : String(error),
+          ...buildDiagnosticErrorFields(error),
+          originalError: sanitizeErrorMessage(getErrorMessage(error)),
+          recoveryError: sanitizeErrorMessage(getErrorMessage(recoveryError)),
           errorCode: error?.lc_error_code,
           question,
           rawQuestion,
           historyCount: diagnosticHistory.length,
-          answer: sanitizeDiagnosticAnswer(answer),
+          answer: buildDiagnosticFailureAnswer(answer, error, recoveryError),
           toolResultCount: toolRecords.length,
           toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
           repoHints,
@@ -425,12 +436,12 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
 
     return {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      ...buildDiagnosticErrorFields(error),
       errorCode: error?.lc_error_code,
       question,
       rawQuestion,
       historyCount: diagnosticHistory.length,
-      answer: sanitizeDiagnosticAnswer(answer),
+      answer: buildDiagnosticFailureAnswer(answer, error),
       toolResultCount: toolRecords.length,
       toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
       repoHints,
@@ -494,7 +505,7 @@ export function startDiagnosticServer() {
     try {
       res.json(await evaluateDiagnosticCaseAsync(normalizeCase(req.query.case), req.query));
     } catch (error: any) {
-      res.status(400).json({ ok: false, error: error.message });
+      res.status(400).json({ ok: false, ...buildDiagnosticErrorFields(error), errorCode: error?.lc_error_code });
     }
   });
 
@@ -502,7 +513,7 @@ export function startDiagnosticServer() {
     try {
       res.json(await evaluateDiagnosticCaseAsync(normalizeCase(req.body?.case), req.body || {}));
     } catch (error: any) {
-      res.status(400).json({ ok: false, error: error.message });
+      res.status(400).json({ ok: false, ...buildDiagnosticErrorFields(error), errorCode: error?.lc_error_code });
     }
   });
 
@@ -510,7 +521,7 @@ export function startDiagnosticServer() {
     try {
       res.json(await runDiagnosticAgentQuestion(req.body || {}));
     } catch (error: any) {
-      res.status(400).json({ ok: false, error: error.message });
+      res.status(400).json({ ok: false, ...buildDiagnosticErrorFields(error), errorCode: error?.lc_error_code });
     }
   });
 

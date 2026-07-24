@@ -1,0 +1,173 @@
+schema_version: 2
+orchestrator_version: 2
+revision: 10
+task_id: diagnostic-real-error-fallback
+task:
+  title: 修复诊断服务兜底返回真实异常
+  source: 用户线上 debug 接口反馈：服务未返回对应异常说明，兜底应返回真实异常
+workspace:
+  status: confirmed
+  decision: current_workspace
+  confirmed_at: '2026-07-24T11:22:55+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feature/search-iteration
+  base_branch: origin/feature/search-iteration
+  migration: null
+route: bug
+route_history: []
+stages:
+- id: diagnosing-bugs
+  skill: diagnosing-bugs
+  status: complete
+  required_files:
+  - path: D:/workplace/skills/my-skills/dev-spec-gen/references/debugging-evidence-specs.md
+    sha256: 1296e685eade03559af8c395802b99b917c4f9d973acd2d8a35ba582a691c245
+  - path: D:/workplace/skills/my-skills/dev-spec-gen/references/loki-cli-specs.md
+    sha256: bb8fd708fdbb5058375a3f2e64d794b8fe8e5cac39df3c2545d4b09c5281ce15
+  output_files: []
+  handoff_summary: 已完成线上和代码取证：真实异常会进入 error 字段但 answer 为空，调用方只展示 answer 时无法看到原因；WeCom
+    适配器还会用固定兜底覆盖真实异常。修复目标是保留脱敏后的真实异常，并同步写入用户可见 answer。
+  evidence:
+  - kind: verification
+    summary: 线上 10.1.14.177:3010/__debug/status 返回 ok=true，debug 服务可用。
+    recorded_at: '2026-07-24T11:36:03+00:00'
+  - kind: verification
+    summary: 线上 POST 10.1.14.177:3010/__debug/ask 返回 HTTP 200、ok=false、error 含 402
+      insufficient_balance，但 answer 为空；失败发生在 planner/Agent 链路。
+    recorded_at: '2026-07-24T11:36:03+00:00'
+  - kind: verification
+    summary: 代码路径确认 Agent 异常分支原先使用 sanitizeDiagnosticAnswer(answer)，无阶段性回答时不会把异常写入
+      answer；WeCom 适配器异常分支原先发送固定兜底文案。
+    recorded_at: '2026-07-24T11:36:03+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-24T11:36:03+00:00'
+- id: regression-test
+  skill: tdd
+  status: complete
+  required_files:
+  - path: D:/workplace/skills/my-skills/dev-spec-gen/references/testing-specs.md
+    sha256: 600abb701d7daef7bd2faad3d9e333717047577d32349c94eefae5fffcdf2d4c
+  output_files:
+  - path: D:/workplace/typescript/wecom-agent/src/tests/test-error-response.ts
+    sha256: e173aba856d9d9fd1191d1569534cf06c220e1f32b72b22a1bcade753601b660
+  - path: D:/workplace/typescript/wecom-agent/src/tests/test-diagnostic-http.ts
+    sha256: 38b6fb45e74154ce2c544911d4be9128783de90a5a657252eea9cf0cac2ca224
+  handoff_summary: 已补充真实异常兜底回归测试和 HTTP 入口断言，覆盖异常可见性、敏感信息脱敏及现有诊断接口回归。
+  evidence:
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-error-response.ts 通过，验证 402
+      insufficient_balance 会进入用户可见 answer，且 api_key/password 会脱敏。
+    recorded_at: '2026-07-24T11:36:38+00:00'
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-diagnostic-server.ts 通过，既有 debug
+      规则查询未回归。
+    recorded_at: '2026-07-24T11:36:38+00:00'
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-diagnostic-http.ts 通过，缺少 question
+      时 answer 返回“处理请求时发生异常：question is required”。
+    recorded_at: '2026-07-24T11:36:38+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-24T11:36:38+00:00'
+- id: minimal-fix
+  skill: implement
+  status: complete
+  required_files:
+  - path: D:/workplace/skills/my-skills/dev-spec-gen/references/workflow-guardrails.md
+    sha256: 398217e1e97708b89606cd96ea744b2015b8675be63d5cf749e5ebab3bf36e9e
+  - path: D:/workplace/skills/my-skills/dev-spec-gen/references/general-specs.md
+    sha256: 21a529153dc10c826882c40f803251b223346cebd4de17853c263df06c3f892b
+  output_files:
+  - path: D:/workplace/typescript/wecom-agent/src/error-response.ts
+    sha256: 0bc6aaad6efd8d3d2a9b9ad984f9fe56b094081dbd2fa8e9ded5f18872ddaae2
+  - path: D:/workplace/typescript/wecom-agent/src/diagnostic-server.ts
+    sha256: 1d179f1962cfd368ff6915cc1b1549909b80b1eda44ec2d50403af39957976e1
+  - path: D:/workplace/typescript/wecom-agent/src/wecom-adapter.ts
+    sha256: a92697ee3f68061353f320d6bb947431dd3a7eaf4eb7a61447b8a4c9e5c0328d
+  handoff_summary: 已完成最小修复：新增统一异常提取与脱敏模块；诊断 Agent 异常、恢复失败及 HTTP 外层异常均返回真实异常并填充 answer；WeCom
+    适配器去除固定兜底文案，改为返回脱敏后的真实异常。
+  evidence:
+  - kind: verification
+    summary: npx tsc --noEmit --pretty false 通过。
+    recorded_at: '2026-07-24T11:37:25+00:00'
+  - kind: verification
+    summary: git diff --check 通过；修改仅涉及真实异常响应、诊断服务入口、WeCom 适配器和对应测试，未纳入 assets/。
+    recorded_at: '2026-07-24T11:37:25+00:00'
+  - kind: verification
+    summary: 真实异常统一经过 api_key、token、password、cookie、Authorization Bearer 等敏感信息脱敏后写入
+      answer/error；原有部分回答会保留并追加异常说明。
+    recorded_at: '2026-07-24T11:37:25+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-24T11:37:25+00:00'
+- id: code-review
+  skill: code-review
+  status: complete
+  required_files: []
+  output_files: []
+  handoff_summary: 代码审查通过：实现与线上问题和修复目标一致，未发现阻断性 Standards/Spec 问题；额外确认部分回答不能吞掉真实异常。未执行
+    commit、push 或部署。
+  evidence:
+  - kind: verification
+    summary: Standards review：改动集中在异常响应边界和一个共享脱敏模块，无全局格式化、无无关重构；错误信息统一脱敏，部分回答场景会追加真实异常。
+    recorded_at: '2026-07-24T11:40:47+00:00'
+  - kind: verification
+    summary: Spec review：满足“兜底返回真实异常”：诊断服务的 answer/error、恢复失败字段以及 WeCom 消息兜底均包含真实异常；未发现超出该目标的行为变更。
+    recorded_at: '2026-07-24T11:40:47+00:00'
+  - kind: verification
+    summary: 复核发现并修正 WeCom 适配器在已有部分回答时丢弃异常的问题，现在会在部分回答后追加异常说明；npx tsc、三项诊断测试和 git
+      diff --check 重新通过。
+    recorded_at: '2026-07-24T11:40:47+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-24T11:40:47+00:00'
+- id: verification
+  skill: testing
+  status: complete
+  required_files:
+  - path: D:/workplace/skills/my-skills/dev-spec-gen/references/testing-specs.md
+    sha256: 600abb701d7daef7bd2faad3d9e333717047577d32349c94eefae5fffcdf2d4c
+  output_files: []
+  handoff_summary: 最终验证完成：类型检查、异常兜底单测、诊断服务回归测试、HTTP 入口测试和 diff 检查均通过；本次未执行 commit、push
+    或部署。
+  evidence: &id001
+  - kind: verification
+    summary: npx tsc --noEmit --pretty false 通过。
+    recorded_at: '2026-07-24T11:45:33+00:00'
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-error-response.ts 通过，402 insufficient_balance
+      真实异常进入用户可见 answer，敏感字段脱敏。
+    recorded_at: '2026-07-24T11:45:33+00:00'
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-diagnostic-server.ts 与 src/tests/test-diagnostic-http.ts
+      通过，缺少 question 时 answer 返回真实异常说明。
+    recorded_at: '2026-07-24T11:45:33+00:00'
+  - kind: verification
+    summary: git diff --check 通过；工作区 assets/ 未纳入本次改动。
+    recorded_at: '2026-07-24T11:45:33+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-24T11:45:33+00:00'
+current_stage: verification
+current_skill: testing
+stage_status: complete
+next_skill: null
+resume_from: completed
+continuation_mode: auto
+required_action: null
+handoff_summary: 阶段 verification 已完成，任务编排中的全部阶段已完成。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-07-24T11:45:33+00:00'

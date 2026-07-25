@@ -434,7 +434,7 @@ export interface FinalReplyDeliveryResult {
   content: string;
   shouldSendFinal: boolean;
   reason: string;
-  source: "reviewed" | "human_loop" | "blocked";
+  source: "reviewed" | "human_loop" | "blocked" | "error";
 }
 
 function extractLikelyFieldNames(content: string) {
@@ -527,6 +527,15 @@ export function resolveFinalReplyDelivery(input: FinalReplyDeliveryInput): Final
       shouldSendFinal: true,
       reason: input.finalResolution.reason,
       source: "reviewed",
+    };
+  }
+
+  if (input.finalResolution.source === "error") {
+    return {
+      content: input.finalResolution.answer || input.finalResolution.reason,
+      shouldSendFinal: true,
+      reason: input.finalResolution.reason,
+      source: "error",
     };
   }
 

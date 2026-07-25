@@ -4,6 +4,7 @@ import { z } from "zod";
 import { parseArgs, type ToolContextRecord } from "./tool-context-filter.js";
 import type { SessionMemoryGraph, SessionMemoryRecord } from "./session-memory-graph.js";
 import { stringifyModelContent } from "./model-content.js";
+import { buildUserFacingErrorReply } from "./error-response.js";
 
 export type RuntimeTodoStatus = "pending" | "in_progress" | "done" | "blocked";
 
@@ -28,6 +29,7 @@ export interface FinalAnswerReviewResult {
   ready: boolean;
   action: FinalAnswerReviewAction;
   reason: string;
+  errorMessage?: string;
 }
 
 export interface FinalAnswerReviewInput {
@@ -47,7 +49,7 @@ export interface FinalReplyResolutionResult {
   action: FinalAnswerReviewAction;
   answer: string;
   reason: string;
-  source: "candidate" | "stream_snapshot" | "unresolved";
+  source: "candidate" | "stream_snapshot" | "unresolved" | "error";
   review: FinalAnswerReviewResult;
 }
 
@@ -485,8 +487,9 @@ export async function reviewFinalAnswerWithModel(input: FinalAnswerReviewInput):
     }
     return review;
   } catch (error) {
-    console.error("Failed to review final answer with LLM:", error);
-    return { ready: false, action: "continue", reason: "最终回复模型评审失败" };
+    const errorMessage = buildUserFacingErrorReply(error, "最终回复模型评审失败");
+    console.error("Failed to review final answer with LLM:", errorMessage);
+    return { ready: false, action: "continue", reason: errorMessage, errorMessage };
   }
 }
 
@@ -523,6 +526,17 @@ export async function resolveFinalReplyWithModel(input: FinalReplyResolutionInpu
     memoryGraph: input.memoryGraph,
   });
 
+  if (candidateReview.errorMessage) {
+    return {
+      ready: false,
+      action: "continue",
+      answer: candidateReview.errorMessage,
+      reason: candidateReview.errorMessage,
+      source: "error",
+      review: candidateReview,
+    };
+  }
+
   if (candidateReview.ready) {
     return {
       ready: true,
@@ -541,6 +555,16 @@ export async function resolveFinalReplyWithModel(input: FinalReplyResolutionInpu
       model: input.model,
       memoryGraph: input.memoryGraph,
     });
+    if (snapshotReview.errorMessage) {
+      return {
+        ready: false,
+        action: "continue",
+        answer: snapshotReview.errorMessage,
+        reason: snapshotReview.errorMessage,
+        source: "error",
+        review: snapshotReview,
+      };
+    }
     if (snapshotReview.ready) {
       return {
         ready: true,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { buildBlockedFinalHumanLoopRequest, resolveFinalReplyDelivery } from "../wecom-adapter.js";
+import { resolveFinalReplyWithModel, reviewFinalAnswerWithModel } from "../runtime-todolist.js";
 import type { FinalReplyResolutionResult } from "../runtime-todolist.js";
 
 function unresolvedFinal(
@@ -31,6 +32,46 @@ assert.match(blocked.content, /sku_id 字段/);
 assert.doesNotMatch(blocked.content, /回复“继续”|回复继续/);
 assert.doesNotMatch(blocked.content, /最终回复闸门|候选回答|卡住原因|我会继续/);
 assert.match(blocked.reason, /候选仍是阶段性进度/);
+
+const modelErrorReview = await reviewFinalAnswerWithModel({
+  question: "模型异常时应返回什么？",
+  answer: "阶段性候选回答",
+  model: {
+    async invoke() {
+      throw new Error("HTTP 429 model_cooldown api_key=secret-value");
+    },
+  },
+});
+assert.match(
+  (modelErrorReview as { errorMessage?: string }).errorMessage || "",
+  /最终回复模型评审失败：HTTP 429 model_cooldown/,
+  "模型评审异常必须保留脱敏后的真实异常",
+);
+assert.doesNotMatch(
+  (modelErrorReview as { errorMessage?: string }).errorMessage || "",
+  /secret-value/,
+  "模型评审异常中的敏感信息必须脱敏",
+);
+
+const modelErrorResolution = await resolveFinalReplyWithModel({
+  question: "模型异常时不应伪装成证据不足",
+  answer: "阶段性候选回答",
+  streamSnapshots: ["更早的阶段性快照"],
+  model: {
+    async invoke() {
+      throw new Error("HTTP 429 model_cooldown");
+    },
+  },
+});
+assert.equal(modelErrorResolution.source, "error");
+const modelErrorDelivery = resolveFinalReplyDelivery({
+  content: modelErrorResolution.answer,
+  finalResolution: modelErrorResolution,
+  humanLoopReply: null,
+});
+assert.equal(modelErrorDelivery.source, "error");
+assert.match(modelErrorDelivery.content, /最终回复模型评审失败：HTTP 429 model_cooldown/);
+assert.doesNotMatch(modelErrorDelivery.content, /已自动继续核实/);
 
 const humanLoopInput = {
   ...blockedInput,

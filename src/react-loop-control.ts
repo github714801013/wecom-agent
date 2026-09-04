@@ -15,6 +15,8 @@ export interface ReactLoopControlOptions {
   maxToolActions?: number;
   maxRepeatedToolActions?: number;
   maxInvalidActions?: number;
+  // 查询类工具（名称含 query）的独立预算：查询不收敛是耗时主因，超限强制收敛
+  maxQueryToolActions?: number;
 }
 
 export interface ReactLoopDecision {
@@ -57,8 +59,13 @@ export const REACT_LOOP_GRAPH: Record<ReactLoopNode, ReactLoopNode[]> = {
 const DEFAULT_MAX_TOOL_ACTIONS = 64;
 const DEFAULT_MAX_REPEATED_TOOL_ACTIONS = 2;
 const DEFAULT_MAX_INVALID_ACTIONS = 3;
+const DEFAULT_MAX_QUERY_TOOL_ACTIONS = 8;
 const RUNTIME_TODO_TOOL_NAME = "runtime_todolist_update";
 const REACT_LOOP_CONTROL_CODE = "REACT_LOOP_CONTROL";
+
+function isQueryToolName(toolName: string) {
+  return /query|search|grep|zoekt|gitnexus/i.test(toolName);
+}
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -133,10 +140,12 @@ export function createReactLoopController(options: ReactLoopControlOptions = {})
   const maxToolActions = options.maxToolActions ?? DEFAULT_MAX_TOOL_ACTIONS;
   const maxRepeatedToolActions = options.maxRepeatedToolActions ?? DEFAULT_MAX_REPEATED_TOOL_ACTIONS;
   const maxInvalidActions = options.maxInvalidActions ?? DEFAULT_MAX_INVALID_ACTIONS;
+  const maxQueryToolActions = options.maxQueryToolActions ?? DEFAULT_MAX_QUERY_TOOL_ACTIONS;
   const signatureCounts = new Map<string, number>();
   const observations: ToolContextRecord[] = [];
   let evidenceToolActions = 0;
   let invalidActions = 0;
+  let queryToolActions = 0;
 
   return {
     evaluateAction(action: ReactAction): ReactLoopDecision {
@@ -171,6 +180,19 @@ export function createReactLoopController(options: ReactLoopControlOptions = {})
           reason: `重复工具动作超过限制：${action.toolName}，重复次数 ${signatureCount}/${maxRepeatedToolActions}`,
           signature,
         });
+      }
+
+      if (isQueryToolName(action.toolName)) {
+        if (queryToolActions >= maxQueryToolActions) {
+          return createDecision({
+            allowed: false,
+            currentNode: "evaluateAction",
+            nextNode: "final",
+            reason: `查询预算已耗尽：${queryToolActions}/${maxQueryToolActions}。请停止继续查询，基于已有证据组织答案。`,
+            signature,
+          });
+        }
+        queryToolActions += 1;
       }
 
       if (isEvidenceToolName(action.toolName)) {

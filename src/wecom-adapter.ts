@@ -3,7 +3,7 @@ import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindo
 import { getMissingPriorityAnswerAnchors, repairAnswerForMissingPriorityAnchors } from "./answer-anchor-guard.js";
 import { config, type BotConfig } from "./config.js";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
-import { sessionManager } from "./session-manager.js";
+import { sessionManager, type ReplyMode } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 import { analyzeImageForQuestion, type VisionImageAnalyzer } from "./vision-analyzer.js";
 import { buildMcpHeaders, getAllMcpTools } from "./mcp-client.js";
@@ -17,7 +17,8 @@ import {
   toStoredHumanLoopRequest,
   type HumanLoopRequest,
 } from "./human-loop.js";
-import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, getProcessingFrame, stripProtocolNoise } from "./progress-updates.js";
+import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, formatElapsedDuration, getProcessingFrame, stripProtocolNoise } from "./progress-updates.js";
+import { rewriteAnswerForBusiness } from "./business-answer-rewrite.js";
 import {
   consumeFlowControlDelta,
   createDefaultFlowControl,
@@ -32,8 +33,16 @@ import {
   createAgentProgressLimitError,
   createAgentToolErrorLimitError,
 } from "./agent-progress-guard.js";
+import {
+  AUTO_VERIFICATION_NO_PROGRESS_REPLY,
+  buildAutoVerificationContinuationPrompt,
+  runAutoVerificationLoop,
+  type AutoVerificationRoundContext,
+  type AutoVerificationRoundResult,
+} from "./auto-verification-loop.js";
 import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
 import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
+import { buildToolResultFileReadTool } from "./tool-result-store.js";
 import { buildProgressLimitRecoverySystemPrompt, ensureRecoverySqlAuditMarker } from "./recovery-synthesis.js";
 import { buildOriginalQuestionTool } from "./original-question-tool.js";
 import { stringifyModelContent } from "./model-content.js";
@@ -58,6 +67,7 @@ import {
 import {
   buildDirectEvidenceFastPathInstruction,
   buildDirectEvidenceRuntimeInstruction,
+  buildEntryAnchorGraphInstruction,
   hasDirectEvidenceAnchors,
   shouldUseWeComDirectEvidenceFastPath,
 } from "./direct-evidence.js";
@@ -71,8 +81,8 @@ import {
 import {
   buildSensitiveRequestAuditEvent,
   buildSensitiveRequestBlockedReply,
-  detectSensitiveCredentialRequest,
   extractSensitiveRequestPreflightText,
+  judgeSensitiveRequestByModel,
 } from "./sensitive-request-guard.js";
 import {
   applySqlAuditEvidence,
@@ -92,7 +102,9 @@ import {
   hasTodoItem,
   isSqlAuditEvidenceBlocking,
   renderTodoStepsForHeartbeat,
+  snapshotUserFacingTodoSteps,
   type FinalReplyResolutionResult,
+  type UserFacingTodoStep,
   resolveFinalReplyWithModel,
   shouldSendFinalReply,
   syncRuntimeAuditTodoPlan,
@@ -395,13 +407,61 @@ export function isHelpCommand(text: string): boolean {
   return exactCommands.has(normalized);
 }
 
+const UNCERTAINTY_PATTERN = /无法确认|无法确定|需要进一步|建议查看代码|建议检索|需要代码|需要工具|不确定答案|信息不足|资料不足|需要更多信息|请提供更多|无法回答|超出我的能力/u;
+
+function hasUncertaintyMarkers(content: string): boolean {
+  return UNCERTAINTY_PATTERN.test(content.trim());
+}
+
+export type QuestionDifficulty = "simple" | "medium" | "complex";
+
+// 直接匹配型意图：关键词命中即可得答案，无需多轮逻辑推理。
+// 接口/功能/板块的处理逻辑、步骤、业务逻辑梳理（FLOW/API 等）属于逻辑推理，不在此列。
+const DIRECT_MATCH_INTENTS = new Set(["SQL", "CONFIG", "DOC", "AUTH"]);
+
+export function isDirectMatchIntent(intent: string | null | undefined): boolean {
+  return Boolean(intent && DIRECT_MATCH_INTENTS.has(intent.trim().toUpperCase()));
+}
+
+// 基于 planner 意图分析结果分流：queries 数量反映业务逻辑查询需求
+export function classifyQuestionDifficulty(plannerResult: { queries: unknown[] } | null): QuestionDifficulty {
+  if (!plannerResult) return "complex";
+  const queryCount = plannerResult.queries?.length ?? 0;
+  if (queryCount === 0) return "simple";
+  if (queryCount <= 2) return "medium";
+  return "complex";
+}
+
+const DEV_MODE_PREFIX = "/dev";
+const BUSINESS_MODE_PREFIX = "/business";
+
+export type ReplyModeCommand = { modeSwitch: ReplyMode; strippedText: string } | { modeSwitch: null; strippedText: string };
+
+export function detectReplyModeCommand(text: string): ReplyModeCommand {
+  const trimmed = stripBoundaryMentions(text);
+  if (trimmed === DEV_MODE_PREFIX || trimmed.toLowerCase().startsWith(`${DEV_MODE_PREFIX} `)) {
+    const stripped = trimmed.length > DEV_MODE_PREFIX.length ? trimmed.slice(DEV_MODE_PREFIX.length).trim() : "";
+    return { modeSwitch: "dev", strippedText: stripped };
+  }
+  if (trimmed === BUSINESS_MODE_PREFIX || trimmed.toLowerCase().startsWith(`${BUSINESS_MODE_PREFIX} `)) {
+    const stripped = trimmed.length > BUSINESS_MODE_PREFIX.length ? trimmed.slice(BUSINESS_MODE_PREFIX.length).trim() : "";
+    return { modeSwitch: "business", strippedText: stripped };
+  }
+  return { modeSwitch: null, strippedText: trimmed };
+}
+
 export function buildHelpReply(headerCommands = listMcpHeaderCommands(config.mcpServers)) {
-  const commandText = headerCommands.length > 0
+  const replyModeHints = [
+    "/dev：切换到开发者模式（返回技术原貌回答）",
+    "/business：切换回业务回答模式（默认）",
+  ];
+  const allCommandHints = headerCommands.length > 0
     ? [
         "当前支持指令：",
+        ...replyModeHints,
         ...headerCommands.map(command => `${command.command}：切换到 ${command.label} 配置（${command.serverNames.join("、")}）`),
       ].join("\n")
-    : "也可以直接说明“不要沿用上个项目，改查 <项目名>”。";
+    : ["当前支持指令：", ...replyModeHints].join("\n");
   return [
     "使用帮助",
     "",
@@ -413,7 +473,7 @@ export function buildHelpReply(headerCommands = listMcpHeaderCommands(config.mcp
     "",
     "3. 清理项目限制",
     "发送“清理会话”后重新提问，不带历史项目范围；也可以直接说明“不要沿用上个项目，改查 <项目名>”。",
-    commandText,
+    allCommandHints,
     "",
     "4. 继续或停止",
     "任务处理中发送“继续”可确认继续等待；发送“停止”可取消当前任务。",
@@ -434,7 +494,7 @@ export interface FinalReplyDeliveryResult {
   content: string;
   shouldSendFinal: boolean;
   reason: string;
-  source: "reviewed" | "human_loop" | "blocked" | "error";
+  source: "reviewed" | "human_loop" | "blocked" | "error" | "no_progress";
 }
 
 function extractLikelyFieldNames(content: string) {
@@ -726,7 +786,7 @@ export async function startBot(botConfig: BotConfig) {
     );
 
     const sensitiveRequestText = extractSensitiveRequestPreflightText(body);
-    const sensitiveRequestDecision = detectSensitiveCredentialRequest(sensitiveRequestText);
+    const sensitiveRequestDecision = await judgeSensitiveRequestByModel(sensitiveRequestText);
     if (sensitiveRequestDecision.blocked) {
       const auditEvent = buildSensitiveRequestAuditEvent({
         botName: botConfig.name,
@@ -771,7 +831,7 @@ export async function startBot(botConfig: BotConfig) {
     };
 
     if (startEarlyProgress) {
-      await bot.replyStreamWithCard(frame, streamId, withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now())), false, {
+      await bot.replyStreamWithCard(frame, streamId, withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now(), streamStartedAt)), false, {
         templateCard: {
           card_type: 'text_notice',
           main_title: { title: '任务处理中', desc: '正在理解你的消息...' },
@@ -779,7 +839,7 @@ export async function startBot(botConfig: BotConfig) {
         }
       });
       earlyProgressTimer = setInterval(() => {
-        void sendEarlyProgress(withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now())));
+        void sendEarlyProgress(withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now(), streamStartedAt)));
       }, THINKING_HEARTBEAT_INTERVAL_MS);
     }
 
@@ -800,6 +860,7 @@ export async function startBot(botConfig: BotConfig) {
       : extractTextContent(parsedContent as any);
     const isHelp = isHelpCommand(commandText);
     const isHardcodedNew = isClearSessionCommand(commandText);
+    const replyModeCommand = detectReplyModeCommand(commandText);
     const activeTask = activeTasks.get(sessionKey);
     const activeText = stripBoundaryMentions(commandText);
     const mcpHeaderCommand = parseMcpHeaderCommand(commandText, config.mcpServers);
@@ -903,6 +964,48 @@ export async function startBot(botConfig: BotConfig) {
       return;
     }
 
+    // 会话级回复模式切换：/dev 或 /business
+    if (replyModeCommand.modeSwitch) {
+      const previousMode = sessionManager.getReplyMode(sessionKey);
+      const newMode = replyModeCommand.modeSwitch;
+      sessionManager.setReplyMode(sessionKey, newMode);
+
+      const modeLabel = newMode === "dev" ? "开发者模式" : "业务回答模式";
+      console.log(`[${botConfig.name}] Reply mode switched for ${sessionKey}: ${previousMode} -> ${newMode}`);
+
+      // 如果携带了新问题，正常处理（后续流程会使用新 mode）
+      if (replyModeCommand.strippedText) {
+        // strippedText 会在后续 currentQuestion 中被使用
+      } else {
+        // 无问题：仅切换模式 + 重新格式化上条回答
+        const lastRaw = sessionManager.getLastRawAnswer(sessionKey);
+        if (!lastRaw) {
+          await bot.replyStreamWithCard(frame, body.msgid, `已切换到${modeLabel}。暂无可重新格式化的回答。`, true, {
+            templateCard: { card_type: "text_notice", main_title: { title: "模式已切换", desc: modeLabel }, task_id: `task_${body.msgid}` },
+          });
+          return;
+        }
+
+        let reformatted: string;
+        if (newMode === "dev") {
+          // dev 模式：直接返回原始回答
+          reformatted = lastRaw;
+        } else {
+          // business 模式：重新走业务重写
+          try {
+            reformatted = await rewriteAnswerForBusiness("", lastRaw);
+          } catch {
+            reformatted = lastRaw;
+          }
+        }
+
+        await bot.replyStreamWithCard(frame, body.msgid, `已切换到${modeLabel}。\n\n${reformatted}`, true, {
+          templateCard: { card_type: "text_notice", main_title: { title: "模式已切换", desc: modeLabel }, task_id: `task_${body.msgid}` },
+        });
+        return;
+      }
+    }
+
     const originalUserQuestion = typeof parsedContent === "string"
       ? stripBoundaryMentions(parsedContent)
       : extractTextContent(parsedContent as any);
@@ -1000,9 +1103,12 @@ export async function startBot(botConfig: BotConfig) {
         return;
       }
 
-      const currentQuestion = typeof effectiveParsedContent === "string"
+      const rawQuestion = typeof effectiveParsedContent === "string"
         ? stripBoundaryMentions(effectiveParsedContent)
         : extractTextContent(effectiveParsedContent as any);
+      const currentQuestion = replyModeCommand.modeSwitch && replyModeCommand.strippedText
+        ? replyModeCommand.strippedText
+        : rawQuestion;
       const currentTask: ActiveTaskState = { msgid: body.msgid, cancelled: false, question: currentQuestion };
       activeTasks.set(sessionKey, currentTask);
       const runtimeTodoList = createRuntimeTodoList();
@@ -1024,7 +1130,7 @@ export async function startBot(botConfig: BotConfig) {
 
       let fullContent = "";
       let flowControl = createDefaultFlowControl();
-      const flowControlStreamState = createFlowControlStreamState();
+      let flowControlStreamState = createFlowControlStreamState();
       let coverNextVisibleContent = false;
       const applyFlowControlPatch = (patch: FlowControlPatch) => {
         flowControl = mergeFlowControl(flowControl, patch);
@@ -1036,19 +1142,31 @@ export async function startBot(botConfig: BotConfig) {
       let intermediateMessages: BaseMessage[] = [];
       const toolContextRecords: ToolContextRecord[] = [];
       const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
+      const agentProgressGuard = createAgentProgressGuard({
+        maxToolResults: getMaxAgentToolResultsPerTurn(),
+      });
+      let autoVerificationAgent: any = null;
+      let autoVerificationScopedEvidenceTools: any[] = [];
       let repoHints: string[] = [];
       let recoveryAuditReason = "";
       let toolErrorLimitReached = false;
+      let toolProgressLimitReached = false;
       let lastUpdateTime = 0;
       let heartbeatInFlight = false;
       let lastHeartbeatTime = 0;
       let heartbeatTimer: NodeJS.Timeout | undefined;
+      // 阶段耗时打点：用于定位「整理分析结果」慢段
+      const logPhaseDuration = (phase: string, startedAt: number) => {
+        console.log(`[${botConfig.name}] Phase duration for ${body.msgid}: ${phase}=${Date.now() - startedAt}ms`);
+      };
       const UPDATE_INTERVAL = 2000;
       let expiredStreamFinalSent = false;
       let expiredStreamHistorySaved = false;
       let replyAckTimeoutReconnectTriggered = false;
       let replyStreamQueue = Promise.resolve();
       const visibleStreamSnapshots: string[] = [];
+      let visiblePlanSteps: readonly UserFacingTodoStep[] | undefined;
+      let lastPlanSnapshot = "";
       const rememberVisibleStreamSnapshot = (content: string) => {
         const visible = collapseProgressUpdates(stripProtocolNoise(content)).trim();
         if (!visible) return;
@@ -1062,6 +1180,16 @@ export async function startBot(botConfig: BotConfig) {
       const saveExpiredStreamHistory = async () => {
         if (expiredStreamHistorySaved) return;
         expiredStreamHistorySaved = true;
+        // 保存当前计划状态，供「继续」时复用：只处理未完成项
+        if (visiblePlanSteps && visiblePlanSteps.length > 0) {
+          const statusMap = new Map(runtimeTodoList.items.map(item => [item.id, item.status]));
+          sessionManager.setLastPlanSteps(sessionKey, visiblePlanSteps.map(step => ({
+            id: step.id,
+            task: step.task,
+            status: statusMap.get(step.id) || "pending",
+          })));
+          console.log(`[${botConfig.name}] Saved plan steps for ${body.msgid}: ${visiblePlanSteps.length} steps`);
+        }
         const toolContextSummary = buildToolContextSummary(toolContextRecords);
         const pauseResumeRequest = toStoredHumanLoopRequest(
           buildStreamPauseResumeRequest({
@@ -1080,13 +1208,17 @@ export async function startBot(botConfig: BotConfig) {
           new AIMessage(STREAM_EXPIRED_MESSAGE),
         ]);
       };
-      const safeReplyStreamNow = async (content: string, final = false) => {
+      type StreamReplyMode = "normal" | "plan";
+      let sendPlanSnapshot: (now?: number) => Promise<boolean>;
+      const safeReplyStreamNow = async (content: string, final = false, mode: StreamReplyMode = "normal") => {
         if (shouldStopCurrentTask()) return false;
         const safeContent = stripEmptyProtocolContent(content).trim();
         if (!safeContent && !final) return false;
         const replyContent = final
           ? withMcpEnvironmentNotice(safeContent || "未获取到有效回复")
-          : buildIntermediateStreamContent(safeContent);
+          : mode === "plan"
+            ? safeContent
+            : buildIntermediateStreamContent(safeContent);
         if (isStreamExpired(streamStartedAt)) {
           await saveExpiredStreamHistory();
           currentTask.cancelled = true;
@@ -1104,7 +1236,7 @@ export async function startBot(botConfig: BotConfig) {
 
         try {
           await bot.replyStream(frame, streamId, replyContent, final);
-          if (!final) {
+          if (!final && mode !== "plan") {
             rememberVisibleStreamSnapshot(safeContent);
           }
           return true;
@@ -1127,13 +1259,30 @@ export async function startBot(botConfig: BotConfig) {
           throw error;
         }
       };
-      const safeReplyStream = (content: string, final = false) => {
+      const safeReplyStream = (content: string, final = false, mode: StreamReplyMode = "normal") => {
+        if (!final && mode === "normal" && visiblePlanSteps) {
+          return sendPlanSnapshot();
+        }
         const replyTask = replyStreamQueue.then(
-          () => safeReplyStreamNow(content, final),
-          () => safeReplyStreamNow(content, final),
+          () => safeReplyStreamNow(content, final, mode),
+          () => safeReplyStreamNow(content, final, mode),
         );
         replyStreamQueue = replyTask.then(() => undefined, () => undefined);
         return replyTask;
+      };
+      const buildPlanSnapshot = (now = Date.now()) => {
+        if (!visiblePlanSteps) return "";
+        const todoSteps = renderTodoStepsForHeartbeat(runtimeTodoList, getProcessingFrame(now), visiblePlanSteps);
+        if (!todoSteps) return "";
+        return `处理进度 · 已用时 ${formatElapsedDuration(streamStartedAt, now)}\n\n${todoSteps}`;
+      };
+      sendPlanSnapshot = async (now = Date.now()) => {
+        const snapshot = buildPlanSnapshot(now);
+        if (!snapshot || snapshot === lastPlanSnapshot) return false;
+        lastPlanSnapshot = snapshot;
+        const sent = await safeReplyStream(snapshot, false, "plan");
+        if (!sent && lastPlanSnapshot === snapshot) lastPlanSnapshot = "";
+        return sent;
       };
 
       const sendStageProgress = async (content: string, force = false) => {
@@ -1159,13 +1308,11 @@ export async function startBot(botConfig: BotConfig) {
         const now = Date.now();
        if (now - lastHeartbeatTime < THINKING_HEARTBEAT_INTERVAL_MS) return;
        heartbeatInFlight = true;
-        const heartbeatContent = buildThinkingHeartbeatContent(fullContent, getActiveToolCalls(), now);
-        const todoSteps = renderTodoStepsForHeartbeat(runtimeTodoList, getProcessingFrame(now));
-        const heartbeatWithSteps = todoSteps ? `${heartbeatContent}\n\n${todoSteps}` : heartbeatContent;
-        void safeReplyStream(
-          heartbeatWithSteps,
-          false,
-        ).then(sent => {
+        const heartbeatTask = visiblePlanSteps
+          ? sendPlanSnapshot(now)
+          : safeReplyStream(buildThinkingHeartbeatContent(fullContent, getActiveToolCalls(), now, streamStartedAt), false);
+        console.log(`[${botConfig.name}] Heartbeat sent for ${body.msgid}: elapsed=${formatElapsedDuration(streamStartedAt, now)}, planMode=${Boolean(visiblePlanSteps)}`);
+        void heartbeatTask.then(sent => {
          if (sent) lastHeartbeatTime = Date.now();
        }).catch(error => {
          console.error(`[${botConfig.name}] Thinking heartbeat failed for ${body.msgid}:`, error);
@@ -1175,7 +1322,7 @@ export async function startBot(botConfig: BotConfig) {
      }, THINKING_HEARTBEAT_INTERVAL_MS);
 
       // --- Planner Logic Start ---
-      let plannerResult = null;
+      let plannerResult: Awaited<ReturnType<typeof runPlanner>> = null;
       const runtimeTodoInstruction = `系统提示：【运行时 TodoList 工具要求】
 当前回答由运行时 TodoList 控制流程完成度，TodoList 是动态计划，不是固定审核清单。
 如果当前工具列表存在 runtime_todolist_update，只需要维护当前问题实际需要的审核节点；不要为了无关节点补“不适用”，也不要输出内部 TodoList 内容。
@@ -1211,14 +1358,35 @@ Human Loop 严格门槛：所有可由 LLM 工具、代码检索、调用链、�
         if (textItem) textToPlan = stripBoundaryMentions(textItem.text || "");
       }
 
+      // 分流决策在 planner 意图分析之后产生（见 Planner Logic End 后的 classifyQuestionDifficulty）
+      let questionDifficulty: QuestionDifficulty = "complex";
+
       if (isStreamPauseResume) {
         startTodoItem(runtimeTodoList, "planner_checked");
         completeTodoItem(runtimeTodoList, "planner_checked", "stream pause resume: skipped planner/prelude to avoid restarting from head");
+        // 复用暂停前保存的计划：已完成项保持 ✓，只处理未完成项
+        const storedPlanSteps = sessionManager.getLastPlanSteps(sessionKey);
+        let planResumeInstruction = "";
+        if (storedPlanSteps && storedPlanSteps.length > 0) {
+          for (const step of storedPlanSteps) {
+            if (step.status === "done" && hasTodoItem(runtimeTodoList, step.id)) {
+              completeTodoItem(runtimeTodoList, step.id, "resumed from saved plan");
+            }
+          }
+          visiblePlanSteps = storedPlanSteps.map(step => ({ id: step.id, task: step.task }));
+          const planProgressText = storedPlanSteps
+            .map(step => `${step.status === "done" ? "✓" : "○"} ${step.task}`)
+            .join("\n");
+          planResumeInstruction = `\n\n系统提示：【断点恢复计划】\n暂停前计划进度：\n${planProgressText}\n已完成项无需重新处理，只继续未完成项。`;
+          console.log(`[${botConfig.name}] Restored saved plan for ${body.msgid}: ${storedPlanSteps.length} steps (${storedPlanSteps.filter(step => step.status === "done").length} done)`);
+          // 恢复的计划立即以快照呈现给用户
+          void sendPlanSnapshot();
+        }
         if (typeof effectiveParsedContent === 'string') {
-          finalContentForPrompt = `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${buildStreamPauseResumeRuntimeInstruction()}\n\n${effectiveParsedContent}`;
+          finalContentForPrompt = `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${buildStreamPauseResumeRuntimeInstruction()}${planResumeInstruction}\n\n${effectiveParsedContent}`;
         } else if (Array.isArray(effectiveParsedContent)) {
           finalContentForPrompt = [
-            { type: 'text', text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${buildStreamPauseResumeRuntimeInstruction()}\n\n` },
+            { type: 'text', text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${buildStreamPauseResumeRuntimeInstruction()}${planResumeInstruction}\n\n` },
             ...effectiveParsedContent,
           ];
         }
@@ -1234,13 +1402,13 @@ Human Loop 严格门槛：所有可由 LLM 工具、代码检索、调用链、�
               plannerIntent: plannerResult.intent,
               secondaryIntents: plannerResult.secondary_intents,
             });
-           await sendStageProgress("已完成问题规划，正在整理检索词和候选方向，继续核实中。", true);
-            // 规划完成后立即展示步骤清单，已完成打 ✓，未完成的后续由心跳持续更新
-            const planSteps = renderTodoStepsForHeartbeat(runtimeTodoList, getProcessingFrame(Date.now()));
-            if (planSteps) {
-              await sendStageProgress(planSteps, true);
+            const initialVisiblePlanSteps = snapshotUserFacingTodoSteps(runtimeTodoList);
+            if (initialVisiblePlanSteps.length > 0) {
+              visiblePlanSteps = initialVisiblePlanSteps;
+              await sendPlanSnapshot();
             }
-            const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
+            const queryLimit = isDirectMatchIntent(plannerResult.intent) ? 1 : 16;
+            const queries = plannerResult.queries?.slice(0, queryLimit).map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
             
             // 优先使用去实例化检索词，避免品牌/租户/完整文案干扰代码搜索。
@@ -1331,10 +1499,340 @@ ${hypotheses}
       }
       // --- Planner Logic End ---
 
+      // planner 意图分析后的分流：queries=0 简单直接答；1-2 中等一次查询；>2 复杂完整流程
+      questionDifficulty = isStreamPauseResume ? "complex" : classifyQuestionDifficulty(plannerResult);
+      const useFastPath = questionDifficulty === "simple";
+      // 直接匹配型：SQL/CONFIG/DOC/AUTH 意图，走 agent 但仅提示词区别（关键词匹配、命中即答）
+      const DIRECT_MATCH_REACT_LOOP_CONTROL = {
+        maxToolActions: 4,
+        maxQueryToolActions: 1,
+        maxRepeatedToolActions: 1,
+      };
+      const useDirectMatch = !isStreamPauseResume
+        && !useFastPath
+        && isDirectMatchIntent(plannerResult?.intent);
+      // 直接匹配型无需验证推理链，始终跳过自动验证
+      const skipVerification = questionDifficulty !== "complex" || useDirectMatch;
+      console.log(`[${botConfig.name}] Question difficulty for ${body.msgid}: ${questionDifficulty} (queries=${plannerResult?.queries?.length ?? 0}, directMatch=${useDirectMatch}, intent=${plannerResult?.intent ?? "unknown"})`);
+
+      const ensureAutoVerificationAgent = async () => {
+        if (autoVerificationAgent) {
+          return {
+            agent: autoVerificationAgent,
+            scopedEvidenceTools: autoVerificationScopedEvidenceTools,
+          };
+        }
+
+        const sessionMcpHeaderOverrides = sessionManager.resolveMcpHeaders(sessionKey);
+        const defaultMcpHeaderCommand = botConfig.defaultMcpHeaderCommand
+          ? resolveMcpHeaderCommand(botConfig.defaultMcpHeaderCommand, config.mcpServers)
+          : null;
+        const mcpHeaderOverrides = Object.keys(sessionMcpHeaderOverrides).length > 0
+          ? sessionMcpHeaderOverrides
+          : defaultMcpHeaderCommand?.headersByServer ?? {};
+        const toolsLoadStartedAt = Date.now();
+        const tools = await getAllMcpTools(botConfig, mcpHeaderOverrides);
+        logPhaseDuration(`tools_load(count=${tools.length})`, toolsLoadStartedAt);
+        const defaultRepoHints = extractProjectsFromMcpHeaders(mcpHeaderOverrides);
+        const explicitRepoHints = extractExplicitRepoHints(textToPlan, defaultRepoHints);
+        repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints, defaultRepoHints);
+        autoVerificationScopedEvidenceTools = scopeToolsToRepo(tools, repoHints);
+        syncRuntimeAuditTodoPlan(runtimeTodoList, {
+          question: currentQuestion,
+          repoHints,
+          ...(plannerResult?.intent ? { plannerIntent: plannerResult.intent } : {}),
+          ...(plannerResult?.secondary_intents ? { secondaryIntents: plannerResult.secondary_intents } : {}),
+        });
+        const agentTools = [
+          ...autoVerificationScopedEvidenceTools,
+          buildOriginalQuestionTool({
+            originalUserQuestion,
+            currentQuestion,
+            sessionMessages: session.messages,
+          }),
+          buildSessionMemoryGraphTool({
+            graph: session.memoryGraph,
+            currentQuestion,
+          }),
+          buildRuntimeTodoTool(runtimeTodoList),
+          buildToolResultFileReadTool(),
+        ];
+        completeTodoItem(runtimeTodoList, "tools_loaded", `tools=${agentTools.length}, repoHints=${repoHints.join(",") || "none"}`);
+        console.log(`[${botConfig.name}] Agent tool budget for ${body.msgid}: directMatch=${useDirectMatch}, maxToolActions=${useDirectMatch ? DIRECT_MATCH_REACT_LOOP_CONTROL.maxToolActions : "default"}, maxQueryToolActions=${useDirectMatch ? DIRECT_MATCH_REACT_LOOP_CONTROL.maxQueryToolActions : "default"}`);
+        autoVerificationAgent = await initializeAgent(agentTools, plannerResult, {
+          reactLoopControl: useDirectMatch
+            ? DIRECT_MATCH_REACT_LOOP_CONTROL
+            : undefined,
+        });
+        return {
+          agent: autoVerificationAgent,
+          scopedEvidenceTools: autoVerificationScopedEvidenceTools,
+        };
+      };
+
+      const runAutoVerificationAgentRound = async (
+        userContent: any,
+        resetCandidate: boolean,
+        signal?: AbortSignal,
+      ): Promise<AutoVerificationRoundResult> => {
+        if (signal?.aborted || shouldStopCurrentTask()) {
+          throw new Error(STREAM_EXPIRED_MESSAGE);
+        }
+        const { agent } = await ensureAutoVerificationAgent();
+        const roundToolRecordStart = toolContextRecords.length;
+        if (resetCandidate) {
+          fullContent = "";
+          toolCallMap.clear();
+          flowControlStreamState = createFlowControlStreamState();
+        }
+
+        const stream = await agent.stream({
+          messages: buildMessagesForCurrentTurn({
+            sessionMessages: session.messages,
+            userContent,
+            repoHint: repoHints,
+          }),
+        }, {
+          recursionLimit: useDirectMatch
+            ? Math.min(config.llm.recursionLimit, 8)
+            : config.llm.recursionLimit,
+          streamMode: "messages",
+          ...(signal ? { signal } : {}),
+        });
+
+        for await (const [message, metadata] of stream) {
+          const streamMetadata = metadata as AgentStreamMetadata | undefined;
+          if (signal?.aborted || shouldStopCurrentTask()) {
+            fullContent = "";
+            throw new Error(STREAM_EXPIRED_MESSAGE);
+          }
+          if (streamMetadata?.answerReview?.resetContent) {
+            fullContent = "";
+            visibleStreamSnapshots.length = 0;
+          }
+          if (streamMetadata?.flowControl) {
+            applyFlowControlPatch(streamMetadata.flowControl);
+          }
+          if (streamMetadata?.answerReview?.progress) {
+            await sendStageProgress(stringifyModelContent(message.content), true);
+            continue;
+          }
+          const msg = message as BaseMessage;
+          intermediateMessages.push(msg);
+
+          const type = (msg as any)._getType?.() || msg.constructor.name;
+          if (type === "tool" || type === "ToolMessage") {
+            const toolMsg = msg as any;
+            const id = toolMsg.tool_call_id;
+            const entry = toolCallMap.get(id);
+            if (entry) {
+              entry.completed = true;
+            }
+            const toolRecord: ToolContextRecord = {
+              id,
+              name: entry?.name || toolMsg.name || "unknown_tool",
+              args: entry?.args || "",
+              content: stringifyModelContent(toolMsg.content),
+              ...(toolMsg.status === "success" || toolMsg.status === "error"
+                ? { status: toolMsg.status }
+                : {}),
+            };
+            toolContextRecords.push(toolRecord);
+            toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
+            console.log(`[Tool Call Result] Name: ${toolRecord.name}, Status: ${toolRecord.status || "unknown"}, Args: ${toolRecord.args}, Result Size: ${stringifyModelContent(toolMsg.content).length}`);
+            const guardDecision = agentProgressGuard.recordToolResult(toolRecord);
+            if (guardDecision.shouldStop) {
+              if (guardDecision.errorCode === "AGENT_TOOL_ERROR_LIMIT") {
+                throw createAgentToolErrorLimitError(guardDecision.reason);
+              }
+              throw createAgentProgressLimitError(guardDecision.reason);
+            }
+            continue;
+          }
+
+          if (type === "ai" || type === "AIMessage" || type === "AIMessageChunk") {
+            const aiMsg = msg as any;
+            if (aiMsg.tool_call_chunks && aiMsg.tool_call_chunks.length > 0) {
+              for (const chunk of aiMsg.tool_call_chunks) {
+                const id = chunk.id;
+                if (!id) continue;
+                if (!toolCallMap.has(id)) {
+                  toolCallMap.set(id, { name: "", args: "", notified: false, completed: false });
+                }
+                const entry = toolCallMap.get(id)!;
+                if (chunk.name) entry.name = chunk.name;
+                if (chunk.args) entry.args += chunk.args;
+
+                const activeCalls = getActiveToolCalls();
+                if (activeCalls.length > 0) {
+                  const statusMsg = buildProgressStreamContent(fullContent, activeCalls);
+                  if (Date.now() - lastUpdateTime > 1000) {
+                    if (!shouldStopCurrentTask()) {
+                      await safeReplyStream(statusMsg, false);
+                    }
+                    lastUpdateTime = Date.now();
+                  }
+                }
+              }
+              continue;
+            }
+
+            if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
+              for (const tool of aiMsg.tool_calls) {
+                if (!tool.name) continue;
+                const id = tool.id || `${tool.name}-${Date.now()}`;
+                toolCallMap.set(id, {
+                  name: tool.name,
+                  args: JSON.stringify(tool.args || {}),
+                  notified: true,
+                  completed: false,
+                });
+                console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
+                const statusMsg = buildProgressStreamContent(fullContent, [
+                  `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
+                ]);
+                if (!shouldStopCurrentTask()) {
+                  await safeReplyStream(statusMsg, false);
+                }
+              }
+              continue;
+            }
+
+            if (aiMsg.content) {
+              const extractedDelta = consumeFlowControlDelta(
+                stripEmptyProtocolContent(stringifyModelContent(aiMsg.content)),
+                flowControlStreamState,
+              );
+              if (extractedDelta.hasControl) {
+                applyFlowControlPatch(extractedDelta.control);
+              }
+              const delta = extractedDelta.content;
+              if (delta.trim().length > 0) {
+                if (coverNextVisibleContent) {
+                  fullContent = delta;
+                  coverNextVisibleContent = false;
+                } else if (fullContent && delta.startsWith(fullContent)) {
+                  fullContent = delta;
+                } else {
+                  fullContent += delta;
+                }
+
+                if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
+                  if (!shouldStopCurrentTask()) {
+                    await safeReplyStream(collapseProgressUpdates(fullContent), false);
+                  }
+                  lastUpdateTime = Date.now();
+                }
+              }
+            }
+          }
+        }
+
+        for (const [id, entry] of toolCallMap.entries()) {
+          if (!entry.completed && entry.name) {
+            console.log(`[Tool Call Pending/Final] Name: ${entry.name}, Args: ${entry.args}`);
+          }
+        }
+
+        return {
+          content: fullContent,
+          evidenceGaps: [],
+          toolRecords: toolContextRecords.slice(roundToolRecordStart),
+        };
+      };
+      const runAgentRoundWithTiming = async (
+        userContent: any,
+        resetCandidate: boolean,
+        signal?: AbortSignal,
+      ): Promise<AutoVerificationRoundResult> => {
+        const startedAt = Date.now();
+        const result = await runAutoVerificationAgentRound(userContent, resetCandidate, signal);
+        logPhaseDuration(`agent_round(reset=${resetCandidate})`, startedAt);
+        return result;
+      };
+
+      // 简单问题快速路径：planner 已分析（queries=0），跳过 MCP 工具与搜索循环，直接 LLM 回答
+      let fastPathAnswer = "";
+      if (useFastPath) {
+        startTodoItem(runtimeTodoList, "tools_loaded");
+        completeTodoItem(runtimeTodoList, "tools_loaded", "fast path: skipped MCP tool loading");
+        startTodoItem(runtimeTodoList, "analysis_finished");
+        try {
+          const businessPrompt = await getBusinessPrompt(plannerResult);
+          const baseModel = await getBaseModel();
+          const fastPathStart = Date.now();
+          const fastPathResponse = await baseModel.invoke([
+            new SystemMessage(businessPrompt),
+            ...buildMessagesForCurrentTurn({
+              sessionMessages: session.messages,
+              userContent: currentQuestion,
+              repoHint: [],
+            }),
+          ]);
+          const candidate = stringifyModelContent(fastPathResponse.content);
+          const fastPathDuration = formatElapsedDuration(fastPathStart);
+          if (hasUncertaintyMarkers(candidate)) {
+            console.log(`[${botConfig.name}] Fast path uncertainty detected for ${body.msgid}: falling back to full pipeline (duration=${fastPathDuration})`);
+            completeTodoItem(runtimeTodoList, "analysis_finished", "fast path uncertainty markers detected, fallback to full pipeline");
+            questionDifficulty = "complex";
+          } else {
+            fastPathAnswer = candidate;
+            console.log(`[${botConfig.name}] Fast path completed for ${body.msgid}: duration=${fastPathDuration}, contentLength=${fastPathAnswer.length}`);
+            completeTodoItem(runtimeTodoList, "analysis_finished", `fast path contentLength=${fastPathAnswer.length}, duration=${fastPathDuration}`);
+          }
+        } catch (fastPathError) {
+          console.error(`[${botConfig.name}] Fast path failed for ${body.msgid}, falling back to full pipeline:`, fastPathError);
+          completeTodoItem(runtimeTodoList, "analysis_finished", "fast path error, fallback to full pipeline");
+          questionDifficulty = "complex";
+        }
+      }
+
+      // 直接匹配型提示词注入：走 agent，但提示只做关键词匹配、命中即答、不扩展推理
+      if (useDirectMatch && plannerResult) {
+        const directMatchInstruction = `系统提示：【直接匹配回答】
+当前问题可以通过关键词直接匹配代码、配置或数据得到答案，不需要多步逻辑推理。
+1. 优先用规划阶段给出的检索词直接查询，命中即基于证据组织答案
+2. 本次最多执行一次关键词检索，后续只允许读取命中证据所需的最小上下文
+3. 不要扩展检索范围、不要推理因果链、不要多轮假设验证
+4. 证据不足时明确说明未找到，不要推理猜测
+5. 回答中保留关键取值（字段名、参数值、枚举值、错误码、配置值）原文`;
+        if (typeof finalContentForPrompt === 'string') {
+          finalContentForPrompt = `${directMatchInstruction}\n\n${finalContentForPrompt}`;
+        } else if (Array.isArray(finalContentForPrompt)) {
+          finalContentForPrompt = [
+            { type: 'text', text: `${directMatchInstruction}\n\n` },
+            ...finalContentForPrompt,
+          ];
+        }
+        console.log(`[${botConfig.name}] Direct match instruction injected for ${body.msgid}: intent=${plannerResult.intent}`);
+      }
+
+      // 明确入口问题：先精确定位入口/板块，再拉图信息，从代码整理答案。
+      // 入口锚点由 planner 模型节点识别（entry_anchors），不用正则。
+      const entryAnchors = plannerResult?.entry_anchors?.filter(Boolean) ?? [];
+      const useEntryAnchor = !useFastPath
+        && !isStreamPauseResume
+        && entryAnchors.length > 0;
+      if (useEntryAnchor) {
+        const anchorListText = entryAnchors.map(anchor => `- ${anchor}`).join("\n");
+        const entryAnchorInstruction = `${buildEntryAnchorGraphInstruction()}\n已识别的入口锚点：\n${anchorListText}`;
+        if (typeof finalContentForPrompt === 'string') {
+          finalContentForPrompt = `${entryAnchorInstruction}\n\n${finalContentForPrompt}`;
+        } else if (Array.isArray(finalContentForPrompt)) {
+          finalContentForPrompt = [
+            { type: 'text', text: `${entryAnchorInstruction}\n\n` },
+            ...finalContentForPrompt,
+          ];
+        }
+        console.log(`[${botConfig.name}] Entry anchor instruction injected for ${body.msgid}: ${entryAnchors.length} anchors`);
+      }
+
       // 记录流式过程中的所有消息，用于容错恢复
       try {
+        if (fastPathAnswer) {
+          fullContent = fastPathAnswer;
         // 快路径只看用户本轮原始输入，避免拼接历史 AI 输出（含"原因分析/调用链/代码位置"等 section）误触发跳过工具加载。
-        if (shouldUseWeComDirectEvidenceFastPath(originalUserQuestion)) {
+        } else if (!useFastPath && shouldUseWeComDirectEvidenceFastPath(originalUserQuestion)) {
           startTodoItem(runtimeTodoList, "tools_loaded");
           completeTodoItem(runtimeTodoList, "tools_loaded", "direct evidence fast path: skipped MCP tool loading");
           startTodoItem(runtimeTodoList, "analysis_finished");
@@ -1349,44 +1847,10 @@ ${hypotheses}
         } else {
         startTodoItem(runtimeTodoList, "tools_loaded");
         await sendStageProgress("正在加载 MCP 工具和项目范围，继续核实中。", true);
-        const sessionMcpHeaderOverrides = sessionManager.resolveMcpHeaders(sessionKey);
-        const defaultMcpHeaderCommand = botConfig.defaultMcpHeaderCommand
-          ? resolveMcpHeaderCommand(botConfig.defaultMcpHeaderCommand, config.mcpServers)
-          : null;
-        const mcpHeaderOverrides = Object.keys(sessionMcpHeaderOverrides).length > 0
-          ? sessionMcpHeaderOverrides
-          : defaultMcpHeaderCommand?.headersByServer ?? {};
-        const tools = await getAllMcpTools(botConfig, mcpHeaderOverrides);
-        const defaultRepoHints = extractProjectsFromMcpHeaders(mcpHeaderOverrides);
-        const explicitRepoHints = extractExplicitRepoHints(
-          textToPlan,
-          defaultRepoHints,
-        );
-        repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints, defaultRepoHints);
-        const scopedEvidenceTools = scopeToolsToRepo(tools, repoHints);
-        syncRuntimeAuditTodoPlan(runtimeTodoList, {
-          question: currentQuestion,
-          repoHints,
-          ...(plannerResult?.intent ? { plannerIntent: plannerResult.intent } : {}),
-          ...(plannerResult?.secondary_intents ? { secondaryIntents: plannerResult.secondary_intents } : {}),
-        });
-        const agentTools = [
-          ...scopedEvidenceTools,
-          buildOriginalQuestionTool({
-            originalUserQuestion,
-            currentQuestion,
-            sessionMessages: session.messages,
-          }),
-          buildSessionMemoryGraphTool({
-            graph: session.memoryGraph,
-            currentQuestion,
-          }),
-          buildRuntimeTodoTool(runtimeTodoList),
-        ];
-        completeTodoItem(runtimeTodoList, "tools_loaded", `tools=${agentTools.length}, repoHints=${repoHints.join(",") || "none"}`);
+        const { scopedEvidenceTools } = await ensureAutoVerificationAgent();
         await sendStageProgress("已加载可用工具，正在判断是否需要预检索，继续核实中。", true);
 
-        if (!isStreamPauseResume && !hasDirectEvidence && plannerResult && textToPlan.trim().length > 0) {
+        if (!isStreamPauseResume && !hasDirectEvidence && !useDirectMatch && plannerResult && textToPlan.trim().length > 0) {
           await sendStageProgress("正在执行预检索以缩小证据范围，继续核实中。", true);
           const prelude = await runSearchLoopPrelude({
             userQuestion: textToPlan,
@@ -1409,161 +1873,8 @@ ${hypotheses}
 
         startTodoItem(runtimeTodoList, "analysis_finished");
         await sendStageProgress("正在启动业务分析节点，继续核实中。", true);
-        const agent = await initializeAgent(agentTools, plannerResult);
         await sendStageProgress("业务分析节点已启动，正在调用模型和工具核实证据，继续核实中。", true);
-        const stream = await agent.stream({
-          messages: buildMessagesForCurrentTurn({
-            sessionMessages: session.messages,
-            userContent: finalContentForPrompt,
-            repoHint: repoHints,
-          }),
-        }, {
-          recursionLimit: config.llm.recursionLimit,
-          streamMode: "messages",
-        });
-
-        const agentProgressGuard = createAgentProgressGuard({
-          maxToolResults: getMaxAgentToolResultsPerTurn(),
-        });
-        // 工具调用累加器：用于聚合流式的 tool_call_chunks
-        for await (const [message, metadata] of stream) {
-            const streamMetadata = metadata as AgentStreamMetadata | undefined;
-            if (shouldStopCurrentTask()) {
-              fullContent = "";
-              break;
-            }
-            if (streamMetadata?.answerReview?.resetContent) {
-              fullContent = "";
-              visibleStreamSnapshots.length = 0;
-            }
-            if (streamMetadata?.flowControl) {
-              applyFlowControlPatch(streamMetadata.flowControl);
-            }
-            if (streamMetadata?.answerReview?.progress) {
-              await sendStageProgress(stringifyModelContent(message.content), true);
-              continue;
-            }
-            const msg = message as BaseMessage;
-            intermediateMessages.push(msg); // 记录中间过程
-
-            const type = (msg as any)._getType?.() || msg.constructor.name;
-
-            // 处理工具执行结果：记录完整调用日志
-            if (type === "tool" || type === "ToolMessage") {
-              const toolMsg = msg as any;
-              const id = toolMsg.tool_call_id;
-              const entry = toolCallMap.get(id);
-              if (entry) {
-                entry.completed = true;
-              }
-              const toolRecord: ToolContextRecord = {
-                id,
-                name: entry?.name || toolMsg.name || "unknown_tool",
-                args: entry?.args || "",
-                content: stringifyModelContent(toolMsg.content),
-                ...(toolMsg.status === "success" || toolMsg.status === "error"
-                  ? { status: toolMsg.status }
-                  : {}),
-              };
-              toolContextRecords.push(toolRecord);
-              toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
-              console.log(`[Tool Call Result] Name: ${toolRecord.name}, Status: ${toolRecord.status || "unknown"}, Args: ${toolRecord.args}, Result Size: ${stringifyModelContent(toolMsg.content).length}`);
-              const guardDecision = agentProgressGuard.recordToolResult(toolRecord);
-              if (guardDecision.shouldStop) {
-                if (guardDecision.errorCode === "AGENT_TOOL_ERROR_LIMIT") {
-                  throw createAgentToolErrorLimitError(guardDecision.reason);
-                }
-                throw createAgentProgressLimitError(guardDecision.reason);
-              }
-              continue;
-            }
-
-            if (type === "ai" || type === "AIMessage" || type === "AIMessageChunk") {
-              const aiMsg = msg as any; // Cast to any to handle both AIMessage and AIMessageChunk
-
-              // 处理工具调用：记录日志并发送状态反馈给企微
-              if (aiMsg.tool_call_chunks && aiMsg.tool_call_chunks.length > 0) {
-                for (const chunk of aiMsg.tool_call_chunks) {
-                  const id = chunk.id;
-                  if (!id) continue;
-                  if (!toolCallMap.has(id)) {
-                    toolCallMap.set(id, { name: "", args: "", notified: false, completed: false });
-                  }
-                  const entry = toolCallMap.get(id)!;
-                  if (chunk.name) entry.name = chunk.name;
-                  if (chunk.args) entry.args += chunk.args;
-
-                  // 聚合当前所有正在活跃的调用（名字已知且未完成）
-                  const activeCalls = getActiveToolCalls();
-
-                  if (activeCalls.length > 0) {
-                    const statusMsg = buildProgressStreamContent(fullContent, activeCalls);
-
-                    // 节流推送：避免高频更新导致前端闪烁
-                    if (Date.now() - lastUpdateTime > 1000) {
-                      if (!shouldStopCurrentTask()) {
-                        await safeReplyStream(statusMsg, false);
-                      }
-                      lastUpdateTime = Date.now();
-                    }
-                  }
-                }
-                continue;
-              } else if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
-                  // 回退逻辑：如果模型非流式返回，直接使用 tool_calls
-                  for (const tool of aiMsg.tool_calls) {
-                    if (!tool.name) continue;
-                    const id = tool.id || `${tool.name}-${Date.now()}`;
-                    toolCallMap.set(id, {
-                      name: tool.name,
-                      args: JSON.stringify(tool.args || {}),
-                      notified: true,
-                      completed: false,
-                    });
-                    console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
-                    const statusMsg = buildProgressStreamContent(fullContent, [
-                      `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
-                    ]);
-                    if (!shouldStopCurrentTask()) {
-                      await safeReplyStream(statusMsg, false);
-                    }
-                  }
-                  continue;
-              }
-
-              if (aiMsg.content) {
-                const extractedDelta = consumeFlowControlDelta(stripEmptyProtocolContent(stringifyModelContent(aiMsg.content)), flowControlStreamState);
-                if (extractedDelta.hasControl) {
-                  applyFlowControlPatch(extractedDelta.control);
-                }
-                const delta = extractedDelta.content;
-                if (delta.trim().length > 0) {
-                  if (coverNextVisibleContent) {
-                    fullContent = delta;
-                    coverNextVisibleContent = false;
-                  } else if (fullContent && delta.startsWith(fullContent)) {
-                    fullContent = delta;
-                  } else {
-                    fullContent += delta;
-                  }
-
-                  if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-                    if (!shouldStopCurrentTask()) {
-                      await safeReplyStream(collapseProgressUpdates(fullContent), false);
-                    }
-                    lastUpdateTime = Date.now();
-                  }
-                }
-              }
-            }
-        }
-
-        // 最终检查：记录那些可能未返回 ToolMessage 的调用
-        for (const [id, entry] of toolCallMap.entries()) {
-          if (!entry.completed && entry.name) {
-            console.log(`[Tool Call Pending/Final] Name: ${entry.name}, Args: ${entry.args}`);
-          }
-        }
+        await runAgentRoundWithTiming(finalContentForPrompt, false);
         completeTodoItem(runtimeTodoList, "analysis_finished", `contentLength=${fullContent.length}, toolResults=${toolContextRecords.length}`);
         }
 
@@ -1577,6 +1888,7 @@ ${hypotheses}
           completeTodoItem(runtimeTodoList, "analysis_finished", "tool error limit reached, sent direct user feedback");
         // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
         } else if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.lc_error_code === 'AGENT_TOOL_PROGRESS_LIMIT' || err.message?.includes('Recursion limit')) {
+          toolProgressLimitReached = true;
           try {
             console.log(`[${botConfig.name}] [Recovery] Agent progress limit reached for ${body.msgid}, attempting fallback synthesis...`);
             const baseModel = await getBaseModel();
@@ -1620,7 +1932,7 @@ ${errorFallback}` : errorFallback;
         }
       }
 
-      await stopThinkingHeartbeatAndDrain();
+      // 自动续查和最终评审期间继续维持心跳，终态发送前再统一停止。
 
       // --- Update Session History ---
       if (fullContent) {
@@ -1690,13 +2002,6 @@ ${errorFallback}` : errorFallback;
           sessionManager.clearPendingHumanLoop(sessionKey);
         }
 
-        await sessionManager.addMessages(sessionKey, [
-          new HumanMessage({ content: effectiveParsedContent as any }),
-          ...(buildToolContextSummary(toolContextRecords)
-            ? [new SystemMessage(buildToolContextSummary(toolContextRecords))]
-            : []),
-          new AIMessage(fullContent),
-        ]);
       }
 
       // 发送最终结果
@@ -1745,25 +2050,180 @@ ${errorFallback}` : errorFallback;
       });
       const incompleteAuditItems = getIncompleteAuditTodoItems(runtimeTodoList);
       const auditPassed = incompleteAuditItems.length === 0;
-      if (!auditPassed) {
+      if (!auditPassed && !skipVerification) {
         const auditFailureMessage = buildIncompleteAuditTodoMessage(incompleteAuditItems);
         console.error(`[${botConfig.name}] Runtime TodoList audit incomplete for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}\n${auditFailureMessage}`);
-        const auditFallbackModel = await getBaseModel();
-        fullContent = await generateUserFacingAuditFallbackMessage({
-          question: currentQuestion,
-          items: incompleteAuditItems,
-          model: auditFallbackModel,
-        });
+        // 已有实质回答时保留正文并附一句缺口提示，不用审核兜底模板替换掉真实答案
+        if (fullContent.trim().length >= 200) {
+          const blockedItemCount = incompleteAuditItems.filter(item => item.status === "blocked").length;
+          fullContent = `${fullContent}\n\n（提示：${blockedItemCount > 0 ? "部分结论因查询预算受限未完全核实" : "部分审核项未完成"}，如需要可继续追问核实。）`;
+          console.log(`[${botConfig.name}] Audit incomplete but kept substantive answer for ${body.msgid}: contentLength=${fullContent.length}`);
+        } else {
+          const auditFallbackModel = await getBaseModel();
+          fullContent = await generateUserFacingAuditFallbackMessage({
+            question: currentQuestion,
+            items: incompleteAuditItems,
+            model: auditFallbackModel,
+          });
+        }
+      } else if (!auditPassed) {
+        console.log(`[${botConfig.name}] Skipped audit fallback for ${body.msgid}: difficulty=${questionDifficulty}, incompleteItems=${incompleteAuditItems.length}`);
       }
 
       startTodoItem(runtimeTodoList, "final_checked");
-      const finalResolution = await resolveFinalReplyWithModel({
-        question: currentQuestion,
-        answer: fullContent,
-        streamSnapshots: visibleStreamSnapshots,
-        model: await getBaseModel(),
-        memoryGraph: memoryGraphBeforeCurrentTurn,
-      });
+      const initialCandidate = fullContent;
+      const initialToolRecords = [...toolContextRecords];
+      const finalReviewModel = await getBaseModel();
+      let initialRoundPending = true;
+      let latestCandidate = initialCandidate;
+      let autoVerificationResult: Awaited<ReturnType<typeof runAutoVerificationLoop>>;
+      const verificationStartedAt = Date.now();
+
+      if (skipVerification && !shouldStopCurrentTask()) {
+        // 简单/中等难度问题跳过自动验证与最终评审闸门，直接发送
+        const skipResolution: FinalReplyResolutionResult = {
+          ready: true,
+          action: "send",
+          answer: initialCandidate,
+          reason: `skipped verification for ${questionDifficulty} question`,
+          source: "candidate",
+          review: {
+            ready: true,
+            action: "send",
+            reason: `skipped verification for ${questionDifficulty} question`,
+          },
+        };
+        autoVerificationResult = {
+          content: initialCandidate,
+          finalResolution: skipResolution,
+          exitReason: "passthrough",
+          rounds: 0,
+          toolRecords: initialToolRecords,
+          evidenceGaps: [],
+        };
+        console.log(`[${botConfig.name}] Skipped auto verification for ${body.msgid}: difficulty=${questionDifficulty}`);
+      } else {
+
+      try {
+        if (shouldStopCurrentTask()) {
+          throw new Error(STREAM_EXPIRED_MESSAGE);
+        }
+        autoVerificationResult = await runAutoVerificationLoop({
+          startedAt: streamStartedAt,
+          now: Date.now,
+          async runRound(context: AutoVerificationRoundContext) {
+            if (shouldStopCurrentTask()) {
+              throw new Error(STREAM_EXPIRED_MESSAGE);
+            }
+            if (initialRoundPending) {
+              initialRoundPending = false;
+              return {
+                content: initialCandidate,
+                evidenceGaps: [],
+                toolRecords: initialToolRecords,
+              };
+            }
+
+            const continuationPrompt = buildAutoVerificationContinuationPrompt({
+              question: currentQuestion,
+              candidate: latestCandidate,
+              evidenceGaps: context.evidenceGaps,
+              usedToolCalls: context.usedToolCalls,
+              accumulatedEvidenceSummary: buildToolContextSummary([...context.accumulatedToolRecords]),
+              correction: context.correction,
+            });
+            await sendStageProgress(
+              context.correction
+                ? "上一轮未产生新证据，正在调整工具参数后执行一次纠偏查询。"
+                : "最终评审仍缺少直接证据，正在继续调用工具核实。",
+              true,
+            );
+            const roundResult = await runAgentRoundWithTiming(continuationPrompt, true, context.signal);
+            latestCandidate = roundResult.content;
+            return {
+              ...roundResult,
+              evidenceGaps: [...context.evidenceGaps],
+            };
+          },
+          canContinue: () => !toolProgressLimitReached,
+          async reviewFinal({ content, signal }) {
+            if (signal.aborted || shouldStopCurrentTask()) {
+              throw new Error(STREAM_EXPIRED_MESSAGE);
+            }
+            return resolveFinalReplyWithModel({
+              question: currentQuestion,
+              answer: content,
+              streamSnapshots: visibleStreamSnapshots,
+              model: finalReviewModel,
+              memoryGraph: memoryGraphBeforeCurrentTurn,
+            });
+          },
+        });
+      } catch (autoVerificationError: any) {
+        let errorContent: string;
+        let errorReason: string;
+
+        if (autoVerificationError?.lc_error_code === "AGENT_TOOL_ERROR_LIMIT") {
+          errorReason = autoVerificationError.message || "工具查询多次失败";
+          errorContent = buildAgentToolErrorLimitReply(errorReason);
+        } else if (
+          autoVerificationError?.lc_error_code === "AGENT_TOOL_PROGRESS_LIMIT"
+          || autoVerificationError?.lc_error_code === "GRAPH_RECURSION_LIMIT"
+          || autoVerificationError?.message?.includes("Recursion limit")
+        ) {
+          errorReason = autoVerificationError.message || "工具调用达到进展保护上限";
+          try {
+            const businessPrompt = await getBusinessPrompt(plannerResult);
+            const recoveryResponse = await finalReviewModel.invoke([
+              new SystemMessage(buildProgressLimitRecoverySystemPrompt(businessPrompt)),
+              ...buildMessagesForCurrentTurn({
+                sessionMessages: session.messages,
+                userContent: finalContentForPrompt,
+                repoHint: repoHints,
+              }),
+              ...(buildToolContextSummary(toolContextRecords)
+                ? [new SystemMessage(buildToolContextSummary(toolContextRecords))]
+                : intermediateMessages),
+            ]);
+            errorContent = ensureRecoverySqlAuditMarker(stringifyModelContent(recoveryResponse.content));
+          } catch (recoveryError) {
+            errorContent = `${buildUserFacingErrorReply(autoVerificationError)}
+
+${buildUserFacingErrorReply(recoveryError, "恢复处理时发生异常")}`;
+          }
+        } else {
+          errorReason = autoVerificationError instanceof Error
+            ? autoVerificationError.message
+            : String(autoVerificationError);
+          errorContent = buildUserFacingErrorReply(autoVerificationError);
+        }
+
+        const errorResolution: FinalReplyResolutionResult = {
+          ready: false,
+          action: "continue",
+          answer: errorContent,
+          reason: errorReason,
+          source: "error",
+          review: {
+            ready: false,
+            action: "continue",
+            reason: errorReason,
+          },
+        };
+        autoVerificationResult = {
+          content: errorContent,
+          finalResolution: errorResolution,
+          exitReason: "passthrough",
+          rounds: 0,
+          toolRecords: [...toolContextRecords],
+          evidenceGaps: [errorReason],
+        };
+      }
+      }
+      logPhaseDuration(`auto_verification(rounds=${autoVerificationResult.rounds}, exit=${autoVerificationResult.exitReason})`, verificationStartedAt);
+
+      fullContent = autoVerificationResult.content;
+      const finalResolution = autoVerificationResult.finalResolution;
       const isResumeTurn = (activePendingHumanLoop?.resumeCount ?? 0) > 0;
       const repeatedClarificationOutput = hasRepeatedInputOutput(
         memoryGraphBeforeCurrentTurn,
@@ -1786,7 +2246,14 @@ ${errorFallback}` : errorFallback;
         humanLoopReply,
         userQuestion: currentQuestion,
       };
-      const finalDelivery = resolveFinalReplyDelivery(finalDeliveryInput);
+      const finalDelivery: FinalReplyDeliveryResult = autoVerificationResult.exitReason === "no-progress"
+        ? {
+          content: AUTO_VERIFICATION_NO_PROGRESS_REPLY,
+          shouldSendFinal: true,
+          reason: "auto verification correction produced no new evidence",
+          source: "no_progress",
+        }
+        : resolveFinalReplyDelivery(finalDeliveryInput);
       if (finalDelivery.source === "blocked" && finalResolution.action === "human_loop") {
         sessionManager.setPendingHumanLoop(
           sessionKey,
@@ -1794,6 +2261,37 @@ ${errorFallback}` : errorFallback;
         );
       }
       fullContent = finalDelivery.content;
+
+      // 存原始回答，供模式切换时重新格式化
+      if (fullContent && !shouldStopCurrentTask()) {
+        sessionManager.setLastRawAnswer(sessionKey, fullContent);
+      }
+
+      // 默认业务回答模式：将技术回答转为业务语言；dev 模式跳过；错误回复保留原貌
+      const currentReplyMode = sessionManager.getReplyMode(sessionKey);
+      const isErrorReply = finalDelivery.source === "error";
+      if (fullContent && currentReplyMode === "business" && !isErrorReply && !shouldStopCurrentTask()) {
+        try {
+          const rewriteStart = Date.now();
+          const rewritten = await rewriteAnswerForBusiness(currentQuestion, fullContent);
+          const rewriteDuration = formatElapsedDuration(rewriteStart);
+          console.log(`[${botConfig.name}] Business answer rewrite completed for ${body.msgid}: duration=${rewriteDuration}, originalLength=${fullContent.length}, rewrittenLength=${rewritten.length}`);
+          fullContent = rewritten;
+        } catch (rewriteError) {
+          console.error(`[${botConfig.name}] Business answer rewrite failed for ${body.msgid}, using original answer:`, rewriteError);
+        }
+      } else if (fullContent && (currentReplyMode === "dev" || isErrorReply)) {
+        console.log(`[${botConfig.name}] Skipped business rewrite for ${body.msgid}: mode=${currentReplyMode}, isErrorReply=${isErrorReply}, contentLength=${fullContent.length}`);
+      }
+
+      if (fullContent && !shouldStopCurrentTask()) {
+        const finalToolContextSummary = buildToolContextSummary(toolContextRecords);
+        await sessionManager.addMessages(sessionKey, [
+          new HumanMessage({ content: effectiveParsedContent as any }),
+          ...(finalToolContextSummary ? [new SystemMessage(finalToolContextSummary)] : []),
+          new AIMessage(fullContent),
+        ]);
+      }
       if (finalDelivery.shouldSendFinal) {
         completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}; source=${finalDelivery.source}; review=${finalDelivery.reason}`);
       } else {
@@ -1804,9 +2302,14 @@ ${errorFallback}` : errorFallback;
         assertTodoListComplete(runtimeTodoList);
         console.log(`[${botConfig.name}] Runtime TodoList completed for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
       }
-      stopThinkingHeartbeat();
+      await stopThinkingHeartbeatAndDrain();
       if (!shouldStopCurrentTask() && fullContent) {
+        console.log(`[${botConfig.name}] Final reply for ${body.msgid}: totalElapsed=${formatElapsedDuration(streamStartedAt)}`);
         await safeReplyStream(fullContent || "未获取到有效回复", true);
+      }
+      // 恢复轮完成后清理保存的计划，避免后续普通轮次误复用
+      if (isStreamPauseResume && sessionManager.getLastPlanSteps(sessionKey)) {
+        sessionManager.clearLastPlanSteps(sessionKey);
       }
       if (activeTasks.get(sessionKey) === currentTask) {
         activeTasks.delete(sessionKey);

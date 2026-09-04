@@ -91,4 +91,38 @@ assert.equal(typeof secondResult, "string", "blocked wrapped tool call should re
 assert.match(String(secondResult), /REACT_LOOP_CONTROL/, "blocked result should include control marker");
 assert.equal(invokeCount, 1, "blocked duplicate action must not call original tool");
 
+// 查询类工具独立预算：8 次后强制收敛，即使总预算未耗尽
+const queryBudgetController = createReactLoopController({ maxToolActions: 99, maxRepeatedToolActions: 99, maxQueryToolActions: 3 });
+for (let index = 0; index < 3; index += 1) {
+  assert.equal(
+    queryBudgetController.evaluateAction({ type: "tool", toolName: "query", args: { query: `q${index}` } }).allowed,
+    true,
+    `query ${index + 1} should pass within query budget`,
+  );
+}
+const queryExhausted = queryBudgetController.evaluateAction({ type: "tool", toolName: "query", args: { query: "q4" } });
+assert.equal(queryExhausted.allowed, false, "query beyond budget should be blocked");
+assert.equal(queryExhausted.nextNode, "final", "query exhaustion should route to final with existing evidence");
+assert.match(queryExhausted.reason, /查询预算已耗尽/, "blocked reason should mention query budget");
+// 非查询工具不受查询预算影响
+assert.equal(
+  queryBudgetController.evaluateAction({ type: "tool", toolName: "code_snippet", args: { filePath: "src/a.ts" } }).allowed,
+  true,
+  "non-query tool should not consume query budget",
+);
+
+// 直接匹配可设置更低的查询预算，超过后应在执行前强制收敛
+const directMatchToolNames = ["query", "gitnexusQuery", "searchCode", "queryTool"];
+for (const toolName of directMatchToolNames) {
+  const directMatchController = createReactLoopController({ maxToolActions: 4, maxRepeatedToolActions: 1, maxQueryToolActions: 1 });
+  assert.equal(
+    directMatchController.evaluateAction({ type: "tool", toolName, args: { query: "库存调拨推送日志" } }).allowed,
+    true,
+    `direct match should allow the first ${toolName} call`,
+  );
+  const directMatchQueryExhausted = directMatchController.evaluateAction({ type: "tool", toolName, args: { query: "库存调拨源单据" } });
+  assert.equal(directMatchQueryExhausted.allowed, false, `direct match should block the second ${toolName} call`);
+  assert.equal(directMatchQueryExhausted.nextNode, "final", "direct match query exhaustion should finalize with current evidence");
+}
+
 console.log("ReAct Loop Control 验证通过");

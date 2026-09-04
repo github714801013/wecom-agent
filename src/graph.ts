@@ -25,6 +25,8 @@ const MODEL_CONTEXT_MAP: Record<string, number> = {
   "gpt-4o-mini": 128000,
   "claude-3-5-sonnet-20240620": 200000,
   "deepseek-v3.2": 64000,
+  "openai/qwen3.8-flash": 128000,
+  "openai/qwen3-flash": 128000,
 };
 
 export function getModelContextWindow() {
@@ -260,6 +262,7 @@ export interface PlannerResult {
     exclude: string[];
   };
   missing_info: string[];
+  entry_anchors?: string[];
 }
 
 export interface CompressorResult {
@@ -570,13 +573,23 @@ export interface AgenticSearchLoopOptions {
   maxRewrites?: number;
 }
 
+export function mergeQueriesForSingleCall(queries: SearchQuery[]): SearchQuery[] {
+  if (queries.length <= 1) return queries;
+  const mergedQuery = queries
+    .map(query => query.query?.trim())
+    .filter(Boolean)
+    .join(" OR ");
+  if (!mergedQuery) return queries;
+  return [{ ...queries[0]!, query: mergedQuery }];
+}
+
 export function createAgenticSearchLoop(options: AgenticSearchLoopOptions) {
   return {
     async run(userQuestion: string): Promise<AgenticSearchLoopResult> {
       const compressions: CompressorResult[] = [];
       const ragResult = await runAgenticRag<SearchQuery, SearchResult>({
         question: userQuestion,
-        queries: options.plannerResult.queries,
+        queries: mergeQueriesForSingleCall(options.plannerResult.queries),
         retrieve: async query => options.searcher(query),
         grade: async input => {
           const compression = await options.compressor({
@@ -1509,10 +1522,18 @@ export function createReviewedAgent(baseAgent: any, options: ReviewedAgentOption
   };
 }
 
-export async function initializeAgent(tools?: any[], plannerResult?: BusinessPromptPlanner | null) {
+export interface AgentInitializationOptions {
+  reactLoopControl?: Parameters<typeof createReactLoopController>[0];
+}
+
+export async function initializeAgent(
+  tools?: any[],
+  plannerResult?: BusinessPromptPlanner | null,
+  options: AgentInitializationOptions = {},
+) {
   const model = await getBaseModel();
   const agentTools = tools || await getAllMcpTools();
-  const reactLoopController = createReactLoopController();
+  const reactLoopController = createReactLoopController(options.reactLoopControl);
   const controlledTools = wrapToolsWithReactLoopControl(agentTools, reactLoopController);
   const systemPrompt = await getBusinessPrompt(plannerResult);
 

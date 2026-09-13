@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import {
+  filterToolsForKnownProjectScope,
   parseQueryableProjects,
   wrapGitNexusListReposTool,
 } from "../mcp-client.js";
@@ -62,6 +63,29 @@ assert.equal(
   wrapGitNexusListReposTool(originalTool, "other-mcp", { projects: "oa-stock" }),
   originalTool,
   "list_repos tools from non-GitNexus servers should not be wrapped",
+);
+
+const unscopedCalls: unknown[] = [];
+const unscopedTool = wrapGitNexusListReposTool({
+  name: "gitnexus_list_repos",
+  description: "List indexed repositories",
+  invoke: async (args: unknown) => {
+    unscopedCalls.push(args);
+    return JSON.stringify({ repositories: [{ name: "oa-stock" }] });
+  },
+}, "gitnexus", {});
+await unscopedTool.invoke({});
+assert.equal(unscopedCalls.length, 1, "未知项目范围省略 scope 时必须发现全部已索引项目");
+
+assert.equal(
+  filterToolsForKnownProjectScope([wrappedTool], ["oa-stock"]).length,
+  0,
+  "项目范围已知时不得把 GitNexus list_repos 注册给 Pi",
+);
+assert.deepEqual(
+  filterToolsForKnownProjectScope([wrappedTool], []),
+  [wrappedTool],
+  "项目范围未知时必须保留 GitNexus list_repos",
 );
 
 console.log("list_repos scope 参数验证通过");

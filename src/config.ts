@@ -40,6 +40,10 @@ const agentConfigSchema = z.object({
     apiMode: z.enum(["auto", "chat_completions", "responses"]).default("auto"),
     recursionLimit: z.coerce.number().default(25),
     contextWindow: z.coerce.number().default(0),
+    requestTimeoutMs: z.coerce.number().int().positive().default(480000),
+    toolTimeoutMs: z.coerce.number().int().positive().default(60000),
+    maxConcurrentRequests: z.coerce.number().int().positive().default(4),
+    maxOutputTokens: z.coerce.number().int().positive().optional(),
   }),
   vision: z.object({
     enabled: booleanConfigSchema.default(true),
@@ -53,8 +57,7 @@ const agentConfigSchema = z.object({
     allowed: z.array(z.string()).default([]),
     excluded: z.array(z.string()).default([]),
     cacheTtlMinutes: z.coerce.number().positive().default(30),
-    maxAgentToolResultsPerTurn: z.coerce.number().int().positive().default(64),
-  }).default({ allowed: [], excluded: [], cacheTtlMinutes: 30, maxAgentToolResultsPerTurn: 64 }),
+  }).default({ allowed: [], excluded: [], cacheTtlMinutes: 30 }),
 });
 
 export type McpServerConfig = z.infer<typeof mcpServerSchema>;

@@ -35,12 +35,16 @@ function stableJson(value: unknown): string {
   return JSON.stringify(Object.fromEntries(entries));
 }
 
-function buildToolSignature(record: ToolContextRecord) {
-  return `${record.name}:${stableJson(parseArgs(record.args || ""))}`;
+export function normalizeToolName(name: string) {
+  return name.trim().toLowerCase();
 }
 
-function isEvidenceTool(record: ToolContextRecord) {
-  return record.name !== RUNTIME_TODO_TOOL_NAME;
+export function buildToolSignature(record: ToolContextRecord) {
+  return `${normalizeToolName(record.name)}:${stableJson(parseArgs(record.args || ""))}`;
+}
+
+export function isEvidenceTool(record: ToolContextRecord) {
+  return normalizeToolName(record.name) !== RUNTIME_TODO_TOOL_NAME;
 }
 
 function summarizeToolError(record: ToolContextRecord) {

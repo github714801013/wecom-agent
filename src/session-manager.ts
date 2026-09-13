@@ -10,6 +10,14 @@ import {
   type SessionMemoryGraph,
 } from "./session-memory-graph.js";
 
+export type ReplyMode = "business" | "dev";
+
+export interface StoredPlanStep {
+  id: string;
+  task: string;
+  status: string;
+}
+
 export interface Session {
   messages: BaseMessage[];
   lastActivity: number;
@@ -19,13 +27,25 @@ export interface Session {
   currentMcpHeaderCommand?: string | undefined;
   pendingHumanLoop?: StoredHumanLoopRequest | undefined;
   memoryGraph?: SessionMemoryGraph | undefined;
+  replyMode?: ReplyMode | undefined;
+  lastRawAnswer?: string | undefined;
+  lastPlanSteps?: StoredPlanStep[] | undefined;
 }
 
 export class SessionManager {
   private sessions = new Map<string, Session>();
+  private readonly sessionRevisions = new WeakMap<Session, number>();
   private readonly SESSION_EXPIRATION_MS = 60 * 60 * 1000; // 1 hour
   private readonly MAX_MESSAGES_PER_SESSION = 100; // Increased to allow more room for compression
   private readonly COMPRESSION_THRESHOLD_PERCENT = 0.6; // Trigger at 60% of context window
+
+  private getSessionRevision(session: Session) {
+    return this.sessionRevisions.get(session) ?? 0;
+  }
+
+  private incrementSessionRevision(session: Session) {
+    this.sessionRevisions.set(session, this.getSessionRevision(session) + 1);
+  }
 
   getOrCreateSession(sessionKey: string, expireInactive = false): Session {
     const now = Date.now();
@@ -33,6 +53,7 @@ export class SessionManager {
 
     if (session && expireInactive && now - session.lastActivity > this.SESSION_EXPIRATION_MS) {
       console.log(`[Session] Session for ${sessionKey} expired, clearing history.`);
+      this.incrementSessionRevision(session);
       session.messages = [];
       session.currentRepoHints = undefined;
       session.currentMcpHeaders = undefined;
@@ -40,6 +61,7 @@ export class SessionManager {
       session.pendingHumanLoop = undefined;
       session.isCompressed = false;
       session.memoryGraph = undefined;
+      session.lastPlanSteps = undefined;
     }
 
     if (!session) {
@@ -65,11 +87,15 @@ export class SessionManager {
 
   clearConversationHistory(sessionKey: string, retainedRepoHints: readonly string[] = []) {
     const session = this.getOrCreateSession(sessionKey);
+    this.incrementSessionRevision(session);
     session.messages = [];
     session.currentRepoHints = [...retainedRepoHints];
     session.pendingHumanLoop = undefined;
     session.isCompressed = false;
     session.memoryGraph = undefined;
+    session.replyMode = undefined;
+    session.lastRawAnswer = undefined;
+    session.lastPlanSteps = undefined;
     session.lastActivity = Date.now();
   }
 
@@ -149,12 +175,15 @@ export class SessionManager {
     const session = this.getOrCreateSession(sessionKey, true);
     session.messages.push(...newMessages);
     session.memoryGraph = appendMessagesToSessionMemoryGraph(session.memoryGraph, newMessages);
-    
-    // Check for compression
-    await this.checkAndCompress(sessionKey, session);
-    
     this.pruneSession(session);
+    this.incrementSessionRevision(session);
     session.lastActivity = Date.now();
+
+    // 历史压缩属于后台维护，不能阻塞当前回复交付。
+    const revision = this.getSessionRevision(session);
+    void this.checkAndCompress(sessionKey, session, revision).catch(err => {
+      console.error(`[Session] Background compression failed for ${sessionKey}:`, err);
+    });
   }
 
   private estimateTokens(messages: BaseMessage[]): number {
@@ -163,7 +192,7 @@ export class SessionManager {
     return messages.reduce((acc, msg) => acc + (stringifyModelContent(msg.content).length / 3), 0);
   }
 
-  private async checkAndCompress(sessionKey: string, session: Session) {
+  private async checkAndCompress(sessionKey: string, session: Session, revision: number) {
     const contextWindow = getModelContextWindow();
     const currentTokens = this.estimateTokens(session.messages);
 
@@ -200,6 +229,12 @@ export class SessionManager {
           }
         });
 
+        if (
+          this.sessions.get(sessionKey) !== session
+          || this.getSessionRevision(session) !== revision
+        ) {
+          return;
+        }
         if (compressionResult && compressionResult.status === 'ok') {
           session.memoryGraph = appendCompressionToSessionMemoryGraph(session.memoryGraph, {
             intent: compressionResult.intent,
@@ -244,6 +279,7 @@ ${analyzedCodeRangeIndex}
             ...(lastHumanMsg ? [lastHumanMsg] : [])
           ];
           session.isCompressed = true;
+          this.incrementSessionRevision(session);
           console.log(`[Session] Compression successful for ${sessionKey}`);
         }
       } catch (err) {
@@ -255,6 +291,43 @@ ${analyzedCodeRangeIndex}
   private pruneSession(session: Session) {
     if (session.messages.length > this.MAX_MESSAGES_PER_SESSION) {
       session.messages = session.messages.slice(-this.MAX_MESSAGES_PER_SESSION);
+    }
+  }
+
+  getReplyMode(sessionKey: string): ReplyMode {
+    return this.sessions.get(sessionKey)?.replyMode ?? "business";
+  }
+
+  setReplyMode(sessionKey: string, mode: ReplyMode) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.replyMode = mode;
+    session.lastActivity = Date.now();
+  }
+
+  getLastRawAnswer(sessionKey: string): string | undefined {
+    return this.sessions.get(sessionKey)?.lastRawAnswer;
+  }
+
+  setLastRawAnswer(sessionKey: string, answer: string) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.lastRawAnswer = answer;
+    session.lastActivity = Date.now();
+  }
+
+  getLastPlanSteps(sessionKey: string): StoredPlanStep[] | undefined {
+    return this.sessions.get(sessionKey)?.lastPlanSteps;
+  }
+
+  setLastPlanSteps(sessionKey: string, steps: StoredPlanStep[]) {
+    const session = this.getOrCreateSession(sessionKey);
+    session.lastPlanSteps = steps;
+    session.lastActivity = Date.now();
+  }
+
+  clearLastPlanSteps(sessionKey: string) {
+    const session = this.sessions.get(sessionKey);
+    if (session) {
+      session.lastPlanSteps = undefined;
     }
   }
 }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -147,6 +148,17 @@ function isGitNexusListReposTool(mcpTool: any, serverName: string) {
   return /gitnexus/iu.test(serverName) && normalizedName.endsWith("listrepos");
 }
 
+const PROJECT_DISCOVERY_TOOL_MARKER = "__wecomProjectDiscoveryTool";
+
+export function isProjectDiscoveryTool(mcpTool: any) {
+  return mcpTool?.[PROJECT_DISCOVERY_TOOL_MARKER] === true;
+}
+
+export function filterToolsForKnownProjectScope(tools: any[], repoHints: readonly string[] = []) {
+  if (!repoHints.some(hint => hint.trim())) return tools;
+  return tools.filter(tool => !isProjectDiscoveryTool(tool));
+}
+
 export function wrapGitNexusListReposTool(
   mcpTool: any,
   serverName: string,
@@ -157,9 +169,10 @@ export function wrapGitNexusListReposTool(
   }
 
   const queryableProjects = parseQueryableProjects(headers);
-  return tool(
+  const defaultScope = queryableProjects.length > 0 ? "queryable" : "all_indexed";
+  const projectDiscoveryTool = tool(
     async ({ scope }) => {
-      if (scope === "all_indexed") {
+      if (scope === "all_indexed" || (scope === undefined && defaultScope === "all_indexed")) {
         return mcpTool.invoke({});
       }
 
@@ -174,15 +187,17 @@ export function wrapGitNexusListReposTool(
       description: [
         mcpTool.description || "查询 GitNexus 项目列表。",
         "新增 scope 参数：queryable 返回当前请求头允许查询的项目，不访问远端；all_indexed 调用 GitNexus 返回全部已索引项目。",
-        "未传 scope 时默认 queryable。",
+        "未传 scope 时，有已配置项目则返回 queryable；无项目范围则调用 GitNexus 发现全部已索引项目。",
       ].join("\n"),
       schema: z.object({
         scope: z.enum(["queryable", "all_indexed"])
-          .default("queryable")
-          .describe("queryable=当前允许查询的项目；all_indexed=全部已索引项目"),
+          .optional()
+          .describe("queryable=当前允许查询的项目；all_indexed=全部已索引项目；省略时按当前范围自动选择"),
       }),
     },
   );
+  Object.defineProperty(projectDiscoveryTool, PROJECT_DISCOVERY_TOOL_MARKER, { value: true, enumerable: true });
+  return projectDiscoveryTool;
 }
 
 export function createMcpTransport(server: McpServerConfig, bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}): Transport | null {
@@ -223,7 +238,13 @@ type McpToolsCacheEntry = {
 };
 
 export function buildMcpToolsCacheKey(bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {
-  return `${bot?.botId || "__default__"}:${JSON.stringify(bot?.mcpHeaders || {})}:${JSON.stringify(headerOverrides)}`;
+  return createHash("sha256")
+    .update(JSON.stringify({
+      botId: bot?.botId || "__default__",
+      mcpHeaders: bot?.mcpHeaders || {},
+      headerOverrides,
+    }))
+    .digest("hex");
 }
 
 export function getMcpToolsCacheTtlMs(cacheTtlMinutes = config.tools.cacheTtlMinutes) {
@@ -238,7 +259,7 @@ export function createMcpToolsCache(ttlMs: number, now = () => Date.now()) {
       const current = now();
       const cached = entries.get(key);
       if (cached?.tools && cached.expiresAt > current) {
-        console.log(`Using cached MCP tools for ${key}, ttl left ${Math.ceil((cached.expiresAt - current) / 1000)}s.`);
+        console.log(`Using cached MCP tools, ttl left ${Math.ceil((cached.expiresAt - current) / 1000)}s.`);
         return cached.tools;
       }
       if (cached?.pending) {
@@ -275,7 +296,7 @@ async function loadFreshMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOver
   for (const server of config.mcpServers) {
     let client: Client | undefined;
     try {
-      console.log(`Loading tools from MCP server: ${server.name} (${server.url})...`);
+      console.log(`Loading tools from MCP server: ${server.name} (${server.type})...`);
       
       const transport = createMcpTransport(server, bot, headerOverrides);
       if (!transport) {
@@ -300,11 +321,11 @@ async function loadFreshMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOver
       
       console.log(`Successfully loaded ${wrappedTools.length} tools from ${server.name} MCP.`);
       allTools.push(...wrappedTools);
-    } catch (error) {
-      await client?.close().catch(closeError => {
-        console.warn(`Failed to close ${server.name} MCP client after load failure:`, closeError);
+    } catch {
+      await client?.close().catch(() => {
+        console.warn(`Failed to close ${server.name} MCP client after load failure.`);
       });
-      console.error(`Failed to load tools from ${server.name} MCP:`, error);
+      console.error(`Failed to load tools from ${server.name} MCP.`);
     }
   }
 

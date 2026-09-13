@@ -73,11 +73,18 @@ export function isLikelyIrrelevantToolResult(content: string) {
   return NO_HIT_PATTERNS.some(pattern => pattern.test(normalized));
 }
 
+import { buildStoredToolResultPlaceholder, MAX_TOOL_RESULT_CONTENT_LENGTH } from "./tool-result-store.js";
+
 export function filterToolResultForCurrentTurn(record: ToolContextRecord) {
   const condition = getSearchCondition(record);
 
   if (isLikelyIrrelevantToolResult(record.content)) {
     return `本次检索未获得相关结果：${condition}。后续避免重复使用相同条件。`;
+  }
+
+  if (record.content.length > MAX_TOOL_RESULT_CONTENT_LENGTH) {
+    console.log(`[Tool Result Stored] Name: ${record.name}, Size: ${record.content.length}`);
+    return buildStoredToolResultPlaceholder(record.content, condition);
   }
 
   if (record.content.length > 6000 && !hasEnoughOverlap(record)) {

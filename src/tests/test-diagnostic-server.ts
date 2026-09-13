@@ -1,5 +1,10 @@
 import { strict as assert } from "node:assert";
-import { evaluateDiagnosticCase } from "../diagnostic-server.js";
+import {
+  evaluateDiagnosticCase,
+  isDiagnosticRequestAuthorized,
+  isDiagnosticServerEnabled,
+  parseDiagnosticRecursionLimit,
+} from "../diagnostic-server.js";
 
 const progressResult = evaluateDiagnosticCase("progress", {
   content: "已读取问题，继续核实中。已定位候选文件，继续核实中。",
@@ -45,5 +50,15 @@ assert.equal(
   "clarification_required",
   "diagnostic human-loop case should expose actual parser result",
 );
+
+const diagnosticToken = "a".repeat(32);
+assert.equal(isDiagnosticServerEnabled("true", diagnosticToken), true);
+assert.equal(isDiagnosticServerEnabled("true", undefined), false);
+assert.equal(isDiagnosticServerEnabled("true", "replace_with_a_dedicated_diagnostic_token"), false);
+assert.equal(isDiagnosticServerEnabled("false", diagnosticToken), false);
+assert.equal(isDiagnosticRequestAuthorized(diagnosticToken, diagnosticToken), true);
+assert.equal(isDiagnosticRequestAuthorized("wrong", diagnosticToken), false);
+assert.equal(parseDiagnosticRecursionLimit(999, 25), 64);
+assert.equal(parseDiagnosticRecursionLimit(-1, 25), 25);
 
 console.log("diagnostic server 规则查询验证通过");

@@ -628,7 +628,8 @@ hypotheses 用于假设驱动检索。
 "secondary": ["config", "log"],
 "exclude": ["test", "mock", "demo", "target", "dist", "node_modules", ".git"]
 },
-"missing_info": ["订单号", "环境", "失败时间", "相关日志"]
+"missing_info": ["订单号", "环境", "失败时间", "相关日志"],
+"entry_anchors": ["https://oa.dev.9ji.com/addOrder/subCheckOp", "subCheckOp", "orderServices.cs:6516"]
 }
 
 字段要求：
@@ -652,6 +653,7 @@ hypotheses 用于假设驱动检索。
 10. missing_info 必填，可以为空数组。
 11. hypotheses 必须使用“可能”类表述，不得写成已证实结论。
 12. missing_info 必须只列真正影响检索或判断的信息；不要填入泛化占位项。
+13. entry_anchors 必填，可以为空数组：识别用户问题中的明确入口锚点，包括完整 URL 或接口路径（如 /cloudapi_nc/orderservice/api/barCode/getProductInfoByBarcode）、方法名、文件:行号、引号包裹的精确文案（页面提示、短信模板正文等）。每个锚点原样保留、不要改写；没有明确入口时输出空数组，不要用宽泛业务词凑数。
 
 短信来源类问题示例：
 

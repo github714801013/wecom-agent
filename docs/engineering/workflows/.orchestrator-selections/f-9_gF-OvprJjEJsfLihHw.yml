@@ -1,0 +1,2483 @@
+selection_id: f-9_gF-OvprJjEJsfLihHw
+purpose: init
+selection_stage: final
+task_id: dev-direct-match-routing
+state_path: D:\workplace\typescript\wecom-agent\docs\engineering\workflows\dev-direct-match-routing-orchestration.yml
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-02T07:37:03+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feature/search-iteration
+  base_branch: null
+  base_commit: null
+  migration: null
+definition:
+  path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+  sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+route: development
+stages:
+- id: gitnexus-inquiry
+  skill: null
+  mcp:
+    server: remote_gitnexus
+    tools:
+    - query
+    - context
+    - code_snippet
+    - impact
+    - trace
+    fallback: local_workspace_search
+    scope: current_workspace
+  execution_mode: sub_agent
+  kind: mcp
+  host_action: null
+  reference_mutation: false
+  skills: []
+  agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+    source=local_search、authority=non_gitnexus。
+  orchestration_mode: mcp_prompt
+  evidence_policy:
+    gitnexus_first: true
+    require_query_record: true
+    allow_local_fallback: true
+    local_fallback_only_when:
+    - repository_unindexed
+    - service_unavailable
+    - authorization_unavailable
+    - timeout
+    - index_stale
+    - aggregate_unsupported
+    - capability_unavailable
+    local_search_root: workspace.path
+    local_evidence_source: local_search
+    local_evidence_authority: non_gitnexus
+    local_search_cannot_prove:
+    - call_graph
+    - impact
+    - cross_project_trace
+    - complete_consumers
+  completion_gate:
+    id: inquiry_record
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: user_confirmation
+    action: execute_gitnexus_inquiry
+    prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+      Agent。
+    allow_skip: research_not_needed
+    reuse: same_task_readonly_exact
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: plans/dev-direct-match-routing-gitnexus-inquiry.md
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: execute_gitnexus_inquiry
+    command: 执行只读 GitNexus 调研（scope=current_workspace）
+    authorization: 用户在流程选择阶段选择调研模式 current_workspace_research，视为同意执行该只读调研。
+    authorized_at: '2026-09-02T07:37:24+00:00'
+    source: research_mode
+  answer_confirmations: []
+  host_action_baseline: null
+- id: workspace-confirm
+  skill: null
+  mcp: null
+  execution_mode: main_agent
+  kind: host_action
+  host_action:
+    id: workspace_confirm
+    purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+    steps:
+    - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+    - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+    - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+      worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+  reference_mutation: false
+  skills: []
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: workspace_confirmation_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics: []
+  reference_topics_snapshot: null
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: grill-with-docs
+  skill: grill-with-docs
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - grill-with-docs
+  agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+    Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后 choose-question-node
+    记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+  orchestration_mode: nested_sub_orchestration
+  evidence_policy: null
+  completion_gate:
+    id: evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: skill_defined
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: grill
+    index_path: grill/index.yml
+    path: interaction
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: implement-no-tdd
+  skill: implement
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - ponytail
+  - implement
+  agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: implementation_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: code-review
+  skill: code-review
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - code-review
+  agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+    HEAD^..HEAD。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: review_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+stages_sha256: cc3b140da682ab0548ac77a936193a0c4ec2e2a633f07323807984024a2de10b
+expected_revision: null
+selection_epoch: null
+status: consumed
+created_at: '2026-09-02T07:37:22+00:00'
+route_options:
+  task_type: development
+  task_name: 项目需求开发
+  task_purpose: 完成需求澄清、规格拆解、任务分解、测试、实现、评审和验证。
+  route: development
+  selection_mode: selectable
+  stage_registry:
+    code-review:
+      id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    gitnexus-inquiry:
+      id: gitnexus-inquiry
+      skill: null
+      mcp:
+        server: remote_gitnexus
+        tools:
+        - query
+        - context
+        - code_snippet
+        - impact
+        - trace
+        fallback: local_workspace_search
+        scope: dynamic
+      execution_mode: sub_agent
+      kind: mcp
+      host_action: null
+      reference_mutation: false
+      skills: []
+      agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+        source=local_search、authority=non_gitnexus。
+      orchestration_mode: mcp_prompt
+      evidence_policy:
+        gitnexus_first: true
+        require_query_record: true
+        allow_local_fallback: true
+        local_fallback_only_when:
+        - repository_unindexed
+        - service_unavailable
+        - authorization_unavailable
+        - timeout
+        - index_stale
+        - aggregate_unsupported
+        - capability_unavailable
+        local_search_root: workspace.path
+        local_evidence_source: local_search
+        local_evidence_authority: non_gitnexus
+        local_search_cannot_prove:
+        - call_graph
+        - impact
+        - cross_project_trace
+        - complete_consumers
+      completion_gate:
+        id: inquiry_record
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: user_confirmation
+        action: execute_gitnexus_inquiry
+        prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+          Agent。
+        allow_skip: research_not_needed
+        reuse: same_task_readonly_exact
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: plans/dev-direct-match-routing-gitnexus-inquiry.md
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: research
+        index_path: research/index.yml
+        path: gitnexus
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    grill-with-docs:
+      id: grill-with-docs
+      skill: grill-with-docs
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - grill-with-docs
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+        Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后
+        choose-question-node 记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+      orchestration_mode: nested_sub_orchestration
+      evidence_policy: null
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: skill_defined
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    implement:
+      id: implement
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - tdd
+      - implement
+      agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+        时不执行编译。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    implement-no-tdd:
+      id: implement-no-tdd
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - implement
+      agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    to-spec:
+      id: to-spec
+      skill: to-spec
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-spec
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: specification_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: routing
+        index_path: routing/index.yml
+        path: core
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    to-tickets:
+      id: to-tickets
+      skill: to-tickets
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-tickets
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: ticket_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: tickets
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    verify:
+      id: verify
+      skill: verify
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - verify
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: verification_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: .
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - verify
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    workspace-confirm:
+      id: workspace-confirm
+      skill: null
+      mcp: null
+      execution_mode: main_agent
+      kind: host_action
+      host_action:
+        id: workspace_confirm
+        purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+        steps:
+        - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+        - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+        - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+          worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+      reference_mutation: false
+      skills: []
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: workspace_confirmation_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+  options:
+  - option_id: development_standard
+    name: 标准需求开发
+    purpose: 适用于需要完整规格、任务拆分、TDD、实现、评审和验证的项目需求。
+    research_stage_id: gitnexus-inquiry
+    research_modes:
+      current_workspace_research: current_workspace
+      remote_gitnexus_research: cross_project
+      clarify_directly: null
+    transitions:
+      complete:
+        workspace-confirm: grill-with-docs
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: null
+      skipped:
+        workspace-confirm: grill-with-docs
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: null
+    label: workspace-confirm → grill-with-docs → to-spec → to-tickets → implement
+      → code-review → verify
+    stage_ids:
+    - workspace-confirm
+    - grill-with-docs
+    - to-spec
+    - to-tickets
+    - implement
+    - code-review
+    - verify
+    stages:
+    - id: workspace-confirm
+      skill: null
+      mcp: null
+      execution_mode: main_agent
+      kind: host_action
+      host_action:
+        id: workspace_confirm
+        purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+        steps:
+        - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+        - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+        - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+          worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+      reference_mutation: false
+      skills: []
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: workspace_confirmation_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: grill-with-docs
+      skill: grill-with-docs
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - grill-with-docs
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+        Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后
+        choose-question-node 记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+      orchestration_mode: nested_sub_orchestration
+      evidence_policy: null
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: skill_defined
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: to-spec
+      skill: to-spec
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-spec
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: specification_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: routing
+        index_path: routing/index.yml
+        path: core
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: to-tickets
+      skill: to-tickets
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-tickets
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: ticket_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: tickets
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: implement
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - tdd
+      - implement
+      agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+        时不执行编译。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: verify
+      skill: verify
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - verify
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: verification_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: .
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - verify
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    omitted_stages: []
+  - option_id: development_lightweight
+    name: 轻量需求开发
+    purpose: 适用于范围明确、无需完整规格拆解但仍需要实现、评审和验证的需求。
+    research_stage_id: gitnexus-inquiry
+    research_modes:
+      current_workspace_research: current_workspace
+      remote_gitnexus_research: cross_project
+      clarify_directly: null
+    transitions:
+      complete:
+        workspace-confirm: grill-with-docs
+        grill-with-docs: implement-no-tdd
+        implement-no-tdd: code-review
+        code-review: null
+      skipped:
+        workspace-confirm: grill-with-docs
+        grill-with-docs: implement-no-tdd
+        implement-no-tdd: code-review
+        code-review: null
+    label: workspace-confirm → grill-with-docs → implement-no-tdd → code-review
+    stage_ids:
+    - workspace-confirm
+    - grill-with-docs
+    - implement-no-tdd
+    - code-review
+    stages:
+    - id: workspace-confirm
+      skill: null
+      mcp: null
+      execution_mode: main_agent
+      kind: host_action
+      host_action:
+        id: workspace_confirm
+        purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+        steps:
+        - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+        - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+        - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+          worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+      reference_mutation: false
+      skills: []
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: workspace_confirmation_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: grill-with-docs
+      skill: grill-with-docs
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - grill-with-docs
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+        Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后
+        choose-question-node 记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+      orchestration_mode: nested_sub_orchestration
+      evidence_policy: null
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: skill_defined
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: implement-no-tdd
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - implement
+      agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    omitted_stages:
+    - to-spec
+    - to-tickets
+    - implement
+    - verify
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  skill_audit:
+    checked:
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    - skill: grill-with-docs
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\grill-with-docs\SKILL.md
+    - skill: implement
+      source: builtin
+    - skill: ponytail
+      source: missing
+    - skill: tdd
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\tdd\SKILL.md
+    - skill: to-spec
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-spec\SKILL.md
+    - skill: to-tickets
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-tickets\SKILL.md
+    - skill: verify
+      source: missing
+    skipped:
+    - stage_id: implement
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: implement-no-tdd
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: verify
+      skill: verify
+      reason: skill_initially_unavailable
+  manual_input:
+    enabled: true
+    input_format: stage_ids
+flow_catalog:
+  version: 1
+  path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+  sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+flow_definition:
+  version: 1
+  task_type: development
+  option_id: development_lightweight
+  name: 轻量需求开发
+  purpose: 适用于范围明确、无需完整规格拆解但仍需要实现、评审和验证的需求。
+  stage_ids:
+  - gitnexus-inquiry
+  - workspace-confirm
+  - grill-with-docs
+  - implement-no-tdd
+  - code-review
+  stages:
+  - id: gitnexus-inquiry
+    skill: null
+    mcp:
+      server: remote_gitnexus
+      tools:
+      - query
+      - context
+      - code_snippet
+      - impact
+      - trace
+      fallback: local_workspace_search
+      scope: current_workspace
+    execution_mode: sub_agent
+    kind: mcp
+    host_action: null
+    reference_mutation: false
+    skills: []
+    agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+      source=local_search、authority=non_gitnexus。
+    orchestration_mode: mcp_prompt
+    evidence_policy:
+      gitnexus_first: true
+      require_query_record: true
+      allow_local_fallback: true
+      local_fallback_only_when:
+      - repository_unindexed
+      - service_unavailable
+      - authorization_unavailable
+      - timeout
+      - index_stale
+      - aggregate_unsupported
+      - capability_unavailable
+      local_search_root: workspace.path
+      local_evidence_source: local_search
+      local_evidence_authority: non_gitnexus
+      local_search_cannot_prove:
+      - call_graph
+      - impact
+      - cross_project_trace
+      - complete_consumers
+    completion_gate:
+      id: inquiry_record
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: user_confirmation
+      action: execute_gitnexus_inquiry
+      prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+        Agent。
+      allow_skip: research_not_needed
+      reuse: same_task_readonly_exact
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: plans/dev-direct-match-routing-gitnexus-inquiry.md
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: research
+      index_path: research/index.yml
+      path: gitnexus
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: workspace-confirm
+    skill: null
+    mcp: null
+    execution_mode: main_agent
+    kind: host_action
+    host_action:
+      id: workspace_confirm
+      purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+      steps:
+      - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+      - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+      - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+        worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+    reference_mutation: false
+    skills: []
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: workspace_confirmation_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics: []
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: grill-with-docs
+    skill: grill-with-docs
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - grill-with-docs
+    agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+      Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后 choose-question-node
+      记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+    orchestration_mode: nested_sub_orchestration
+    evidence_policy: null
+    completion_gate:
+      id: evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: skill_defined
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: grill
+      index_path: grill/index.yml
+      path: interaction
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: implement-no-tdd
+    skill: implement
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - ponytail
+    - implement
+    agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: implementation_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: engineering
+      index_path: engineering/index.yml
+      path: .
+      max_level: 3
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - ponytail
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: code-review
+    skill: code-review
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - code-review
+    agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+      HEAD^..HEAD。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: review_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: git
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  transitions:
+    complete:
+      workspace-confirm: grill-with-docs
+      grill-with-docs: implement-no-tdd
+      implement-no-tdd: code-review
+      code-review: null
+      gitnexus-inquiry: workspace-confirm
+    skipped:
+      workspace-confirm: grill-with-docs
+      grill-with-docs: implement-no-tdd
+      implement-no-tdd: code-review
+      code-review: null
+      gitnexus-inquiry: workspace-confirm
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  research_mode: current_workspace_research
+flow_selection:
+  task_type: development
+  option_id: development_lightweight
+  selection_mode: preset
+  stage_ids:
+  - gitnexus-inquiry
+  - workspace-confirm
+  - grill-with-docs
+  - implement-no-tdd
+  - code-review
+  omitted_stages:
+  - to-spec
+  - to-tickets
+  - implement
+  - verify
+  omission_reason: 用户选择了不含这些阶段的流程
+  skill_audit:
+    checked:
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    - skill: grill-with-docs
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\grill-with-docs\SKILL.md
+    - skill: implement
+      source: builtin
+    - skill: ponytail
+      source: missing
+    - skill: tdd
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\tdd\SKILL.md
+    - skill: to-spec
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-spec\SKILL.md
+    - skill: to-tickets
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-tickets\SKILL.md
+    - skill: verify
+      source: missing
+    skipped:
+    - stage_id: implement
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: implement-no-tdd
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: verify
+      skill: verify
+      reason: skill_initially_unavailable
+  research_mode: current_workspace_research
+  research_mode_choice:
+    choice: current_workspace_research
+    chosen_at: '2026-09-02T07:37:24+00:00'
+    source: cli
+  name: 轻量需求开发
+  purpose: 适用于范围明确、无需完整规格拆解但仍需要实现、评审和验证的需求。
+consumed_at: '2026-09-02T07:37:29+00:00'

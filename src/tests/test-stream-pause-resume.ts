@@ -46,8 +46,9 @@ assert.match(runtimeInstruction, /只能从未完成节点继续/, "runtime inst
 assert.match(runtimeInstruction, /所有可用工具路径、代码路径、测试\/dev 库路径/, "runtime instruction should require exhausting queryable paths before asking");
 
 const adapterSource = readFileSync("src/wecom-adapter.ts", "utf8");
-assert.match(adapterSource, /isStreamPauseResume/, "adapter should detect stream pause resume mode");
-assert.match(adapterSource, /skipped planner\/prelude to avoid restarting from head/, "adapter should skip planner/prelude on stream resume");
-assert.match(adapterSource, /!isStreamPauseResume && !hasDirectEvidence && plannerResult/, "adapter should not run prelude on stream resume");
+assert.match(adapterSource, /if \(isStreamPauseResume\)/, "adapter should handle stream pause resume separately");
+assert.match(adapterSource, /buildStreamPauseResumeRuntimeInstruction/, "adapter should retain pause resume guidance");
+assert.doesNotMatch(adapterSource, /runtimeTodoList|runtime_todolist_update/, "adapter should not couple pause resume to runtime Todo");
+assert.match(adapterSource, /!isStreamPauseResume\s*&&\s*entryAnchors\.length > 0/, "adapter should not run entry-anchor prelude on stream resume");
 
 console.log("stream pause resume 验证通过");

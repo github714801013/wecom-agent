@@ -1,0 +1,741 @@
+selection_id: 52aGDHxDmZaV6_iIweWAaw
+purpose: init
+selection_stage: final
+task_id: slow-query-submit-deploy-20260904
+state_path: D:\workplace\typescript\wecom-agent\docs\engineering\workflows\slow-query-submit-deploy-20260904-orchestration.yml
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-04T07:00:26+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feature/search-iteration
+  base_branch: null
+  base_commit: null
+  migration: null
+definition:
+  path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+  sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+route: git_delivery
+stages:
+- id: code-review
+  skill: code-review
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - code-review
+  agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+    HEAD^..HEAD。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: review_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: git-commit
+  skill: null
+  mcp: null
+  execution_mode: main_agent
+  kind: host_action
+  host_action:
+    id: git_commit_and_push
+    purpose: 按当前任务文件精确暂存、提交并推送当前分支 upstream。
+    steps:
+    - 读取 git status --short 和 git diff HEAD，区分本轮任务文件与既有无关改动。
+    - 只对当前任务文件执行 git add -- <明确文件列表>，禁止 git add .。
+    - 执行 git diff --cached --name-only，发现暂存区包含范围外文件时停止。
+    - '根据既有 Git 交付规则生成中文或英文提交信息（备注 body 必须包含 task_id: <编排 task_id> 独立行），并执行用户已确认的
+      git commit。'
+    - 读取当前分支的 upstream，提交前执行 fetch 和 ahead/behind 检查；远端领先时停止并回写阻塞证据。
+    - '先读取当前任务文件、commit subject、task_id、remote、branch 和 ahead/behind，使用 submit-node
+      的 awaiting_confirmation 回写结构化 commit_subject 与 task_file_paths；用户确认后编排器仅按固定
+      argv 精确暂存，执行 `git commit -m <subject> -m "task_id: <task_id>"` 并推送，禁止裸 git commit
+      或执行 confirmation.command。'
+    - 回查 commit hash、remote、branch、push 结果和 git status --short --branch；编排器从同一 task_id
+      的 canonical workspace 读取 origin、base_branch 与 branch，自动写入 GitHub base...提交分支
+      compare 证据；无可靠基线或不受支持 remote 时记录无链接原因。
+  reference_mutation: false
+  skills: []
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: git_delivery_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+stages_sha256: a2efde304a09708a93c652e38e00947d274baf915cfb0f365ed39d3a1cfe9dc1
+expected_revision: null
+selection_epoch: null
+status: consumed
+created_at: '2026-09-04T07:09:27+00:00'
+route_options:
+  task_type: git_delivery
+  task_name: Git 交付
+  task_purpose: 审查当前任务改动，精确暂存，确认后提交并推送当前分支 upstream。
+  route: git_delivery
+  selection_mode: selectable
+  stage_registry:
+    code-review:
+      id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    git-commit:
+      id: git-commit
+      skill: null
+      mcp: null
+      execution_mode: main_agent
+      kind: host_action
+      host_action:
+        id: git_commit_and_push
+        purpose: 按当前任务文件精确暂存、提交并推送当前分支 upstream。
+        steps:
+        - 读取 git status --short 和 git diff HEAD，区分本轮任务文件与既有无关改动。
+        - 只对当前任务文件执行 git add -- <明确文件列表>，禁止 git add .。
+        - 执行 git diff --cached --name-only，发现暂存区包含范围外文件时停止。
+        - '根据既有 Git 交付规则生成中文或英文提交信息（备注 body 必须包含 task_id: <编排 task_id> 独立行），并执行用户已确认的
+          git commit。'
+        - 读取当前分支的 upstream，提交前执行 fetch 和 ahead/behind 检查；远端领先时停止并回写阻塞证据。
+        - '先读取当前任务文件、commit subject、task_id、remote、branch 和 ahead/behind，使用 submit-node
+          的 awaiting_confirmation 回写结构化 commit_subject 与 task_file_paths；用户确认后编排器仅按固定
+          argv 精确暂存，执行 `git commit -m <subject> -m "task_id: <task_id>"` 并推送，禁止裸 git
+          commit 或执行 confirmation.command。'
+        - 回查 commit hash、remote、branch、push 结果和 git status --short --branch；编排器从同一
+          task_id 的 canonical workspace 读取 origin、base_branch 与 branch，自动写入 GitHub
+          base...提交分支 compare 证据；无可靠基线或不受支持 remote 时记录无链接原因。
+      reference_mutation: false
+      skills: []
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: git_delivery_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+  options:
+  - option_id: git_delivery_standard
+    name: 标准 Git 提交
+    purpose: 适用于需要将当前任务的已审查改动安全提交并推送到当前分支 upstream 的任务。
+    research_stage_id: null
+    research_modes: {}
+    transitions:
+      complete:
+        code-review: git-commit
+        git-commit: null
+      skipped:
+        code-review: null
+        git-commit: null
+    label: code-review → git-commit
+    stage_ids:
+    - code-review
+    - git-commit
+    stages:
+    - id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    - id: git-commit
+      skill: null
+      mcp: null
+      execution_mode: main_agent
+      kind: host_action
+      host_action:
+        id: git_commit_and_push
+        purpose: 按当前任务文件精确暂存、提交并推送当前分支 upstream。
+        steps:
+        - 读取 git status --short 和 git diff HEAD，区分本轮任务文件与既有无关改动。
+        - 只对当前任务文件执行 git add -- <明确文件列表>，禁止 git add .。
+        - 执行 git diff --cached --name-only，发现暂存区包含范围外文件时停止。
+        - '根据既有 Git 交付规则生成中文或英文提交信息（备注 body 必须包含 task_id: <编排 task_id> 独立行），并执行用户已确认的
+          git commit。'
+        - 读取当前分支的 upstream，提交前执行 fetch 和 ahead/behind 检查；远端领先时停止并回写阻塞证据。
+        - '先读取当前任务文件、commit subject、task_id、remote、branch 和 ahead/behind，使用 submit-node
+          的 awaiting_confirmation 回写结构化 commit_subject 与 task_file_paths；用户确认后编排器仅按固定
+          argv 精确暂存，执行 `git commit -m <subject> -m "task_id: <task_id>"` 并推送，禁止裸 git
+          commit 或执行 confirmation.command。'
+        - 回查 commit hash、remote、branch、push 结果和 git status --short --branch；编排器从同一
+          task_id 的 canonical workspace 读取 origin、base_branch 与 branch，自动写入 GitHub
+          base...提交分支 compare 证据；无可靠基线或不受支持 remote 时记录无链接原因。
+      reference_mutation: false
+      skills: []
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      completion_gate:
+        id: git_delivery_evidence
+        require_evidence: true
+        require_output_files: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+    omitted_stages: []
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  skill_audit:
+    checked:
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    skipped: []
+  manual_input:
+    enabled: true
+    input_format: stage_ids
+flow_catalog:
+  version: 1
+  path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+  sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+flow_definition:
+  version: 1
+  task_type: git_delivery
+  option_id: git_delivery_standard
+  name: 标准 Git 提交
+  purpose: 适用于需要将当前任务的已审查改动安全提交并推送到当前分支 upstream 的任务。
+  stage_ids:
+  - code-review
+  - git-commit
+  stages:
+  - id: code-review
+    skill: code-review
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - code-review
+    agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+      HEAD^..HEAD。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: review_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: git
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: git-commit
+    skill: null
+    mcp: null
+    execution_mode: main_agent
+    kind: host_action
+    host_action:
+      id: git_commit_and_push
+      purpose: 按当前任务文件精确暂存、提交并推送当前分支 upstream。
+      steps:
+      - 读取 git status --short 和 git diff HEAD，区分本轮任务文件与既有无关改动。
+      - 只对当前任务文件执行 git add -- <明确文件列表>，禁止 git add .。
+      - 执行 git diff --cached --name-only，发现暂存区包含范围外文件时停止。
+      - '根据既有 Git 交付规则生成中文或英文提交信息（备注 body 必须包含 task_id: <编排 task_id> 独立行），并执行用户已确认的
+        git commit。'
+      - 读取当前分支的 upstream，提交前执行 fetch 和 ahead/behind 检查；远端领先时停止并回写阻塞证据。
+      - '先读取当前任务文件、commit subject、task_id、remote、branch 和 ahead/behind，使用 submit-node
+        的 awaiting_confirmation 回写结构化 commit_subject 与 task_file_paths；用户确认后编排器仅按固定
+        argv 精确暂存，执行 `git commit -m <subject> -m "task_id: <task_id>"` 并推送，禁止裸 git
+        commit 或执行 confirmation.command。'
+      - 回查 commit hash、remote、branch、push 结果和 git status --short --branch；编排器从同一 task_id
+        的 canonical workspace 读取 origin、base_branch 与 branch，自动写入 GitHub base...提交分支
+        compare 证据；无可靠基线或不受支持 remote 时记录无链接原因。
+    reference_mutation: false
+    skills: []
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: git_delivery_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: git
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  transitions:
+    complete:
+      code-review: git-commit
+      git-commit: null
+    skipped:
+      code-review: null
+      git-commit: null
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  research_mode: null
+flow_selection:
+  task_type: git_delivery
+  option_id: git_delivery_standard
+  selection_mode: preset
+  stage_ids:
+  - code-review
+  - git-commit
+  omitted_stages: []
+  skill_audit:
+    checked:
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    skipped: []
+  name: 标准 Git 提交
+  purpose: 适用于需要将当前任务的已审查改动安全提交并推送到当前分支 upstream 的任务。
+consumed_at: '2026-09-04T07:10:11+00:00'

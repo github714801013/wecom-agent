@@ -186,7 +186,7 @@ async function runTest() {
     "会话过期清空当前切换指令后，下一轮应回落到 bot 默认指令",
   );
 
-  const adapterSource = readFileSync(new URL("../wecom-adapter.ts", import.meta.url), "utf-8");
+  const adapterSource = readFileSync(new URL("../../src/wecom-adapter.ts", import.meta.url), "utf-8");
   assert.match(adapterSource, /setActiveMcpHeaderCommand\(sessionKey, mcpHeaderCommand\.command\)/);
   assert.match(adapterSource, /withMcpEnvironmentNotice\(buildThinkingHeartbeatContent/);
   assert.match(adapterSource, /withMcpEnvironmentNotice\("正在处理你的问题，请稍候。"\)/);
@@ -206,10 +206,15 @@ async function runTest() {
     /extractExplicitRepoHints\(\s*textToPlan,\s*defaultRepoHints,?\s*\)/,
     "explicit repo detection should only use projects from the active command profile",
   );
-  assert.ok(
-    adapterSource.indexOf("if (isQueryableProjectsQuestion(originalUserQuestion))")
-      < adapterSource.indexOf("const runtimeTodoList = createRuntimeTodoList()"),
-    "project scope fast path should run before runtime TodoList and generic progress flow",
+  assert.doesNotMatch(
+    adapterSource,
+    /const runtimeTodoList = createRuntimeTodoList\(\)/,
+    "主 Pi 路径不得初始化 runtime TodoList",
+  );
+  assert.match(
+    adapterSource,
+    /if \(isQueryableProjectsQuestion\(originalUserQuestion\)\)/,
+    "项目范围直答必须保留在主请求路径中",
   );
 
   console.log("[SUCCESS] project switch command verified");

@@ -232,8 +232,12 @@ export function buildUserFacingProgressContent(content: string, activeCalls: str
 }
 
 export function buildIntermediateStreamContent(content: string, now = Date.now()) {
-  const safeContent = buildUserFacingProgressContent(stripProtocolNoise(content)).trim();
-  if (!safeContent || hasProcessingFramePrefix(safeContent)) return safeContent;
+  // 已带处理帧前缀的心跳行（含已用时后缀）直接透传，避免被 stripThinkingHeartbeatContent 剥离
+  const cleanContent = stripProtocolNoise(content).trim();
+  if (hasProcessingFramePrefix(cleanContent)) return cleanContent;
+
+  const safeContent = buildUserFacingProgressContent(cleanContent).trim();
+  if (!safeContent) return "";
 
   return `${getProcessingFrame(now)} ${safeContent}`;
 }
@@ -253,10 +257,20 @@ export function buildProgressStreamContent(content: string, activeCalls: string[
   return buildUserFacingProgressContent(content, activeCalls);
 }
 
-export function buildThinkingHeartbeatContent(content: string, activeCalls: string[] = [], now = Date.now()) {
+export function formatElapsedDuration(startedAt: number, now = Date.now()): string {
+  const elapsedMs = Math.max(0, now - startedAt);
+  const totalSeconds = Math.floor(elapsedMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}分${seconds}秒` : `${minutes}分`;
+}
+
+export function buildThinkingHeartbeatContent(content: string, activeCalls: string[] = [], now = Date.now(), startedAt?: number) {
   const displayContent = collapseProgressUpdates(content);
   const userFacingContent = buildUserFacingProgressContent(displayContent, activeCalls);
   const timeBucket = Math.floor(now / 1000);
   const heartbeatText = userFacingContent || THINKING_HEARTBEAT_TEXTS[timeBucket % THINKING_HEARTBEAT_TEXTS.length]!;
-  return `${getProcessingFrame(now)} ${heartbeatText}`;
+  const elapsedSuffix = startedAt != null ? `（已用时 ${formatElapsedDuration(startedAt, now)}）` : "";
+  return `${getProcessingFrame(now)} ${heartbeatText}${elapsedSuffix}`;
 }

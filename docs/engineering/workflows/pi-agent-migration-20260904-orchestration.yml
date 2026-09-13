@@ -1,0 +1,1325 @@
+schema_version: 3
+orchestrator_version: 3
+revision: 18
+task_id: pi-agent-migration-20260904
+task:
+  title: Pi 智能体迁移
+  source: local
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-04T15:30:01+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feat/pi-agent-migration
+  base_branch: null
+  base_commit: null
+  migration: null
+route: development
+flow_definition:
+  version: 1
+  task_type: development
+  option_id: development_standard
+  name: 标准需求开发
+  purpose: 适用于需要完整规格、任务拆分、TDD、实现、评审和验证的项目需求。
+  stage_ids:
+  - workspace-confirm
+  - grill-with-docs
+  - to-spec
+  - to-tickets
+  - implement
+  - code-review
+  - verify
+  stages:
+  - id: workspace-confirm
+    skill: null
+    mcp: null
+    execution_mode: main_agent
+    kind: host_action
+    host_action:
+      id: workspace_confirm
+      purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+      steps:
+      - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+      - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+      - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+        worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+    reference_mutation: false
+    skills: []
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: workspace_confirmation_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics: []
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: grill-with-docs
+    skill: grill-with-docs
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - grill-with-docs
+    agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+      Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后 choose-question-node
+      记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+    orchestration_mode: nested_sub_orchestration
+    evidence_policy: null
+    completion_gate:
+      id: evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: skill_defined
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: grill
+      index_path: grill/index.yml
+      path: interaction
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: to-spec
+    skill: to-spec
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - to-spec
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: specification_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: routing
+      index_path: routing/index.yml
+      path: core
+      max_level: 3
+    - topic: orchestration
+      index_path: orchestration/index.yml
+      path: contracts
+      max_level: 3
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: to-tickets
+    skill: to-tickets
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - to-tickets
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: ticket_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: tickets
+      max_level: 3
+    - topic: orchestration
+      index_path: orchestration/index.yml
+      path: contracts
+      max_level: 3
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: implement
+    skill: implement
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - ponytail
+    - tdd
+    - implement
+    agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+      时不执行编译。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: implementation_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: engineering
+      index_path: engineering/index.yml
+      path: .
+      max_level: 3
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - ponytail
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: code-review
+    skill: code-review
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - code-review
+    agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+      HEAD^..HEAD。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: review_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: git
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: verify
+    skill: verify
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - verify
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: verification_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: .
+      max_level: 3
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - verify
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  transitions:
+    complete:
+      workspace-confirm: grill-with-docs
+      grill-with-docs: to-spec
+      to-spec: to-tickets
+      to-tickets: implement
+      implement: code-review
+      code-review: verify
+      verify: null
+    skipped:
+      workspace-confirm: grill-with-docs
+      grill-with-docs: to-spec
+      to-spec: to-tickets
+      to-tickets: implement
+      implement: code-review
+      code-review: verify
+      verify: null
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  research_mode: clarify_directly
+flow_selection:
+  task_type: development
+  option_id: development_standard
+  selection_mode: preset
+  stage_ids:
+  - workspace-confirm
+  - grill-with-docs
+  - to-spec
+  - to-tickets
+  - implement
+  - code-review
+  - verify
+  omitted_stages: []
+  skill_audit:
+    checked:
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    - skill: grill-with-docs
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\grill-with-docs\SKILL.md
+    - skill: implement
+      source: builtin
+    - skill: ponytail
+      source: missing
+    - skill: tdd
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\tdd\SKILL.md
+    - skill: to-spec
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-spec\SKILL.md
+    - skill: to-tickets
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-tickets\SKILL.md
+    - skill: verify
+      source: missing
+    skipped:
+    - stage_id: implement
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: implement-no-tdd
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: verify
+      skill: verify
+      reason: skill_initially_unavailable
+  research_mode: clarify_directly
+  research_mode_choice:
+    choice: clarify_directly
+    chosen_at: '2026-09-04T15:34:03+00:00'
+    source: cli
+  name: 标准需求开发
+  purpose: 适用于需要完整规格、任务拆分、TDD、实现、评审和验证的项目需求。
+route_history: []
+rollback_history: []
+flow_selection_epoch: 0
+awaiting_flow_selection: null
+code_relationship_graphs: []
+stages:
+- id: workspace-confirm
+  skill: null
+  mcp: null
+  execution_mode: main_agent
+  kind: host_action
+  host_action:
+    id: workspace_confirm
+    purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+    steps:
+    - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+    - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+    - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+      worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+  reference_mutation: false
+  skills: []
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: workspace_confirmation_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics: []
+  reference_topics_snapshot: []
+  output_files: []
+  handoff_summary: 工作区绑定确认完成。
+  evidence:
+  - kind: verification
+    summary: 用户已明确授权确认当前工作区绑定。
+    recorded_at: '2026-09-04T15:42:30+00:00'
+  - kind: verification
+    summary: 工作区路径为 D:/workplace/typescript/wecom-agent。
+    recorded_at: '2026-09-04T15:42:30+00:00'
+  - kind: verification
+    summary: 当前分支为 feat/pi-agent-migration。
+    recorded_at: '2026-09-04T15:42:30+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-04T15:42:30+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: confirm_workspace_binding
+    command: 确认当前工作区绑定
+    authorization: 确认当前工作区绑定
+    authorized_at: '2026-09-04T15:37:58+00:00'
+  - action: workspace_confirm
+    command: 确认当前工作区绑定
+    authorization: 确认执行确认当前工作区绑定
+    authorized_at: '2026-09-04T15:42:09+00:00'
+  answer_confirmations: []
+  host_action_baseline:
+    head: 3a853f86cd167cb229570fdbae2bfe4ef92c9e36
+    branch: feat/pi-agent-migration
+- id: grill-with-docs
+  skill: grill-with-docs
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - grill-with-docs
+  agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+    Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后 choose-question-node
+    记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+  orchestration_mode: nested_sub_orchestration
+  evidence_policy: null
+  completion_gate:
+    id: evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: skill_defined
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: grill
+    index_path: grill/index.yml
+    path: interaction
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: grill
+    index_path: grill/index.yml
+    path: interaction
+    max_level: 3
+    index_sha256: c374961f65c609422fea84173d3f15f8db8be6a16a0b4575945d3b35ab31ed3d
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files:
+  - path: plans/pi-agent-feasibility-20260904-gitnexus-inquiry.md
+    sha256: 6c637a73fb4ea5cf2252f38d77f2a3f4c4fa4d66bc459962df982cbbee15cff9
+  handoff_summary: 已完成需求澄清：首期以 Pi Agent runtime 和 MCP Plugin 桥接替换 LangGraph Agent
+    循环，保留企业微信、安全、MCP scope、会话和最终回复契约；不在兼容验证前删除全部旧依赖。
+  evidence:
+  - kind: verification
+    summary: 用户选择直接由主 Agent 完成澄清。
+    recorded_at: '2026-09-04T15:55:42+00:00'
+  - kind: verification
+    summary: 已核验 Pi 0.85.0 的 Agent、AgentTool、streamSimple 和 Node >=22.19.0 要求。
+    recorded_at: '2026-09-04T15:55:42+00:00'
+  - kind: verification
+    summary: 已确认当前实现存在主流程兼容问题，后续应先完成 PoC、测试和审查，再精简旧流程。
+    recorded_at: '2026-09-04T15:55:42+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-04T15:55:42+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: to-spec
+  skill: to-spec
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - to-spec
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: specification_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: routing
+    index_path: routing/index.yml
+    path: core
+    max_level: 3
+  - topic: orchestration
+    index_path: orchestration/index.yml
+    path: contracts
+    max_level: 3
+  reference_topics_snapshot:
+  - topic: routing
+    index_path: routing/index.yml
+    path: core
+    max_level: 3
+    index_sha256: 271cc4063682a936d1d8fd3d4f9ae3b435b473be0d7d84ef437e2217cdc0c40e
+  - topic: orchestration
+    index_path: orchestration/index.yml
+    path: contracts
+    max_level: 3
+    index_sha256: 8e7d4d18067fdc76b5a94a5e1026f1772be80ce25a2d7b5f05850e04e74dc2e3
+  output_files:
+  - path: specs/pi-agent-migration-20260905-spec.md
+    sha256: df9a062d617584a483bfa1a5af59bdba855bde453c932ee838ef0a076aaaa34a
+  handoff_summary: 已完成 Pi 智能体迁移规格：以 Pi runtime 和 MCP Plugin 替换 LangGraph Agent 循环，直接改造企微适配器消费统一事件，并保留安全、会话、MCP
+    scope 和最终输出契约。
+  evidence:
+  - kind: verification
+    summary: 用户确认首期直接改造企业微信适配器消费 Pi 原生事件。
+    recorded_at: '2026-09-04T20:32:25+00:00'
+  - kind: verification
+    summary: 规格覆盖问题、方案、用户故事、实现决策、测试决策、范围外和兼容性边界。
+    recorded_at: '2026-09-04T20:32:25+00:00'
+  - kind: verification
+    summary: 已核验 Pi 0.85.0 的实际 AgentTool、Agent 生命周期和 OpenAI-compatible Provider API。
+    recorded_at: '2026-09-04T20:32:25+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-04T20:32:25+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: to-tickets
+  skill: to-tickets
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - to-tickets
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: ticket_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: tickets
+    max_level: 3
+  - topic: orchestration
+    index_path: orchestration/index.yml
+    path: contracts
+    max_level: 3
+  reference_topics_snapshot:
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: tickets
+    max_level: 3
+    index_sha256: 2629145e0da05b1998a9c203c6bd10f6ad259b76165074b36803e283ca3be51b
+  - topic: orchestration
+    index_path: orchestration/index.yml
+    path: contracts
+    max_level: 3
+    index_sha256: 8e7d4d18067fdc76b5a94a5e1026f1772be80ce25a2d7b5f05850e04e74dc2e3
+  output_files:
+  - path: .scratch/pi-agent-migration/issues/01-pi-runtime-events.md
+    sha256: 3bff109b087cdc17168da106a6887c7fdc1c723908f18baaac82685847db925a
+  - path: .scratch/pi-agent-migration/issues/02-mcp-pi-plugin.md
+    sha256: 9f11fc3537aefdd08555913d1abf31be71010b5318d392a13b75441401aab9fe
+  - path: .scratch/pi-agent-migration/issues/03-wecom-pi-events.md
+    sha256: 3bf8c74100c700f35049474fd5baee7d52cbdca529660bf06e478dd37ae5028f
+  - path: .scratch/pi-agent-migration/issues/04-regression-deploy.md
+    sha256: 7187a7ed104f2b3363be2a5bdeaf7b1f1d669716ce24df9fd8ee053be0e98f02
+  handoff_summary: 已按用户确认创建四个垂直 tickets，依赖顺序为 Pi runtime → MCP Plugin → 企业微信事件消费与流程收敛
+    → 依赖清理与回归部署。
+  evidence:
+  - kind: verification
+    summary: 用户接受四个切片及其阻塞关系。
+    recorded_at: '2026-09-04T22:40:08+00:00'
+  - kind: verification
+    summary: 每个 ticket 均包含端到端交付目标、阻塞项和验收标准。
+    recorded_at: '2026-09-04T22:40:08+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-04T22:40:08+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: implement
+  skill: implement
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - ponytail
+  - tdd
+  - implement
+  agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+    时不执行编译。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: implementation_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+    index_sha256: fe9f6360bba9ca7a7c7bf49835bf2ee55cea88b6541c47953c641f53a19798e1
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files:
+  - path: specs/pi-agent-migration-20260905-spec.md
+    sha256: df9a062d617584a483bfa1a5af59bdba855bde453c932ee838ef0a076aaaa34a
+  handoff_summary: 已完成 Pi runtime、MCP Plugin 与企业微信适配器的首期接入，并通过 TypeScript 编译和 Pi 插件测试。
+  evidence:
+  - kind: verification
+    summary: src/pi-agent-runtime.ts 新增 Pi Agent、MCP AgentTool、OpenAI-compatible streamSimple、预算、超时、取消和原生事件流。
+    recorded_at: '2026-09-04T22:53:33+00:00'
+  - kind: verification
+    summary: src/graph.ts 的 initializeAgent 已切换到 Pi facade。
+    recorded_at: '2026-09-04T22:53:33+00:00'
+  - kind: verification
+    summary: src/wecom-adapter.ts 已改为消费 agent.streamPiEvents()，不再通过 LangGraph stream
+      元组读取本轮主 Agent 事件。
+    recorded_at: '2026-09-04T22:53:33+00:00'
+  - kind: verification
+    summary: src/tests/test-pi-agent-runtime.ts 覆盖 schema、工具调用、取消和超时。
+    recorded_at: '2026-09-04T22:53:33+00:00'
+  - kind: verification
+    summary: npx tsc --noEmit：退出码 0。
+    recorded_at: '2026-09-04T22:53:33+00:00'
+  - kind: verification
+    summary: npx tsc && node dist/tests/test-pi-agent-runtime.js：退出码 0，输出 Pi MCP plugin
+      tests passed。
+    recorded_at: '2026-09-04T22:53:33+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail
+  required_action: null
+  confirmed_at: '2026-09-04T22:53:33+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: code-review
+  skill: code-review
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - code-review
+  agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+    HEAD^..HEAD。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: review_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+    index_sha256: 2629145e0da05b1998a9c203c6bd10f6ad259b76165074b36803e283ca3be51b
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files:
+  - path: reviews/pi-agent-migration-20260905-review.md
+    sha256: c300ad69a35fddfcbf32053e38135e654b3c0f8326c2303c7c5de057966ecfaa
+  handoff_summary: 代码审查完成并修复高置信问题：补充 Pi 运行时默认预算、工具超时取消、请求 deadline、工具更新/错误处理、Docker
+    版本锁定和 npm test 入口。
+  evidence:
+  - kind: verification
+    summary: 审查确认原生事件、超时取消、普通请求预算、旧流程未收敛和恢复幂等仍有缺口；已修复事件处理、工具取消传播、默认预算、请求 deadline。
+    recorded_at: '2026-09-04T23:15:50+00:00'
+  - kind: verification
+    summary: Dockerfile 已锁定 node:22.19-alpine 并使用 npm ci。
+    recorded_at: '2026-09-04T23:15:50+00:00'
+  - kind: verification
+    summary: package.json 的 npm test 已接入 Pi runtime 测试。
+    recorded_at: '2026-09-04T23:15:50+00:00'
+  - kind: verification
+    summary: npx tsc --noEmit：退出码 0。
+    recorded_at: '2026-09-04T23:15:50+00:00'
+  - kind: verification
+    summary: npm test：退出码 0，输出 Pi MCP plugin tests passed。
+    recorded_at: '2026-09-04T23:15:50+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-04T23:15:50+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: verify
+  skill: verify
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - verify
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: verification_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: .
+    max_level: 3
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 2629145e0da05b1998a9c203c6bd10f6ad259b76165074b36803e283ca3be51b
+  output_files:
+  - path: reviews/pi-agent-migration-20260905-review.md
+    sha256: c300ad69a35fddfcbf32053e38135e654b3c0f8326c2303c7c5de057966ecfaa
+  handoff_summary: 已完成可用范围内的验证：TypeScript 编译和 Pi MCP Plugin 单元测试均通过；真实模型、MCP、WeCom
+    与 Docker smoke 未执行。
+  evidence: &id001
+  - kind: verification
+    summary: npx tsc --noEmit：退出码 0。
+    recorded_at: '2026-09-04T23:17:08+00:00'
+  - kind: verification
+    summary: npm test：退出码 0，Pi MCP plugin tests passed。
+    recorded_at: '2026-09-04T23:17:08+00:00'
+  - kind: verification
+    summary: 真实模型 endpoint、真实 MCP Server、WeCom contract 和 Docker smoke 未执行，原因是 verify
+      Skill 不可用且外部服务未在本轮授权/配置。
+    recorded_at: '2026-09-04T23:17:08+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - verify
+  required_action: null
+  confirmed_at: '2026-09-04T23:17:08+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+current_stage: verify
+current_skill: verify
+stage_status: complete
+next_skill: null
+resume_from: completed
+continuation_mode: auto
+required_action: null
+handoff_summary: 阶段 verify 已完成，任务编排中的全部阶段已结束。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-09-04T23:17:13+00:00'
+initialization:
+  selection_id: 6TIqc3VskoHgI8p2375MJg
+  purpose: init
+  selection_stage: final
+  chosen_at: '2026-09-04T15:34:37+00:00'
+  definition:
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  stages_sha256: 47f03c2805c1b69d50ede94bf3f06982c5c62f96ae7029ed1e0c4d075df20a76
+  flow_definition_sha256: a661056dbca8266d43d6db2bf33589592ab6be9d158159442c9242eea696af7c
+  provenance: cli_selection
+workspace_binding:
+  confirmed: true
+  decision: current_workspace_current_branch
+  path: D:\workplace\typescript\wecom-agent
+  branch: feat/pi-agent-migration
+  base_branch: null
+  base_commit: null
+  confirmed_at: '2026-09-04T15:30:01+00:00'

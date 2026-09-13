@@ -1,0 +1,189 @@
+schema_version: 3
+orchestrator_version: 3
+revision: 17
+task_id: auto-verification-reply-three-minute-cooldown
+task:
+  title: 限制证据不足兜底提示三分钟内重复发送
+  source: 用户要求：同一自动继续核实证据不足回复前后至少间隔3分钟，避免持续重复触发
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  confirmed_at: '2026-07-29T06:27:46+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feature/search-iteration
+  base_branch: null
+  migration: null
+route: requirement
+route_history: []
+stages:
+- id: grill-with-docs
+  skill: grill-with-docs
+  completion_gate: null
+  status: complete
+  required_files:
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/grill-adjustment-logic-review.md
+    sha256: 15af4099d9c9109554b340122735533a840b21ad37663d8403a0791e0586c545
+  output_files:
+  - path: ../specs/2026-07-29-auto-verification-reply-three-minute-cooldown-raw-requirements.md
+    sha256: 09a6850092acc5c409a11a43c88d154655f52d98e13c2a877dee9648874832aa
+  - path: ../plans/2026-07-29-auto-verification-reply-three-minute-cooldown-plan.md
+    sha256: be9cf281c10c7ca7289f68eb3f184f51e55c2a66284042d80751f89f2190ff04
+  handoff_summary: requirements-closed
+  evidence:
+  - kind: verification
+    summary: requirements-and-plan-reviewed
+    recorded_at: '2026-07-29T12:26:02+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T12:26:02+00:00'
+- id: specification
+  skill: to-spec
+  completion_gate: null
+  status: complete
+  required_files: []
+  output_files:
+  - path: ../specs/2026-07-29-auto-verification-reply-three-minute-cooldown-spec.md
+    sha256: bfcba004b2e4072f6f116de74b0c042b49e693f8746d88876da2b989064bcb3d
+  handoff_summary: specification-complete
+  evidence:
+  - kind: verification
+    summary: specification-reviewed-with-confirmed-injected-orchestration-test-seam
+    recorded_at: '2026-07-29T12:32:23+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T12:32:23+00:00'
+- id: tickets
+  skill: to-tickets
+  completion_gate: null
+  status: complete
+  required_files: []
+  output_files:
+  - path: ../../../.scratch/auto-verification-reply-three-minute-cooldown/issues/01-fixed-window-auto-verification-loop.md
+    sha256: c2264a1c99f0ac26bed8ccd4ad369506300b4029dcc9fad183dcdd25926a1149
+  - path: ../../../.scratch/auto-verification-reply-three-minute-cooldown/issues/02-new-evidence-progress-guard.md
+    sha256: febb5a5d218592fba165ce84b85a71f883a472b197dcb571b84d5c94696963b1
+  - path: ../../../.scratch/auto-verification-reply-three-minute-cooldown/issues/03-exit-isolation-stream-regressions.md
+    sha256: b7890d0a0636c3a89e39633516abcdef20d62b3ef74e6ec44387ad886ea65227
+  handoff_summary: three-tickets-approved-and-published
+  evidence:
+  - kind: verification
+    summary: user-approved-three-ticket-breakdown-published-locally
+    recorded_at: '2026-07-29T13:10:03+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T13:10:03+00:00'
+- id: regression-test
+  skill: tdd
+  completion_gate: tdd
+  status: complete
+  required_files:
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/testing-specs.md
+    sha256: 600abb701d7daef7bd2faad3d9e333717047577d32349c94eefae5fffcdf2d4c
+  output_files:
+  - path: ../../../src/tests/test-auto-verification-loop.ts
+    sha256: 0eb5fe7d71b206162a9a0160c4e37dc6e22e71a4bd4d5d3157e1a39163931702
+  - path: ../../../src/auto-verification-loop.ts
+    sha256: f68042097f772dfac5470c194581cc5ead82cb89c49e1413505d2fd420e70b11
+  handoff_summary: first-tracer-bullet-red-green-complete
+  evidence:
+  - kind: verification
+    summary: rg-confirmed-red-symbol-reference-existed-only-in-test
+    recorded_at: '2026-07-29T13:33:18+00:00'
+  - kind: tdd_red
+    summary: node-ts-node-test-failed-before-runAutoVerificationLoop-existed
+    recorded_at: '2026-07-29T13:33:18+00:00'
+  - kind: tdd_green
+    summary: same-target-test-passed-after-minimal-two-round-loop
+    recorded_at: '2026-07-29T13:33:18+00:00'
+  blocked_reason: TDD 完成闸门要求 Red 与 Green 证据，或完整授权例外
+  failure_evidence:
+  - TDD 完成闸门要求 Red 与 Green 证据，或完整授权例外
+  required_action: null
+  confirmed_at: '2026-07-29T13:33:18+00:00'
+- id: implementation
+  skill: implement
+  completion_gate: null
+  status: complete
+  required_files:
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/workflow-guardrails.md
+    sha256: 7809000b9186b202fc2b2f8035d80493e7ebf7c2ab43ac2b13a6b7e48dc5f85b
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/general-specs.md
+    sha256: 21a529153dc10c826882c40f803251b223346cebd4de17853c263df06c3f892b
+  output_files:
+  - path: ../../../src/auto-verification-loop.ts
+    sha256: 930a4ae2b4179eec17531f2bf4e500223361213632a7a1894a907844de7b096a
+  - path: ../../../src/tests/test-auto-verification-loop.ts
+    sha256: fb09343e5faaa155c4234744f08cc60c3455ec2be80b93cd221cee1c11bae252
+  - path: ../../../src/wecom-adapter.ts
+    sha256: 288af17e2232a4a9562c85166802f8e652ea9c0843b39314e428580399afbb1b
+  handoff_summary: three-ticket-runtime-implementation-complete
+  evidence:
+  - kind: verification
+    summary: auto-verification-final-delivery-and-progress-guard-tests-passed
+    recorded_at: '2026-07-29T21:57:24+00:00'
+  - kind: verification
+    summary: npx-tsc-noemit-passed
+    recorded_at: '2026-07-29T21:57:24+00:00'
+  - kind: verification
+    summary: gitnexus-unavailable-devspace-exact-code-inspection-used
+    recorded_at: '2026-07-29T21:57:24+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T21:57:24+00:00'
+- id: code-review
+  skill: code-review
+  completion_gate: null
+  status: complete
+  required_files: []
+  output_files:
+  - path: ../reviews/2026-07-29-auto-verification-reply-three-minute-cooldown-code-review.md
+    sha256: 1cd735e97e83bdf26c2cea8712807788f2297ed02c28da8ceb97b2f6287b50af
+  handoff_summary: 阶段已完成，正式产物和验证证据已核验。
+  evidence:
+  - kind: verification
+    summary: standards/spec
+    recorded_at: '2026-07-29T22:18:09+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T22:18:09+00:00'
+- id: verification
+  skill: testing
+  completion_gate: null
+  status: complete
+  required_files:
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/testing-specs.md
+    sha256: 600abb701d7daef7bd2faad3d9e333717047577d32349c94eefae5fffcdf2d4c
+  output_files:
+  - path: ../reviews/2026-07-29-auto-verification-reply-three-minute-cooldown-verification.md
+    sha256: e9d892a5a7f7a77ddea6f38d171362962fe2407d7b0d1fa39e7579bbf37f22ed
+  handoff_summary: 阶段已完成，正式产物和验证证据已核验。
+  evidence: &id001
+  - kind: verification
+    summary: feature
+    recorded_at: '2026-07-29T22:48:09+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T22:48:09+00:00'
+current_stage: verification
+current_skill: testing
+stage_status: complete
+next_skill: null
+resume_from: completed
+continuation_mode: auto
+required_action: null
+handoff_summary: 阶段 verification 已完成，任务编排中的全部阶段已完成。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-07-29T22:48:09+00:00'

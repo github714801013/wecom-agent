@@ -11,6 +11,7 @@ import { buildAnalyzedCodeRangeIndex, formatAnalyzedCodeRangeIndex } from "./ana
 import { PROGRESS_KEYWORDS } from "./progress-updates.js";
 import { createReactLoopController, wrapToolsWithReactLoopControl } from "./react-loop-control.js";
 import { stringifyModelContent } from "./model-content.js";
+import { createPiAgentFacade } from "./pi-agent-runtime.js";
 import {
   runAgenticRag,
   type AgenticRagGrade,
@@ -824,6 +825,7 @@ async function defaultToolIntentResolver(input: {
 }
 
 const PROJECT_SELECTION_MARKER_PATTERN = /项目|仓库|代码包|模块|repo|只查|在|从/iu;
+const EXPLICIT_REPO_PATTERN = /(?:只查|在|从|某项目|某仓库|项目|仓库|repo)\s*([A-Za-z0-9_.\-/，,、和及与\s]+)|([A-Za-z0-9_.\-/]+)\s*(?:项目|仓库|repo)/giu;
 
 const PROJECT_PREFIX_ALIASES: Record<string, string[]> = {
   iteng: ["易腾", "iteng"],
@@ -927,13 +929,16 @@ export function extractMcpProjectCandidates(mcpServers: any[] = []) {
 
 export function extractExplicitRepoHints(userQuestion: string, repoCandidates: string[] = []) {
   const candidates = uniqueRepoCandidatesWithLatest(repoCandidates);
-  if (candidates.length === 0) return [];
-
-  const explicitRepoPattern = /(?:只查|在|从|某项目|某仓库|项目|仓库|repo)\s*([A-Za-z0-9_.\-/，,、和及与\s]+)|([A-Za-z0-9_.\-/]+)\s*(?:项目|仓库|repo)/gi;
-  const explicitMatchKeys = new Set(Array.from(userQuestion.matchAll(explicitRepoPattern))
+  const explicitRepoTokens = Array.from(userQuestion.matchAll(EXPLICIT_REPO_PATTERN))
     .flatMap(match => (match[1] || match[2] || "").split(/[，,、和及与\s]+/))
-    .map(match => match.trim().toLowerCase())
-    .filter(Boolean));
+    .map(match => match.trim())
+    .filter(Boolean);
+  const explicitMatchKeys = new Set(explicitRepoTokens.map(match => match.toLowerCase()));
+  const candidateKeys = new Set(candidates.map(candidate => normalizeRepoKey(candidate.repo)));
+  const unlistedExplicitHints = explicitRepoTokens
+    .filter(token => /^[A-Za-z0-9][A-Za-z0-9_.\-/]{2,127}$/u.test(token))
+    .filter(token => /[A-Z0-9_.\-/]/u.test(token))
+    .filter(token => !candidateKeys.has(normalizeRepoKey(token)));
   const allowSemanticMatch = PROJECT_SELECTION_MARKER_PATTERN.test(userQuestion);
 
   const matches = candidates
@@ -953,7 +958,7 @@ export function extractExplicitRepoHints(userQuestion: string, repoCandidates: s
       return matchedByRepo || match.variantScore > 0;
     });
 
-  return matches
+  const matchedRepos = matches
     .sort((left, right) => {
       const totalDiff = (right.score + right.variantScore) - (left.score + left.variantScore);
       if (totalDiff !== 0) return totalDiff;
@@ -965,6 +970,8 @@ export function extractExplicitRepoHints(userQuestion: string, repoCandidates: s
         : left.firstIndex - right.firstIndex;
     })
     .map(match => match.repo);
+
+  return uniqueRepoCandidatesWithLatest([...unlistedExplicitHints, ...matchedRepos]).map(match => match.repo);
 }
 
 export function extractExplicitRepoHint(userQuestion: string, repoCandidates: string[] = []) {
@@ -1544,4 +1551,18 @@ export async function initializeAgent(
   });
 
   return createReviewedAgent(baseAgent);
+}
+
+export async function initializePiAgent(
+  tools?: any[],
+  plannerResult?: BusinessPromptPlanner | null,
+) {
+  const agentTools = tools || await getAllMcpTools();
+  const systemPrompt = await getBusinessPrompt(plannerResult);
+
+  return createPiAgentFacade({
+    systemPrompt,
+    tools: agentTools,
+    toolTimeoutMs: config.llm.toolTimeoutMs,
+  });
 }

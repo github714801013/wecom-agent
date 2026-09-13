@@ -13,6 +13,7 @@ const bot = {
   mcpHeaders: {
     gitnexus: {
       "x-project": "project-a",
+      authorization: "Bearer header-secret",
     },
   },
 };
@@ -27,13 +28,11 @@ const otherBot = {
   },
 };
 
-assert.equal(
-  buildMcpToolsCacheKey(bot),
-  "bot-a:{\"gitnexus\":{\"x-project\":\"project-a\"}}:{}",
-  "缓存 key 应区分机器人、MCP header 和会话 header override",
-);
+const cacheKey = buildMcpToolsCacheKey(bot);
+assert.match(cacheKey, /^[a-f0-9]{64}$/);
+assert.doesNotMatch(cacheKey, /project-a|header-secret/);
 assert.notEqual(
-  buildMcpToolsCacheKey(bot),
+  cacheKey,
   buildMcpToolsCacheKey(otherBot),
   "不同机器人和 MCP header 应生成不同缓存 key",
 );
@@ -46,29 +45,40 @@ assert.notEqual(
 let now = 1_000;
 let loadCount = 0;
 const cache = createMcpToolsCache(30 * 60 * 1000, () => now);
+const cacheLogs: string[] = [];
+const originalConsoleLog = console.log;
+console.log = (...args: unknown[]) => cacheLogs.push(args.map(String).join(" "));
 type CachedTool = Awaited<ReturnType<typeof cache.get>>[number];
 const mockTool = (name: string): CachedTool => ({ name } as CachedTool);
 
-const first = await cache.get("robot-a", async () => {
-  loadCount += 1;
-  return [mockTool("query")];
-});
+let first: CachedTool[];
+let second: CachedTool[];
+let third: CachedTool[];
+try {
+  first = await cache.get(cacheKey, async () => {
+    loadCount += 1;
+    return [mockTool("query")];
+  });
 
-const second = await cache.get("robot-a", async () => {
-  loadCount += 1;
-  return [mockTool("query-reloaded")];
-});
+  second = await cache.get(cacheKey, async () => {
+    loadCount += 1;
+    return [mockTool("query-reloaded")];
+  });
 
-assert.equal(loadCount, 1, "TTL 内应复用已加载工具");
-assert.equal(second, first, "TTL 内应返回同一个工具列表实例");
+  assert.equal(loadCount, 1, "TTL 内应复用已加载工具");
+  assert.equal(second, first, "TTL 内应返回同一个工具列表实例");
+  assert.doesNotMatch(cacheLogs.join("\n"), /header-secret|project-a/, "缓存日志不得记录请求头原文");
 
-now += 30 * 60 * 1000 + 1;
-const third = await cache.get("robot-a", async () => {
-  loadCount += 1;
-  return [mockTool("query-reloaded")];
-});
+  now += 30 * 60 * 1000 + 1;
+  third = await cache.get(cacheKey, async () => {
+    loadCount += 1;
+    return [mockTool("query-reloaded")];
+  });
+} finally {
+  console.log = originalConsoleLog;
+}
 
 assert.equal(loadCount, 2, "超过 TTL 后应重新加载工具");
-assert.notEqual(third, first, "超过 TTL 后应返回新的工具列表实例");
+assert.notEqual(third!, first!, "超过 TTL 后应返回新的工具列表实例");
 
 console.log("MCP 工具缓存验证通过");

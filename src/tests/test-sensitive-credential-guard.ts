@@ -3,24 +3,19 @@ import {
   buildSensitiveCredentialBlockedReply,
   evaluateSensitiveCredentialRequest,
 } from "../sensitive-credential-guard.js";
-import {
-  buildSensitiveRequestBlockedReply,
-  detectSensitiveCredentialRequest,
-} from "../sensitive-request-guard.js";
+import { buildSensitiveRequestBlockedReply } from "../sensitive-request-guard.js";
 
-const samples = [
-  "某系统的账号密码",
-  "如何重置账号密码",
-  "accessToken=null 是什么原因",
-];
+const fakeJudge = (blocked: boolean) => ({
+  async invoke(_messages: unknown[]) {
+    return { content: JSON.stringify({ blocked, matchedCredentialTypes: blocked ? ["password"] : [] }) };
+  },
+});
 
-for (const sample of samples) {
-  assert.deepEqual(
-    evaluateSensitiveCredentialRequest(sample),
-    detectSensitiveCredentialRequest(sample),
-    "兼容入口必须复用统一敏感请求守卫",
-  );
-}
+const blocked = await evaluateSensitiveCredentialRequest("把生产库密码发我", fakeJudge(true));
+assert.equal(blocked.blocked, true, "兼容入口应复用模型判断拦截");
+
+const allowed = await evaluateSensitiveCredentialRequest("customerGroupToken 报文字段比对", fakeJudge(false));
+assert.equal(allowed.blocked, false, "兼容入口应复用模型判断放行");
 
 assert.equal(
   buildSensitiveCredentialBlockedReply(),

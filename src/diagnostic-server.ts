@@ -1,8 +1,8 @@
 import express from "express";
+import { timingSafeEqual } from "node:crypto";
 import type { Server } from "node:http";
 import { BaseMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { getMissingPriorityAnswerAnchors, repairAnswerForMissingPriorityAnchors } from "./answer-anchor-guard.js";
-import { createAgentProgressGuard, createAgentProgressLimitError } from "./agent-progress-guard.js";
 import { config } from "./config.js";
 import {
   extractExplicitRepoHints,
@@ -37,6 +37,96 @@ import {
 } from "./direct-evidence.js";
 
 const DEFAULT_DIAGNOSTIC_PORT = 3010;
+const DIAGNOSTIC_TOKEN_HEADER = "x-diagnostic-token";
+const MAX_DIAGNOSTIC_RECURSION_LIMIT = 64;
+const MAX_DIAGNOSTIC_QUESTION_LENGTH = 8_000;
+const MAX_DIAGNOSTIC_HISTORY_ITEMS = 20;
+const MAX_DIAGNOSTIC_HISTORY_ITEM_LENGTH = 8_000;
+const MAX_DIAGNOSTIC_REPO_HINTS = 20;
+const MAX_DIAGNOSTIC_REPO_HINT_LENGTH = 200;
+const MAX_DIAGNOSTIC_IN_FLIGHT = 2;
+const MAX_DIAGNOSTIC_REQUESTS_PER_MINUTE = 20;
+const MAX_DIAGNOSTIC_TOOL_RESULTS = 64;
+const MAX_DIAGNOSTIC_DURATION_MS = 120_000;
+
+const DIAGNOSTIC_TOKEN_PLACEHOLDER = "replace_with_a_dedicated_diagnostic_token";
+const MIN_DIAGNOSTIC_TOKEN_LENGTH = 32;
+
+function isUsableDiagnosticToken(token: string | undefined): token is string {
+  return Boolean(token && token !== DIAGNOSTIC_TOKEN_PLACEHOLDER && token.length >= MIN_DIAGNOSTIC_TOKEN_LENGTH);
+}
+
+export function isDiagnosticServerEnabled(
+  enabled = process.env.DIAGNOSTIC_ENABLED,
+  accessToken = process.env.DIAGNOSTIC_TOKEN,
+) {
+  return enabled === "true" && isUsableDiagnosticToken(accessToken);
+}
+
+export function isDiagnosticRequestAuthorized(
+  providedToken: string | undefined,
+  accessToken = process.env.DIAGNOSTIC_TOKEN,
+) {
+  if (!providedToken || !isUsableDiagnosticToken(accessToken)) return false;
+  const provided = Buffer.from(providedToken);
+  const expected = Buffer.from(accessToken);
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+}
+
+export function parseDiagnosticRecursionLimit(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) return Math.min(fallback, MAX_DIAGNOSTIC_RECURSION_LIMIT);
+  return Math.min(parsed, MAX_DIAGNOSTIC_RECURSION_LIMIT);
+}
+
+function validateDiagnosticInput(input: Record<string, unknown>) {
+  const question = typeof input.question === "string" ? input.question : "";
+  if (question.length > MAX_DIAGNOSTIC_QUESTION_LENGTH) {
+    throw new Error("question exceeds diagnostic length limit");
+  }
+  const history = input.history || input.sessionMessages;
+  if (Array.isArray(history)) {
+    if (history.length > MAX_DIAGNOSTIC_HISTORY_ITEMS) {
+      throw new Error("history exceeds diagnostic item limit");
+    }
+    for (const item of history) {
+      if (!item || typeof item !== "object") continue;
+      const content = (item as Record<string, unknown>).content;
+      if (stringifyModelContent(content).length > MAX_DIAGNOSTIC_HISTORY_ITEM_LENGTH) {
+        throw new Error("history item exceeds diagnostic length limit");
+      }
+    }
+  }
+  const repoHints = input.repoHints;
+  if (Array.isArray(repoHints)) {
+    if (repoHints.length > MAX_DIAGNOSTIC_REPO_HINTS) {
+      throw new Error("repoHints exceeds diagnostic item limit");
+    }
+    if (repoHints.some(item => String(item).length > MAX_DIAGNOSTIC_REPO_HINT_LENGTH)) {
+      throw new Error("repoHint exceeds diagnostic length limit");
+    }
+  }
+}
+
+function validateDiagnosticEvaluateInput(input: Record<string, unknown>) {
+  validateDiagnosticInput(input);
+  for (const key of ["content", "args", "candidateAnswer", "answer", "llmReply", "question"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.length > MAX_DIAGNOSTIC_HISTORY_ITEM_LENGTH) {
+      throw new Error(`${key} exceeds diagnostic length limit`);
+    }
+  }
+  for (const key of ["itemIds", "llmReplies", "streamSnapshots"]) {
+    const value = input[key];
+    if (!Array.isArray(value)) continue;
+    if (value.length > MAX_DIAGNOSTIC_HISTORY_ITEMS) {
+      throw new Error(`${key} exceeds diagnostic item limit`);
+    }
+    if (value.some(item => String(item).length > MAX_DIAGNOSTIC_HISTORY_ITEM_LENGTH)) {
+      throw new Error(`${key} item exceeds diagnostic length limit`);
+    }
+  }
+}
 
 type EvaluateCase = "progress" | "tool-context" | "human-loop" | "audit-fallback" | "question-history" | "final-gate";
 
@@ -140,6 +230,7 @@ function buildDiagnosticAuditFallbackItems(input: Record<string, unknown>) {
 }
 
 async function evaluateDiagnosticCaseAsync(caseName: EvaluateCase, input: Record<string, unknown>): Promise<DiagnosticResult> {
+  validateDiagnosticEvaluateInput(input);
   if (caseName === "final-gate") {
     const llmReplies = normalizeDiagnosticStringArray(input.llmReplies);
     let replyIndex = 0;
@@ -190,11 +281,6 @@ async function evaluateDiagnosticCaseAsync(caseName: EvaluateCase, input: Record
   };
 }
 
-function parsePositiveInteger(value: unknown, fallback: number) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 function getMessageType(message: BaseMessage) {
   return (message as any)._getType?.() || message.constructor.name;
 }
@@ -242,6 +328,13 @@ function normalizeDiagnosticHistory(input: unknown): ConversationContextItem[] {
 }
 
 export async function runDiagnosticAgentQuestion(input: Record<string, unknown>) {
+  validateDiagnosticInput(input);
+  const diagnosticStartedAt = performance.now();
+  const assertDiagnosticDeadline = () => {
+    if (performance.now() - diagnosticStartedAt > MAX_DIAGNOSTIC_DURATION_MS) {
+      throw new Error("diagnostic request timed out");
+    }
+  };
   const rawQuestion = String(input.question || "").trim();
   if (!rawQuestion) {
     throw new Error("question is required");
@@ -252,21 +345,25 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
     : rawQuestion;
 
   const botName = typeof input.botName === "string" ? input.botName : "";
-  const botConfig = config.bots.find(bot => bot.name === botName) || config.bots[0];
+  const diagnosticBotName = process.env.DIAGNOSTIC_BOT_NAME?.trim() || config.bots[0]?.name;
+  const botConfig = config.bots.find(bot => bot.name === diagnosticBotName);
   if (!botConfig) {
-    throw new Error("No bot config available");
+    throw new Error("No diagnostic bot config available");
+  }
+  if (botName && botName !== botConfig.name) {
+    throw new Error("diagnostic bot selection is not allowed");
   }
 
-  const maxToolResults = parsePositiveInteger(input.maxToolResults, config.tools.maxAgentToolResultsPerTurn);
-  const recursionLimit = parsePositiveInteger(input.recursionLimit, config.llm.recursionLimit);
-  const requestedRepoHints = Array.isArray(input.repoHints)
-    ? input.repoHints.map(String).filter(Boolean)
-    : typeof input.repoHint === "string" && input.repoHint.trim()
-      ? [input.repoHint.trim()]
-      : [];
+  const recursionLimit = parseDiagnosticRecursionLimit(input.recursionLimit, config.llm.recursionLimit);
+  const configuredRepoHints = (process.env.DIAGNOSTIC_REPO_HINTS || "")
+    .split(",")
+    .map(item => item.trim())
+    .filter(Boolean);
   const explicitRepoHints = extractExplicitRepoHints(question, extractMcpProjectCandidates(config.mcpServers));
-  const repoHints = requestedRepoHints.length > 0 ? requestedRepoHints : explicitRepoHints;
+  const repoHints = configuredRepoHints.length > 0 ? configuredRepoHints : explicitRepoHints;
+  assertDiagnosticDeadline();
   const plannerResult = await runPlanner(question);
+  assertDiagnosticDeadline();
   if (shouldUseDirectEvidenceFastPath(question)) {
     const businessPrompt = await getBusinessPrompt(plannerResult);
     const baseModel = await getBaseModel();
@@ -274,6 +371,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
       new SystemMessage(`${businessPrompt}\n\n${buildDirectEvidenceFastPathInstruction()}`),
       new HumanMessage(question),
     ]);
+    assertDiagnosticDeadline();
     return {
       ok: true,
       question,
@@ -283,13 +381,13 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
       toolResultCount: 0,
       toolNames: [],
       repoHints,
-      maxToolResults,
       recursionLimit,
       plannerIntent: plannerResult?.intent,
       plannerQueries: plannerResult?.queries,
     };
   }
   const tools = await getAllMcpTools(botConfig);
+  assertDiagnosticDeadline();
   const scopedTools = scopeToolsToRepo(tools, repoHints);
   const prelude = plannerResult
     && !hasDirectEvidenceAnchors(question)
@@ -300,6 +398,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
       repoHint: repoHints,
     })
     : "";
+  assertDiagnosticDeadline();
   const userContent = [
     prelude,
     hasDirectEvidenceAnchors(question) ? buildDirectEvidenceRuntimeInstruction() : "",
@@ -307,12 +406,12 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
     question,
   ].filter(Boolean).join("\n\n");
   const agent = await initializeAgent(scopedTools, plannerResult);
-  const guard = createAgentProgressGuard({ maxToolResults });
   const stream = await agent.stream({
     messages: [new HumanMessage(userContent)],
   }, {
     recursionLimit,
     streamMode: "messages",
+    deadlineMs: MAX_DIAGNOSTIC_DURATION_MS,
   });
 
   const toolCallMap = new Map<string, { name: string; args: string; completed: boolean }>();
@@ -321,6 +420,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
 
   try {
     for await (const [message] of stream) {
+      assertDiagnosticDeadline();
       const msg = message as BaseMessage;
       const type = getMessageType(msg);
 
@@ -337,9 +437,8 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
             content: stringifyModelContent(toolMsg.content),
           };
           toolRecords.push(record);
-          const decision = guard.recordToolResult(record);
-          if (decision.shouldStop) {
-            throw createAgentProgressLimitError(decision.reason);
+          if (toolRecords.length > MAX_DIAGNOSTIC_TOOL_RESULTS) {
+            throw new Error("diagnostic tool result limit reached");
           }
         }
         continue;
@@ -398,7 +497,7 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
         return {
           ok: true,
           recovered: true,
-          recoveryReason: error instanceof Error ? error.message : String(error),
+          recoveryReason: sanitizeErrorMessage(getErrorMessage(error)),
           question,
           rawQuestion,
           historyCount: diagnosticHistory.length,
@@ -406,7 +505,6 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
           toolResultCount: toolRecords.length,
           toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
           repoHints,
-          maxToolResults,
           recursionLimit,
           plannerIntent: plannerResult?.intent,
           plannerQueries: plannerResult?.queries,
@@ -426,7 +524,6 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
           toolResultCount: toolRecords.length,
           toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
           repoHints,
-          maxToolResults,
           recursionLimit,
           plannerIntent: plannerResult?.intent,
           plannerQueries: plannerResult?.queries,
@@ -445,7 +542,6 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
       toolResultCount: toolRecords.length,
       toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
       repoHints,
-      maxToolResults,
       recursionLimit,
       plannerIntent: plannerResult?.intent,
       plannerQueries: plannerResult?.queries,
@@ -461,7 +557,6 @@ export async function runDiagnosticAgentQuestion(input: Record<string, unknown>)
     toolResultCount: toolRecords.length,
     toolNames: Array.from(new Set(toolRecords.map(record => record.name))),
     repoHints,
-    maxToolResults,
     recursionLimit,
     plannerIntent: plannerResult?.intent,
     plannerQueries: plannerResult?.queries,
@@ -479,14 +574,54 @@ function normalizeCase(value: unknown): EvaluateCase {
 }
 
 export function startDiagnosticServer() {
-  if (process.env.DIAGNOSTIC_ENABLED === "false") {
+  if (!isDiagnosticServerEnabled()) {
+    if (process.env.DIAGNOSTIC_ENABLED === "true") {
+      console.error("[diagnostic] DIAGNOSTIC_ENABLED=true requires DIAGNOSTIC_TOKEN; diagnostic server remains disabled.");
+    }
     return;
   }
 
   const port = Number(process.env.DIAGNOSTIC_PORT || DEFAULT_DIAGNOSTIC_PORT);
-  const host = process.env.DIAGNOSTIC_HOST || "0.0.0.0";
+  const host = process.env.DIAGNOSTIC_HOST || "127.0.0.1";
   const app = express();
+  const rateWindows = new Map<string, { startedAt: number; count: number }>();
+  let activeDiagnosticRequests = 0;
+  const withDiagnosticCapacity = async <T>(work: () => Promise<T>) => {
+    if (activeDiagnosticRequests >= MAX_DIAGNOSTIC_IN_FLIGHT) {
+      throw new Error("diagnostic capacity exhausted");
+    }
+    activeDiagnosticRequests += 1;
+    try {
+      return await work();
+    } finally {
+      activeDiagnosticRequests -= 1;
+    }
+  };
 
+  app.use("/__debug", (req, res, next) => {
+    if (!isDiagnosticRequestAuthorized(req.get(DIAGNOSTIC_TOKEN_HEADER))) {
+      res.status(401).json({ ok: false, error: "unauthorized" });
+      return;
+    }
+    next();
+  });
+  app.use("/__debug", (req, res, next) => {
+    const now = Date.now();
+    for (const [key, entry] of rateWindows) {
+      if (now - entry.startedAt >= 60_000) rateWindows.delete(key);
+    }
+    const clientKey = req.ip || "unknown";
+    const current = rateWindows.get(clientKey);
+    const window = !current || now - current.startedAt >= 60_000
+      ? { startedAt: now, count: 0 }
+      : current;
+    if (window.count >= MAX_DIAGNOSTIC_REQUESTS_PER_MINUTE) {
+      res.status(429).json({ ok: false, error: "rate_limited" });
+      return;
+    }
+    rateWindows.set(clientKey, { ...window, count: window.count + 1 });
+    next();
+  });
   app.use(express.json({ limit: "256kb" }));
 
   app.get("/__debug/status", (_req, res) => {
@@ -503,25 +638,32 @@ export function startDiagnosticServer() {
 
   app.get("/__debug/evaluate", async (req, res) => {
     try {
-      res.json(await evaluateDiagnosticCaseAsync(normalizeCase(req.query.case), req.query));
-    } catch (error: any) {
-      res.status(400).json({ ok: false, ...buildDiagnosticErrorFields(error), errorCode: error?.lc_error_code });
+      res.json(await withDiagnosticCapacity(() => evaluateDiagnosticCaseAsync(normalizeCase(req.query.case), req.query)));
+    } catch (error) {
+      console.error("[diagnostic] Evaluate request failed:", sanitizeErrorMessage(getErrorMessage(error)));
+      res.status(400).json({ ok: false, error: "diagnostic_evaluation_failed" });
     }
   });
 
   app.post("/__debug/evaluate", async (req, res) => {
     try {
-      res.json(await evaluateDiagnosticCaseAsync(normalizeCase(req.body?.case), req.body || {}));
-    } catch (error: any) {
-      res.status(400).json({ ok: false, ...buildDiagnosticErrorFields(error), errorCode: error?.lc_error_code });
+      res.json(await withDiagnosticCapacity(() => evaluateDiagnosticCaseAsync(normalizeCase(req.body?.case), req.body || {})));
+    } catch (error) {
+      console.error("[diagnostic] Evaluate request failed:", sanitizeErrorMessage(getErrorMessage(error)));
+      res.status(400).json({ ok: false, error: "diagnostic_evaluation_failed" });
     }
   });
 
   app.post("/__debug/ask", async (req, res) => {
     try {
-      res.json(await runDiagnosticAgentQuestion(req.body || {}));
-    } catch (error: any) {
-      res.status(400).json({ ok: false, ...buildDiagnosticErrorFields(error), errorCode: error?.lc_error_code });
+      res.json(await withDiagnosticCapacity(() => runDiagnosticAgentQuestion(req.body || {})));
+    } catch (error) {
+      if (error instanceof Error && error.message === "diagnostic capacity exhausted") {
+        res.status(429).json({ ok: false, error: "diagnostic_capacity_exhausted" });
+        return;
+      }
+      console.error("[diagnostic] Agent request failed:", sanitizeErrorMessage(getErrorMessage(error)));
+      res.status(400).json({ ok: false, error: "diagnostic_agent_failed" });
     }
   });
 

@@ -4,6 +4,7 @@ import {
   filterToolResultForCurrentTurn,
   isLikelyIrrelevantToolResult,
 } from "../tool-context-filter.js";
+import { readStoredToolResult } from "../tool-result-store.js";
 
 assert.equal(
   isLikelyIrrelevantToolResult("No results found for query"),
@@ -62,11 +63,34 @@ const longLowSignal = filterToolResultForCurrentTurn({
   id: "4",
   name: "remote_gitnexus_query",
   args: JSON.stringify({ query: "收款方式变更", repo: "oa-pay" }),
-  content: " unrelated noise ".repeat(2000),
+  content: " unrelated noise ".repeat(600),
 });
 
 assert.match(longLowSignal, /结果过长且与检索条件相关性较低/);
 assert.doesNotMatch(longLowSignal, /unrelated noise unrelated noise unrelated noise/);
+
+// 超限结果保存临时文件，可分步读取
+const hugeResult = filterToolResultForCurrentTurn({
+  id: "6",
+  name: "remote_gitnexus_query",
+  args: JSON.stringify({ query: "收款方式变更", repo: "oa-pay" }),
+  content: `src/order.ts:42 收款方式变更\n${" evidence line\n".repeat(5000)}`,
+});
+
+assert.match(hugeResult, /结果较大已保存/);
+const fileIdMatch = hugeResult.match(/fileId=([A-Za-z0-9_-]+)/);
+assert.ok(fileIdMatch, "占位提示应包含 fileId");
+assert.match(hugeResult, /src\/order\.ts:42 收款方式变更/, "占位提示应包含头部摘要");
+
+const fileId = fileIdMatch![1]!;
+const firstSlice = readStoredToolResult(fileId, 0, 1000);
+assert.match(firstSlice, /src\/order\.ts:42 收款方式变更/, "首段应包含文件开头");
+assert.match(firstSlice, /已读 0-1000/, "首段应带偏移提示");
+
+const secondSlice = readStoredToolResult(fileId, 1000, 1000);
+assert.match(secondSlice, /已读 1000-2000/, "第二段应从 offset 继续");
+
+assert.match(readStoredToolResult("not-exist-file", 0, 100), /文件标识无效|文件不存在或已清理/);
 
 const relevantResult = filterToolResultForCurrentTurn({
   id: "5",

@@ -3,10 +3,12 @@ services:
     image: wecom-agent:latest
     container_name: wecom-agent
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      REQUEST_RAW_LOG_ENABLED: ${REQUEST_RAW_LOG_ENABLED:-false}
     env_file:
       - .env
-    ports:
-      - "3010:3010"
     volumes:
       - ./config:/app/config:ro
     logging:

@@ -1,0 +1,148 @@
+schema_version: 2
+orchestrator_version: 2
+revision: 12
+task_id: model-error-misleading-fallback
+task:
+  title: 修复模型异常时返回误导性自动继续文案
+  source: 用户线上反馈：模型异常时仍返回误导性核实文案
+workspace:
+  status: confirmed
+  decision: current_workspace
+  confirmed_at: '2026-07-25T00:50:48+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feature/search-iteration
+  base_branch: origin/feature/search-iteration
+  migration: null
+route: bug
+route_history: []
+stages:
+- id: diagnosing-bugs
+  skill: diagnosing-bugs
+  completion_gate: null
+  status: complete
+  required_files: []
+  output_files: []
+  handoff_summary: 已完成线上与代码取证，确认模型评审异常被误标记为正常继续状态；修复需保留脱敏后的真实异常，阻止进入证据不足兜底，并覆盖正常未通过评审仍生成有界兜底的回归。
+  evidence:
+  - kind: verification
+    summary: 线上 POST /__debug/ask 可复现模型异常；reviewFinalAnswerWithModel catch 将模型异常降级为
+      action=continue，resolveFinalReplyWithModel 继续审核候选快照，resolveFinalReplyDelivery
+      随后生成误导性的证据不足文案。故障 seam 已定位在最终回复评审异常状态未保留。
+    recorded_at: '2026-07-25T00:56:07+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-25T00:56:07+00:00'
+- id: regression-test
+  skill: tdd
+  completion_gate: tdd
+  status: complete
+  required_files: []
+  output_files:
+  - path: D:/workplace/typescript/wecom-agent/src/tests/test-final-reply-delivery.ts
+    sha256: c47e209986a19611dc527f0cb4959d993918cc98ed5d3cb1a7539327593aeec8
+  handoff_summary: TDD 红绿闭环完成：在最终回复评审与投递公共 seam 锁定模型异常真实可见、敏感信息脱敏和错误直达，同时保留正常未通过评审的有界兜底行为。
+  evidence:
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-final-reply-delivery.ts 在修复后通过，覆盖评审异常、错误来源投递、敏感信息脱敏和原有
+      blocked/human-loop/send 分支。
+    recorded_at: '2026-07-25T01:04:15+00:00'
+  - kind: tdd_red
+    summary: 修复前同一命令稳定失败：模型评审 catch 丢失真实异常，errorMessage 断言为空，随后会落入证据不足兜底。
+    recorded_at: '2026-07-25T01:04:15+00:00'
+  - kind: tdd_green
+    summary: 修复后同一命令通过：评审异常返回‘最终回复模型评审失败：HTTP 429 model_cooldown’，api_key 已脱敏，投递 source=error
+      且不包含‘已自动继续核实’。
+    recorded_at: '2026-07-25T01:04:15+00:00'
+  blocked_reason: TDD 完成闸门要求同时提供 Red 与 Green 证据
+  failure_evidence:
+  - TDD 完成闸门要求同时提供 Red 与 Green 证据
+  required_action: null
+  confirmed_at: '2026-07-25T01:04:15+00:00'
+- id: minimal-fix
+  skill: implement
+  completion_gate: null
+  status: complete
+  required_files: []
+  output_files:
+  - path: D:/workplace/typescript/wecom-agent/src/runtime-todolist.ts
+    sha256: 4b1791b4869b2195d6f94c4ab31c48f542c6133806a9a406772f2527f8f7ce6d
+  - path: D:/workplace/typescript/wecom-agent/src/wecom-adapter.ts
+    sha256: 35eb6996d7abadfdd2699b2c985213d4c5a162a41d9795883e05c081c610ea7f
+  - path: D:/workplace/typescript/wecom-agent/src/tests/test-final-reply-delivery.ts
+    sha256: 66e9e49533d5b50fc74ecd399b8283e7953849ae4737e69a4600f8e090dbca64
+  handoff_summary: 已完成最小代码修复和回归测试：模型异常不再伪装成证据不足，用户可见内容为脱敏后的真实异常；正常未通过评审和 Human Loop
+    分支保持原行为。
+  evidence:
+  - kind: verification
+    summary: 最小修复已完成：reviewFinalAnswerWithModel 捕获异常时保留统一脱敏后的真实错误；resolveFinalReplyWithModel
+      将评审错误标记为 source=error 并停止继续审核快照；resolveFinalReplyDelivery 直达真实异常，不再调用‘已自动继续核实’兜底。
+    recorded_at: '2026-07-25T01:05:44+00:00'
+  - kind: verification
+    summary: npx tsc --noEmit --pretty false、git diff --check 通过；定向测试 test-final-reply-delivery、test-runtime-todolist、test-error-response、test-diagnostic-http
+      均通过。
+    recorded_at: '2026-07-25T01:05:44+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-25T01:05:44+00:00'
+- id: code-review
+  skill: code-review
+  completion_gate: null
+  status: complete
+  required_files: []
+  output_files: []
+  handoff_summary: 代码评审通过：Standards 与 Spec 两轴均无阻断问题，修复与线上症状、回归 seam 和异常脱敏约束一致。
+  evidence:
+  - kind: verification
+    summary: Standards review：改动仅集中在最终回复评审异常状态、投递分支和对应测试；复用现有 buildUserFacingErrorReply
+      脱敏边界，无全局格式化、无无关重构、无原始凭据输出。
+    recorded_at: '2026-07-25T01:06:37+00:00'
+  - kind: verification
+    summary: Spec review：模型评审异常会保留真实脱敏错误并以 source=error 直达用户，不再生成‘已自动继续核实’；正常阶段性候选、Human
+      Loop 和已审核发送分支保持原行为；未发现范围外行为变更。
+    recorded_at: '2026-07-25T01:06:37+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-25T01:06:37+00:00'
+- id: verification
+  skill: testing
+  completion_gate: null
+  status: complete
+  required_files: []
+  output_files: []
+  handoff_summary: 本地验证完成，任务编排全部阶段完成；修复尚未提交、推送或部署，线上回归保留为未验证项。
+  evidence: &id001
+  - kind: verification
+    summary: 最终定向测试通过：node --loader ts-node/esm src/tests/test-final-reply-delivery.ts、test-runtime-todolist.ts、test-error-response.ts、test-diagnostic-http.ts。模型异常用例确认用户可见‘最终回复模型评审失败：HTTP
+      429 model_cooldown’，api_key 脱敏且不含‘已自动继续核实’。
+    recorded_at: '2026-07-25T01:07:56+00:00'
+  - kind: verification
+    summary: npx tsc --noEmit --pretty false、git diff --check 通过；未发现残留 [DEBUG-*] instrumentation。npm
+      test 未执行，因为 package.json 是固定失败占位脚本。
+    recorded_at: '2026-07-25T01:07:56+00:00'
+  - kind: verification
+    summary: 未执行线上 10.1.14.177 回归：本轮未获提交、推送或部署授权，远端仍是旧版本；线上验证待部署后执行。
+    recorded_at: '2026-07-25T01:07:56+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-25T01:07:56+00:00'
+current_stage: verification
+current_skill: testing
+stage_status: complete
+next_skill: null
+resume_from: completed
+continuation_mode: auto
+required_action: null
+handoff_summary: 阶段 verification 已完成，任务编排中的全部阶段已完成。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-07-25T01:07:56+00:00'

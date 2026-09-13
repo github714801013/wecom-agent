@@ -70,7 +70,6 @@
   "tools": {
     "allowed": [],
     "excluded": [],
-    "cacheTtlMinutes": 30,
-    "maxAgentToolResultsPerTurn": 64
+    "cacheTtlMinutes": 30
   }
 }

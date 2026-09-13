@@ -1,0 +1,184 @@
+schema_version: 3
+orchestrator_version: 3
+revision: 11
+task_id: sensitive-request-guard-code-analysis-false-positive
+task:
+  title: 修复代码分析文本误触发安全拦截
+  source: 用户反馈：OA代码检索结论包含调用链、缓存键和INSERT落库说明时被安全拦截，正常代码分析不应被拦截
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  confirmed_at: '2026-07-29T04:37:04+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feature/search-iteration
+  base_branch: null
+  migration: null
+route: bug
+route_history: []
+stages:
+- id: diagnosing-bugs
+  skill: diagnosing-bugs
+  completion_gate: null
+  status: complete
+  required_files:
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/debugging-evidence-specs.md
+    sha256: 1296e685eade03559af8c395802b99b917c4f9d973acd2d8a35ba582a691c245
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/loki-cli-specs.md
+    sha256: bb8fd708fdbb5058375a3f2e64d794b8fe8e5cac39df3c2545d4b09c5281ce15
+  output_files: []
+  handoff_summary: 已读回敏感凭据前置拦截原始需求和实施计划，建立确定性失败测试并定位根因：英文账号正则无词边界，把代码变量 userId 识别为
+    user；同段中的查询/读取再被识别为披露意图，导致正常代码分析误拦截。回归 seam 为统一守卫单测。
+  evidence:
+  - kind: verification
+    summary: 原计划基线：docs/engineering/specs/2026-07-17-sensitive-request-guard-raw-requirements.md
+      与 docs/engineering/plans/2026-07-17-sensitive-credential-guard-plan.md 明确只拦截真实凭据索取，代码、调用链、鉴权和接口排障应放行。
+    recorded_at: '2026-07-29T04:46:25+00:00'
+  - kind: verification
+    summary: 反馈环：node --loader ts-node/esm src/tests/test-sensitive-request-guard.ts
+      稳定 EXIT=1；新增代码检索样本实际返回 blocked=true，断言期望 false。仅含 userId 调用链、仅含查询读取的两个对照样本均通过，组合样本失败。
+    recorded_at: '2026-07-29T04:46:25+00:00'
+  - kind: verification
+    summary: 根因：CREDENTIAL_PATTERNS 的 user/account 无单词边界，userId 命中 account_identifier；STRONG_DISCLOSURE_PATTERN
+      的读取使安全技术语境豁免失效。SQL 提取只识别 SELECT/SHOW/EXPLAIN，样本中的 INSERT INTO NumberCard 不是本次阻断源。
+    recorded_at: '2026-07-29T04:46:25+00:00'
+  - kind: verification
+    summary: Loki 未查询：故障已在无外部依赖的纯函数 seam 100% 复现，用户未提供消息 ID 或时间窗；生产日志不会改变分类器输入输出根因。
+    recorded_at: '2026-07-29T04:46:25+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T04:46:25+00:00'
+- id: regression-test
+  skill: tdd
+  completion_gate: tdd
+  status: complete
+  required_files:
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/testing-specs.md
+    sha256: 600abb701d7daef7bd2faad3d9e333717047577d32349c94eefae5fffcdf2d4c
+  output_files:
+  - path: D:/workplace/typescript/wecom-agent/src/tests/test-sensitive-request-guard.ts
+    sha256: 45222c2cc91fe855b246aa9d7ef946c23c03c78e7793f3a0d1d3063f9bfd30c8
+  handoff_summary: TDD 红绿闭环完成：公共敏感请求分类 seam 覆盖 userId/accountId 代码标识符与查询/读取组合、含 INSERT
+    的代码结论，以及真实 username 索取反例；最小边界修复后全部通过。
+  evidence:
+  - kind: verification
+    summary: 测试 seam 为原计划既有公开函数 detectSensitiveCredentialRequest；没有 mock 私有实现，也没有连接模型、MCP、数据库或生产环境。
+    recorded_at: '2026-07-29T04:49:01+00:00'
+  - kind: tdd_red
+    summary: 修复前执行 node --loader ts-node/esm src/tests/test-sensitive-request-guard.ts
+      稳定 EXIT=1：代码检索样本被判定 blocked=true，断言期望 false；两个拆分对照样本单独通过。
+    recorded_at: '2026-07-29T04:49:01+00:00'
+  - kind: tdd_green
+    summary: 给英文 user/username/account 增加完整单词边界后，同一命令通过；userId、accountId 和含 INSERT
+      INTO NumberCard 的代码分析样本放行，原有密码、Token、API Key、Cookie、私钥及新增完整 username 索取样本仍拦截。
+    recorded_at: '2026-07-29T04:49:01+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T04:49:01+00:00'
+- id: minimal-fix
+  skill: implement
+  completion_gate: null
+  status: complete
+  required_files:
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/workflow-guardrails.md
+    sha256: 7809000b9186b202fc2b2f8035d80493e7ebf7c2ab43ac2b13a6b7e48dc5f85b
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/general-specs.md
+    sha256: 21a529153dc10c826882c40f803251b223346cebd4de17853c263df06c3f892b
+  output_files:
+  - path: D:/workplace/typescript/wecom-agent/src/sensitive-request-guard.ts
+    sha256: 3be35a983dd6212a286ef54f7a4bc25820db5e12ec5b853f43338a48a1a211e7
+  - path: D:/workplace/typescript/wecom-agent/src/tests/test-sensitive-request-guard.ts
+    sha256: 45222c2cc91fe855b246aa9d7ef946c23c03c78e7793f3a0d1d3063f9bfd30c8
+  handoff_summary: 完成最小修复：仅为英文 user/username/account 账号标识模式增加完整单词边界，避免 userId/accountId
+    代码变量触发敏感凭据识别；补充反馈文本、拆分对照及真实 username 反例回归。
+  evidence:
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-sensitive-request-guard.ts 通过：原反馈中的
+      userId、查询/读取及 INSERT 代码分析文本均放行，真实 username 索取仍拦截。
+    recorded_at: '2026-07-29T05:56:14+00:00'
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-sensitive-credential-guard.ts
+      通过；统一守卫兼容入口行为一致。
+    recorded_at: '2026-07-29T05:56:14+00:00'
+  - kind: verification
+    summary: npx tsc --noEmit --pretty false 通过，无 TypeScript 类型错误。
+    recorded_at: '2026-07-29T05:56:14+00:00'
+  - kind: verification
+    summary: 'git diff --check 通过；npm test 为仓库既有固定占位脚本 Error: no test specified，无法作为项目全量测试入口。'
+    recorded_at: '2026-07-29T05:56:14+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T05:56:14+00:00'
+- id: code-review
+  skill: code-review
+  completion_gate: null
+  status: complete
+  required_files: []
+  output_files: []
+  handoff_summary: 完成 Standards 与 Spec 双轴并行审查：两轴均 0 项发现；最小正则边界调整与新增回归样本符合项目规范和原始安全边界。
+  evidence:
+  - kind: verification
+    summary: Standards 轴：以 HEAD d3c649f 为固定点审查两个目标文件的未提交 diff；未发现违反 AGENTS.md 最小修改、保持风格、核心逻辑测试等规则的硬性问题，12
+      类基线代码异味均无发现。
+    recorded_at: '2026-07-29T06:03:08+00:00'
+  - kind: verification
+    summary: Spec 轴：对照敏感请求原始需求、实施计划及当前误拦截缺陷；未发现缺失、部分实现、范围扩张或错误实现。单词边界修复放行 userId/accountId/LoadUser，同时独立
+      username 索取仍拦截。
+    recorded_at: '2026-07-29T06:03:08+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T06:03:08+00:00'
+- id: verification
+  skill: testing
+  completion_gate: null
+  status: complete
+  required_files:
+  - path: C:/Users/Administrator/.codex/skills/dev-spec-gen/references/testing-specs.md
+    sha256: 600abb701d7daef7bd2faad3d9e333717047577d32349c94eefae5fffcdf2d4c
+  output_files: []
+  handoff_summary: 最终验证完成：目标误拦截已修复，真实敏感凭据索取边界保持；目标测试、兼容测试、TypeScript 类型检查、暂存 diff
+    校验及双轴审查均通过。全量测试和数值覆盖率因项目未配置相应入口而未验证。
+  evidence: &id001
+  - kind: verification
+    summary: 公共 seam：detectSensitiveCredentialRequest。最终执行目标回归通过，覆盖 userId 与查询/读取组合、accountId/LoadUser
+      变体、含 INSERT 的代码结论放行，以及独立 username 和既有密码/Token/API Key 等真实凭据索取拦截。
+    recorded_at: '2026-07-29T06:07:57+00:00'
+  - kind: verification
+    summary: 兼容入口 test-sensitive-credential-guard.ts 通过；npx tsc --noEmit --pretty
+      false 通过；ts-node 仅输出 loader 实验性与 fs.Stats 弃用警告。
+    recorded_at: '2026-07-29T06:07:57+00:00'
+  - kind: verification
+    summary: git diff --cached --check 通过；暂存区仅 src/sensitive-request-guard.ts 与 src/tests/test-sensitive-request-guard.ts，文件
+      SHA-256 与实现阶段登记一致。
+    recorded_at: '2026-07-29T06:07:57+00:00'
+  - kind: verification
+    summary: '项目未配置覆盖率工具，替代证据为公共函数表驱动正反例与 TDD 红绿记录，无法提供数值覆盖率；npm test 为既有固定占位脚本并返回
+      Error: no test specified，因此项目全量测试未执行。'
+    recorded_at: '2026-07-29T06:07:57+00:00'
+  - kind: verification
+    summary: 双轴代码审查完成：Standards 0 项发现，Spec 0 项发现；未发现缺失、范围扩张、错误实现或基线代码异味。
+    recorded_at: '2026-07-29T06:07:57+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  required_action: null
+  confirmed_at: '2026-07-29T06:07:57+00:00'
+current_stage: verification
+current_skill: testing
+stage_status: complete
+next_skill: null
+resume_from: completed
+continuation_mode: auto
+required_action: null
+handoff_summary: 阶段 verification 已完成，任务编排中的全部阶段已完成。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-07-29T06:07:57+00:00'

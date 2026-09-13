@@ -1,0 +1,1039 @@
+schema_version: 3
+orchestrator_version: 3
+revision: 12
+task_id: dev-biz-rewrite-keep-values
+task:
+  title: 业务回复保留代码值与SQL
+  source: local
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-02T07:02:35+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feature/search-iteration
+  base_branch: null
+  base_commit: null
+  migration: null
+route: development
+flow_definition:
+  version: 1
+  task_type: development
+  option_id: development_lightweight
+  name: 轻量需求开发
+  purpose: 适用于范围明确、无需完整规格拆解但仍需要实现、评审和验证的需求。
+  stage_ids:
+  - gitnexus-inquiry
+  - workspace-confirm
+  - grill-with-docs
+  - implement-no-tdd
+  - code-review
+  stages:
+  - id: gitnexus-inquiry
+    skill: null
+    mcp:
+      server: remote_gitnexus
+      tools:
+      - query
+      - context
+      - code_snippet
+      - impact
+      - trace
+      fallback: local_workspace_search
+      scope: current_workspace
+    execution_mode: sub_agent
+    kind: mcp
+    host_action: null
+    reference_mutation: false
+    skills: []
+    agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+      source=local_search、authority=non_gitnexus。
+    orchestration_mode: mcp_prompt
+    evidence_policy:
+      gitnexus_first: true
+      require_query_record: true
+      allow_local_fallback: true
+      local_fallback_only_when:
+      - repository_unindexed
+      - service_unavailable
+      - authorization_unavailable
+      - timeout
+      - index_stale
+      - aggregate_unsupported
+      - capability_unavailable
+      local_search_root: workspace.path
+      local_evidence_source: local_search
+      local_evidence_authority: non_gitnexus
+      local_search_cannot_prove:
+      - call_graph
+      - impact
+      - cross_project_trace
+      - complete_consumers
+    completion_gate:
+      id: inquiry_record
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: user_confirmation
+      action: execute_gitnexus_inquiry
+      prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+        Agent。
+      allow_skip: research_not_needed
+      reuse: same_task_readonly_exact
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: plans/dev-biz-rewrite-keep-values-gitnexus-inquiry.md
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: research
+      index_path: research/index.yml
+      path: gitnexus
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: workspace-confirm
+    skill: null
+    mcp: null
+    execution_mode: main_agent
+    kind: host_action
+    host_action:
+      id: workspace_confirm
+      purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+      steps:
+      - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+      - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+      - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+        worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+    reference_mutation: false
+    skills: []
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: workspace_confirmation_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics: []
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: grill-with-docs
+    skill: grill-with-docs
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - grill-with-docs
+    agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+      Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后 choose-question-node
+      记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+    orchestration_mode: nested_sub_orchestration
+    evidence_policy: null
+    completion_gate:
+      id: evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: skill_defined
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: grill
+      index_path: grill/index.yml
+      path: interaction
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: implement-no-tdd
+    skill: implement
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - ponytail
+    - implement
+    agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: implementation_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: engineering
+      index_path: engineering/index.yml
+      path: .
+      max_level: 3
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - ponytail
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: code-review
+    skill: code-review
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - code-review
+    agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+      HEAD^..HEAD。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: review_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: git
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  transitions:
+    complete:
+      workspace-confirm: grill-with-docs
+      grill-with-docs: implement-no-tdd
+      implement-no-tdd: code-review
+      code-review: null
+      gitnexus-inquiry: workspace-confirm
+    skipped:
+      workspace-confirm: grill-with-docs
+      grill-with-docs: implement-no-tdd
+      implement-no-tdd: code-review
+      code-review: null
+      gitnexus-inquiry: workspace-confirm
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  research_mode: current_workspace_research
+flow_selection:
+  task_type: development
+  option_id: development_lightweight
+  selection_mode: preset
+  stage_ids:
+  - gitnexus-inquiry
+  - workspace-confirm
+  - grill-with-docs
+  - implement-no-tdd
+  - code-review
+  omitted_stages:
+  - to-spec
+  - to-tickets
+  - implement
+  - verify
+  omission_reason: 用户选择了不含这些阶段的流程
+  skill_audit:
+    checked:
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    - skill: grill-with-docs
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\grill-with-docs\SKILL.md
+    - skill: implement
+      source: builtin
+    - skill: ponytail
+      source: missing
+    - skill: tdd
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\tdd\SKILL.md
+    - skill: to-spec
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-spec\SKILL.md
+    - skill: to-tickets
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-tickets\SKILL.md
+    - skill: verify
+      source: missing
+    skipped:
+    - stage_id: implement
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: implement-no-tdd
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: verify
+      skill: verify
+      reason: skill_initially_unavailable
+  research_mode: current_workspace_research
+  research_mode_choice:
+    choice: current_workspace_research
+    chosen_at: '2026-09-02T07:02:54+00:00'
+    source: cli
+  name: 轻量需求开发
+  purpose: 适用于范围明确、无需完整规格拆解但仍需要实现、评审和验证的需求。
+route_history: []
+rollback_history: []
+flow_selection_epoch: 0
+awaiting_flow_selection: null
+code_relationship_graphs: []
+stages:
+- id: gitnexus-inquiry
+  skill: null
+  mcp:
+    server: remote_gitnexus
+    tools:
+    - query
+    - context
+    - code_snippet
+    - impact
+    - trace
+    fallback: local_workspace_search
+    scope: current_workspace
+  execution_mode: sub_agent
+  kind: mcp
+  host_action: null
+  reference_mutation: false
+  skills: []
+  agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+    source=local_search、authority=non_gitnexus。
+  orchestration_mode: mcp_prompt
+  evidence_policy:
+    gitnexus_first: true
+    require_query_record: true
+    allow_local_fallback: true
+    local_fallback_only_when:
+    - repository_unindexed
+    - service_unavailable
+    - authorization_unavailable
+    - timeout
+    - index_stale
+    - aggregate_unsupported
+    - capability_unavailable
+    local_search_root: workspace.path
+    local_evidence_source: local_search
+    local_evidence_authority: non_gitnexus
+    local_search_cannot_prove:
+    - call_graph
+    - impact
+    - cross_project_trace
+    - complete_consumers
+  completion_gate:
+    id: inquiry_record
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: user_confirmation
+    action: execute_gitnexus_inquiry
+    prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+      Agent。
+    allow_skip: research_not_needed
+    reuse: same_task_readonly_exact
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: plans/dev-biz-rewrite-keep-values-gitnexus-inquiry.md
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+    index_sha256: a6190739557bd2b7ed15d6d14c0a4433854a99ee68673acdb69faf3b6b6df2f8
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files: []
+  handoff_summary: 本地调研确认调整点：src/business-answer-rewrite.ts 的 BUSINESS_REWRITE_SYSTEM_PROMPT
+    规则2禁止代码与SQL
+  evidence:
+  - kind: verification
+    summary: source=local_search authority=non_gitnexus
+    recorded_at: '2026-09-02T07:03:41+00:00'
+  - kind: verification
+    summary: 'src/business-answer-rewrite.ts: BUSINESS_REWRITE_SYSTEM_PROMPT 规则2「不要给出任何代码、SQL、技术术语或实现细节」与本次需求冲突'
+    recorded_at: '2026-09-02T07:03:41+00:00'
+  - kind: verification
+    summary: '调用链: wecom-adapter.ts 业务模式分支调用 rewriteAnswerForBusiness(question, fullContent)，prompt
+      是唯一调整点'
+    recorded_at: '2026-09-02T07:03:41+00:00'
+  - kind: verification
+    summary: '调整方向: 规则2改为保留具体取值（字段/参数/枚举/错误码/状态码等）与 SQL 原样，其余实现细节仍转业务语言'
+    recorded_at: '2026-09-02T07:03:41+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-02T07:03:41+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: execute_gitnexus_inquiry
+    command: 执行只读 GitNexus 调研（scope=current_workspace）
+    authorization: 用户在流程选择阶段选择调研模式 current_workspace_research，视为同意执行该只读调研。
+    authorized_at: '2026-09-02T07:02:54+00:00'
+    source: research_mode
+  answer_confirmations: []
+  host_action_baseline: null
+- id: workspace-confirm
+  skill: null
+  mcp: null
+  execution_mode: main_agent
+  kind: host_action
+  host_action:
+    id: workspace_confirm
+    purpose: 呈现并确认当前任务的工作区绑定（decision、branch、base_branch），用户可修改 base 分支后重新预检。
+    steps:
+    - 呈现当前任务绑定的工作区：decision、path、branch、base_branch（默认当前分支）。
+    - 向用户确认绑定；用户要求修改 base 分支时，重新执行 workspace-options 预检并更新绑定。
+    - 回写 host_action_result 精确 5 字段：decision、branch、base_branch、base_commit、confirmed_at；当前分支或复用
+      worktree 的 base 两字段为 null，新建模式与 canonical 一致；用户确认文本写入 evidence。
+  reference_mutation: false
+  skills: []
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: workspace_confirmation_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics: []
+  reference_topics_snapshot: []
+  output_files: []
+  handoff_summary: 工作区绑定已确认
+  evidence:
+  - kind: verification
+    summary: 用户确认 current_workspace_current_branch on feature/search-iteration
+    recorded_at: '2026-09-02T07:06:04+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-02T07:06:04+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: workspace_confirm
+    command: '确认工作区绑定: decision=current_workspace_current_branch, branch=feature/search-iteration,
+      base_branch=null'
+    authorization: 'workspace_confirm: 确认工作区绑定 current_workspace_current_branch on
+      feature/search-iteration'
+    authorized_at: '2026-09-02T07:05:47+00:00'
+  answer_confirmations: []
+  host_action_baseline:
+    head: d3c649f967f0727d2643995f5399d35269506ced
+    branch: feature/search-iteration
+- id: grill-with-docs
+  skill: grill-with-docs
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - grill-with-docs
+  agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问让用户二选一：直接回答或委派二级查询
+    Agent；必须先 submit-node 登记 question_choice（round_id/questions/options），用户选择后 choose-question-node
+    记录；子 Agent 只返回结构化 handoff，资料回答须用户接受确认。
+  orchestration_mode: nested_sub_orchestration
+  evidence_policy: null
+  completion_gate:
+    id: evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: skill_defined
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: grill
+    index_path: grill/index.yml
+    path: interaction
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: grill
+    index_path: grill/index.yml
+    path: interaction
+    max_level: 3
+    index_sha256: c374961f65c609422fea84173d3f15f8db8be6a16a0b4575945d3b35ab31ed3d
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files: []
+  handoff_summary: 需求澄清完成：SQL 完整原样保留；保留代码具体取值但不保留代码块
+  evidence:
+  - kind: verification
+    summary: SQL 语句完整原样保留（表名、字段、条件、参数值、变量占位符均不变，不截断）
+    recorded_at: '2026-09-02T07:07:39+00:00'
+  - kind: verification
+    summary: 代码具体取值必须原样保留：字段名、参数名/值、枚举值、错误码、状态码、接口路径、配置项及配置值
+    recorded_at: '2026-09-02T07:07:39+00:00'
+  - kind: verification
+    summary: 代码块/代码片段本身可转为业务语言，不额外输出代码
+    recorded_at: '2026-09-02T07:07:39+00:00'
+  - kind: verification
+    summary: 其余技术实现细节仍转业务语言；回答保持简明扼要
+    recorded_at: '2026-09-02T07:07:39+00:00'
+  - kind: verification
+    summary: 调整点仅 src/business-answer-rewrite.ts 的 BUSINESS_REWRITE_SYSTEM_PROMPT
+    recorded_at: '2026-09-02T07:07:39+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-02T07:07:39+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: implement-no-tdd
+  skill: implement
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - ponytail
+  - implement
+  agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: implementation_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+    index_sha256: fe9f6360bba9ca7a7c7bf49835bf2ee55cea88b6541c47953c641f53a19798e1
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files: []
+  handoff_summary: 业务重写提示词已更新：SQL 完整保留、代码具体取值保留、代码块转业务语言
+  evidence:
+  - kind: verification
+    summary: 'src/business-answer-rewrite.ts: 规则2 SQL 语句完整原样保留（含变量占位符），不省略不截断'
+    recorded_at: '2026-09-02T07:09:16+00:00'
+  - kind: verification
+    summary: 规则3 代码具体取值必须原样保留：字段名、参数名/值、枚举值、错误码、状态码、接口路径、配置项及配置值
+    recorded_at: '2026-09-02T07:09:16+00:00'
+  - kind: verification
+    summary: 规则4 代码块与其余技术实现细节转业务语言，不额外输出代码
+    recorded_at: '2026-09-02T07:09:16+00:00'
+  - kind: verification
+    summary: tsc --noEmit 通过；无测试断言旧提示词文案
+    recorded_at: '2026-09-02T07:09:16+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail
+  required_action: null
+  confirmed_at: '2026-09-02T07:09:16+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: code-review
+  skill: code-review
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - code-review
+  agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+    HEAD^..HEAD。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: review_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+    index_sha256: 2629145e0da05b1998a9c203c6bd10f6ad259b76165074b36803e283ca3be51b
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files: []
+  handoff_summary: 代码审查通过：仅调整 BUSINESS_REWRITE_SYSTEM_PROMPT 文案，规则覆盖完整
+  evidence: &id001
+  - kind: verification
+    summary: 变更范围仅 BUSINESS_REWRITE_SYSTEM_PROMPT 常量，调用方式与错误处理不变
+    recorded_at: '2026-09-02T07:10:02+00:00'
+  - kind: verification
+    summary: SQL 保留规则覆盖：表名、字段、条件、参数值、变量占位符，含禁止动作（省略/缩写/改写/截断）
+    recorded_at: '2026-09-02T07:10:02+00:00'
+  - kind: verification
+    summary: 取值保留规则覆盖：字段名、参数名/值、枚举值、错误码、状态码、接口路径、配置项/值
+    recorded_at: '2026-09-02T07:10:02+00:00'
+  - kind: verification
+    summary: 代码块转业务语言规则与取值保留规则无冲突（值保留，块不保留）
+    recorded_at: '2026-09-02T07:10:02+00:00'
+  - kind: verification
+    summary: tsc --noEmit 通过；无测试断言旧文案；无其他调用点受影响
+    recorded_at: '2026-09-02T07:10:02+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-02T07:10:02+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+current_stage: code-review
+current_skill: code-review
+stage_status: complete
+next_skill: null
+resume_from: completed
+continuation_mode: auto
+required_action: null
+handoff_summary: 阶段 code-review 已完成，任务编排中的全部阶段已结束。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-09-02T07:10:05+00:00'
+initialization:
+  selection_id: -eZu70n0gPh7hHu_LmfrZg
+  purpose: init
+  selection_stage: final
+  chosen_at: '2026-09-02T07:02:58+00:00'
+  definition:
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  stages_sha256: ee73c60c41e79795d83dae99ae962ae50f978c34b74c08871bab14da2cad0b2f
+  flow_definition_sha256: 5c03d4d65c9123c55fb6646a6f640b0ccf46eadebea1e917d858d405db0e581c
+  provenance: cli_selection

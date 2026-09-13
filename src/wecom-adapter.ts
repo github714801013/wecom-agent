@@ -1,24 +1,22 @@
 import { WSClient, MessageType, generateReqId } from "@wecom/aibot-node-sdk";
-import { initializeAgent, runPlanner, runSearchLoopPrelude, getModelContextWindow, getBaseModel, getBusinessPrompt, extractExplicitRepoHints, buildMessagesForCurrentTurn, scopeToolsToRepo } from "./graph.js";
-import { getMissingPriorityAnswerAnchors, repairAnswerForMissingPriorityAnchors } from "./answer-anchor-guard.js";
+import { initializePiAgent as initializePrimaryPiAgent, runPlanner, getModelContextWindow, extractExplicitRepoHints, buildMessagesForCurrentTurn, scopeToolsToRepo } from "./graph.js";
 import { config, type BotConfig } from "./config.js";
-import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage, BaseMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { sessionManager, type ReplyMode } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 import { analyzeImageForQuestion, type VisionImageAnalyzer } from "./vision-analyzer.js";
-import { buildMcpHeaders, getAllMcpTools } from "./mcp-client.js";
+import { buildMcpHeaders, filterToolsForKnownProjectScope, getAllMcpTools } from "./mcp-client.js";
 import {
   buildHumanLoopReply,
   buildHumanLoopResumeContent,
   detectHumanLoopRequest,
-  detectClarificationContent,
   isAmbiguousNewTopicWhilePending,
   isHumanLoopExpired,
   toStoredHumanLoopRequest,
   type HumanLoopRequest,
 } from "./human-loop.js";
-import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, formatElapsedDuration, getProcessingFrame, stripProtocolNoise } from "./progress-updates.js";
 import { rewriteAnswerForBusiness } from "./business-answer-rewrite.js";
+import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, formatElapsedDuration, getProcessingFrame, stripProtocolNoise } from "./progress-updates.js";
 import {
   consumeFlowControlDelta,
   createDefaultFlowControl,
@@ -27,26 +25,33 @@ import {
   type FlowControlPatch,
   mergeFlowControl,
 } from "./flow-control.js";
+import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE, STREAM_SAFE_TTL_MS } from "./stream-ttl.js";
 import {
-  buildAgentToolErrorLimitReply,
-  createAgentProgressGuard,
-  createAgentProgressLimitError,
-  createAgentToolErrorLimitError,
-} from "./agent-progress-guard.js";
-import {
-  AUTO_VERIFICATION_NO_PROGRESS_REPLY,
-  buildAutoVerificationContinuationPrompt,
-  runAutoVerificationLoop,
-  type AutoVerificationRoundContext,
   type AutoVerificationRoundResult,
 } from "./auto-verification-loop.js";
-import { isStreamExpired, isWeComReplyAckTimeoutError, isWeComStreamExpiredError, STREAM_EXPIRED_MESSAGE } from "./stream-ttl.js";
-import { buildToolContextSummary, filterToolResultForCurrentTurn, type ToolContextRecord } from "./tool-context-filter.js";
+import { buildToolContextSummary, type ToolContextRecord } from "./tool-context-filter.js";
 import { buildToolResultFileReadTool } from "./tool-result-store.js";
-import { buildProgressLimitRecoverySystemPrompt, ensureRecoverySqlAuditMarker } from "./recovery-synthesis.js";
 import { buildOriginalQuestionTool } from "./original-question-tool.js";
 import { stringifyModelContent } from "./model-content.js";
-import { buildUserFacingErrorReply } from "./error-response.js";
+import { buildUserFacingErrorReply, getErrorMessage } from "./error-response.js";
+import { buildRequestRawTrace, isRequestRawLoggingEnabled } from "./request-raw-trace.js";
+import { filterPiAgentTools, type PiAgentEvent } from "./pi-agent-runtime.js";
+import {
+  createRequestTimingRecord,
+  formatRequestTimingLog,
+  monotonicNowMs,
+  shouldSampleRequest,
+  type RequestTerminalStatus,
+} from "./request-timing.js";
+import {
+  createAgentSlotScheduler,
+  AgentSlotCancelledError,
+  type AgentSlotLease,
+} from "./agent-slot-scheduler.js";
+import {
+  createReplyScheduler,
+  type ReplyScheduler,
+} from "./reply-scheduler.js";
 import { buildSessionMemoryGraphTool } from "./session-memory-graph.js";
 import {
   buildStreamPauseResumeRequest,
@@ -65,11 +70,9 @@ import {
   resolveMcpHeaderCommand,
 } from "./mcp-header-commands.js";
 import {
-  buildDirectEvidenceFastPathInstruction,
   buildDirectEvidenceRuntimeInstruction,
   buildEntryAnchorGraphInstruction,
   hasDirectEvidenceAnchors,
-  shouldUseWeComDirectEvidenceFastPath,
 } from "./direct-evidence.js";
 import {
   buildFollowupQuestion,
@@ -84,38 +87,35 @@ import {
   extractSensitiveRequestPreflightText,
   judgeSensitiveRequestByModel,
 } from "./sensitive-request-guard.js";
-import {
-  applySqlAuditEvidence,
-  assertTodoListComplete,
-  blockTodoItem,
-  buildIncompleteAuditTodoMessage,
-  generateUserFacingAuditFallbackMessage,
-  buildRuntimeTodoTool,
-  buildSqlAuditEvidence,
-  completeAnswerSupportedAuditItems,
-  completeRecoveryAuditItems,
-  completeSkippedAuditItems,
-  completeTodoItem,
-  createRuntimeTodoList,
-  getIncompleteAuditTodoItems,
-  hasRepeatedInputOutput,
-  hasTodoItem,
-  isSqlAuditEvidenceBlocking,
-  renderTodoStepsForHeartbeat,
-  snapshotUserFacingTodoSteps,
-  type FinalReplyResolutionResult,
-  type UserFacingTodoStep,
-  resolveFinalReplyWithModel,
-  shouldSendFinalReply,
-  syncRuntimeAuditTodoPlan,
-  startTodoItem,
-  summarizeTodoList,
-} from "./runtime-todolist.js";
-
+import type { FinalReplyResolutionResult } from "./runtime-todolist.js";
 interface ActiveTaskState {
   msgid: string;
   cancelled: boolean;
+  streamExpired?: boolean;
+  streamExpiryMessageSent?: boolean;
+  abortController?: AbortController;
+  cancel?: () => void;
+  terminalState?: "open" | "cancelled" | "expired" | "final_sent";
   question: string;
+}
+
+interface VisiblePlanStep {
+  id: string;
+  task: string;
+  status: string;
+}
+
+function renderVisiblePlanSteps(steps: readonly VisiblePlanStep[], heartbeatFrame: string) {
+  if (steps.length === 0) return "";
+  const lines = steps.map(step => {
+    const marker = step.status === "done"
+      ? "✓"
+      : step.status === "in_progress" && heartbeatFrame
+        ? heartbeatFrame
+        : "○";
+    return `${marker} ${step.task}`;
+  });
+  return `【处理进度】\n${lines.join("\n")}`;
 }
 
 interface AgentStreamMetadata {
@@ -129,6 +129,72 @@ interface AgentStreamMetadata {
 interface BotReconnectState {
   reconnectExhaustedTimer: NodeJS.Timeout | null;
   reconnectWatchdogTimer: NodeJS.Timeout | null;
+}
+
+function extractAssistantText(message: unknown) {
+  if (!message || typeof message !== "object") return "";
+  const record = message as { role?: unknown; content?: unknown };
+  if (record.role !== "assistant") return "";
+  return stringifyModelContent(record.content);
+}
+
+export function extractPiAgentEndContent(event: PiAgentEvent) {
+  if (event.type !== "agent_end") return "";
+  const messages = Array.isArray(event.messages) ? event.messages : [];
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage || typeof lastMessage !== "object") return "";
+  const record = lastMessage as { role?: unknown; stopReason?: unknown };
+  if (record.role !== "assistant" || record.stopReason !== "stop") return "";
+  return extractAssistantText(lastMessage);
+}
+
+function extractPiAgentEndFailure(event: PiAgentEvent): "error" | "aborted" | null {
+  if (event.type !== "agent_end") return null;
+  const messages = Array.isArray(event.messages) ? event.messages : [];
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage || typeof lastMessage !== "object") return null;
+  const record = lastMessage as { role?: unknown; stopReason?: unknown };
+  if (record.role !== "assistant") return null;
+  if (record.stopReason === "error") return "error";
+  if (record.stopReason === "aborted") return "aborted";
+  return null;
+}
+
+export function buildPrimaryPiAgentTools(
+  scopedEvidenceTools: any[],
+  originalQuestionTool: any,
+  sessionMemoryTool: any,
+  resultFileReadTool: any,
+) {
+  return filterPiAgentTools([scopedEvidenceTools, originalQuestionTool, sessionMemoryTool, resultFileReadTool].flat());
+}
+
+function eventToLegacyMessage(event: PiAgentEvent): BaseMessage | null {
+  if (event.type === "agent_end") {
+    const content = extractPiAgentEndContent(event);
+    return content ? new AIMessage(content) : null;
+  }
+  if (event.type === "tool_execution_update") {
+    return new AIMessage(`正在执行工具 ${event.toolName}...`);
+  }
+  if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+    return new AIMessage(event.assistantMessageEvent.delta);
+  }
+  if (event.type === "tool_execution_start") {
+    return new AIMessage({
+      content: "",
+      tool_calls: [{ id: event.toolCallId, name: event.toolName, args: event.args }],
+    });
+  }
+  if (event.type === "tool_execution_end") {
+    return new ToolMessage({
+      content: stringifyModelContent(event.result?.content || event.result),
+      tool_call_id: event.toolCallId,
+      name: event.toolName,
+      status: event.isError ? "error" : "success",
+    });
+  }
+  return null;
 }
 
 const THINKING_HEARTBEAT_INTERVAL_MS = 15000;
@@ -161,23 +227,6 @@ function stripEmptyProtocolContent(content: string) {
   return stripProtocolNoise(content);
 }
 
-function getMaxAgentToolResultsPerTurn() {
-  const parsed = Number(process.env.AGENT_MAX_TOOL_RESULTS_PER_TURN);
-  return Number.isInteger(parsed) && parsed > 0
-    ? parsed
-    : config.tools.maxAgentToolResultsPerTurn;
-}
-
-function reconnectBotAfterReplyAckTimeout(bot: WSClient, botName: string, msgid: string) {
-  try {
-    console.warn(`[${botName}] Reply ack timeout for ${msgid}; reconnecting WeCom WebSocket.`);
-    bot.disconnect();
-    bot.connect();
-  } catch (error) {
-    console.error(`[${botName}] Failed to reconnect WeCom WebSocket after reply ack timeout for ${msgid}:`, error);
-  }
-}
-
 function scheduleReconnectAfterReconnectExhausted(
   bot: WSClient,
   botName: string,
@@ -208,42 +257,19 @@ function scheduleReconnectAfterReconnectExhausted(
 }
 
 /**
- * 格式化工具调用显示，提取关键参数以提升用户体验
+ * 格式化工具调用显示，不回显工具参数。
  */
-function getToolDisplay(name: string, args: any): string {
-  if (!args || args === '{}' || args === '') return name;
-  
-  let argsObj: any;
+function getToolArgumentLength(args: unknown) {
+  if (typeof args === "string") return args.length;
   try {
-    if (typeof args === 'string') {
-      argsObj = JSON.parse(args);
-    } else {
-      argsObj = args;
-    }
-
-    // 提取最能代表查询意图的参数
-    const keyParams = ['query', 'searchText', 'pattern', 'target', 'symbol', 'path', 'table_name', 'sql'];
-    for (const key of keyParams) {
-      if (argsObj[key]) {
-        const val = String(argsObj[key]);
-        const truncated = val.length > 30 ? val.substring(0, 30) + "..." : val;
-        return `${name}("${truncated}")`;
-      }
-    }
-    // 如果没有匹配到常用参数，则显示简短的 JSON 片段
-    const briefArgs = JSON.stringify(argsObj);
-    return briefArgs.length > 40 ? `${name}(${briefArgs.substring(0, 40)}...)` : `${name}(${briefArgs})`;
+    const serialized = JSON.stringify(args);
+    return typeof serialized === "string" ? serialized.length : 0;
   } catch {
-    // 尝试正则匹配还没写完的 JSON 片段（流式过程中常见）
-    if (typeof args === 'string') {
-      const match = args.match(/"(query|searchText|pattern|target|symbol|path|table_name|sql)"\s*:\s*"([^"]*)"/);
-      if (match && match[2]) {
-        const val = match[2];
-        const truncated = val.length > 30 ? val.substring(0, 30) + "..." : val;
-        return `${name}("${truncated}...")`;
-      }
-    }
+    return 0;
   }
+}
+
+function getToolDisplay(name: string, _args: unknown): string {
   return name;
 }
 
@@ -494,7 +520,7 @@ export interface FinalReplyDeliveryResult {
   content: string;
   shouldSendFinal: boolean;
   reason: string;
-  source: "reviewed" | "human_loop" | "blocked" | "error" | "no_progress";
+  source: "reviewed" | "candidate" | "human_loop" | "blocked" | "error" | "no_progress";
 }
 
 function extractLikelyFieldNames(content: string) {
@@ -581,7 +607,7 @@ export function buildBlockedFinalHumanLoopRequest(input: FinalReplyDeliveryInput
 }
 
 export function resolveFinalReplyDelivery(input: FinalReplyDeliveryInput): FinalReplyDeliveryResult {
-  if (shouldSendFinalReply(input.finalResolution)) {
+  if (input.finalResolution.ready && input.finalResolution.action === "send") {
     return {
       content: input.finalResolution.answer,
       shouldSendFinal: true,
@@ -738,13 +764,64 @@ export async function parseWeComMessage(
   }
 }
 
-export async function startBot(botConfig: BotConfig) {
-  const bot = new WSClient({
+function withRequestAbort<T>(operation: () => Promise<T>, signal: AbortSignal, message = "请求已取消"): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error(message));
+  const operationPromise = Promise.resolve().then(() => {
+    if (signal.aborted) throw new Error(message);
+    return operation();
+  });
+  void operationPromise.catch(() => undefined);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error(message));
+    signal.addEventListener("abort", abort, { once: true });
+    operationPromise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+export interface BotRuntimeDependencies {
+  judgeSensitiveRequestByModel?: typeof judgeSensitiveRequestByModel;
+  getAllMcpTools?: typeof getAllMcpTools;
+  initializeAgent?: typeof initializePrimaryPiAgent;
+}
+
+export async function startBot(botConfig: BotConfig, client?: WSClient, dependencies: BotRuntimeDependencies = {}) {
+  const bot = client ?? new WSClient({
     botId: botConfig.botId,
     secret: botConfig.secret,
-    wsUrl: botConfig.wsUrl, 
+    wsUrl: botConfig.wsUrl,
   });
+  const judgeSensitiveRequest = dependencies.judgeSensitiveRequestByModel || judgeSensitiveRequestByModel;
+  const loadMcpTools = dependencies.getAllMcpTools || getAllMcpTools;
+  const initializePiAgent = dependencies.initializeAgent || initializePrimaryPiAgent;
   const reconnectState: BotReconnectState = { reconnectExhaustedTimer: null, reconnectWatchdogTimer: null };
+  const replyScheduler: ReplyScheduler = createReplyScheduler();
+  const expiryReplyScheduler: ReplyScheduler = createReplyScheduler();
+  const agentSlotScheduler = createAgentSlotScheduler(config.llm.maxConcurrentRequests);
+  const failedFinalReplies = new Set<string>();
+  const replyErrorHandlers = new Map<string, (error: unknown) => void>();
+  const replyOwnerChecks = new Map<string, () => boolean>();
+  const sendCard = (
+    frame: any,
+    streamId: string,
+    content: string,
+    final = false,
+    options?: any,
+    shouldRun?: () => boolean,
+  ) => {
+    const ownerCheck = shouldRun || replyOwnerChecks.get(streamId);
+    const send = () => options === undefined
+      ? bot.replyStreamWithCard(frame, streamId, content, final)
+      : bot.replyStreamWithCard(frame, streamId, content, final, options);
+    const replyPromise = ownerCheck
+      ? replyScheduler.scheduleIf(ownerCheck, send, final ? "final" : "progress")
+      : replyScheduler.schedule(send, final ? "final" : "progress");
+    return replyPromise.catch(error => {
+      replyErrorHandlers.get(streamId)?.(error);
+      if (final) failedFinalReplies.add(streamId);
+      console.error(`[${botConfig.name}] Card reply failed for ${streamId}:`, error);
+      return undefined;
+    });
+  };
 
   // 用于消息去重的简单缓存（在多实例部署时建议改用 Redis）
   const processedMsgs = new Set<string>();
@@ -785,8 +862,307 @@ export async function startBot(botConfig: BotConfig) {
       botConfig.defaultMcpHeaderCommand,
     );
 
+    const requestStartedAt = monotonicNowMs();
+    let requestExecutionError = false;
+    let requestTimingFinished = false;
+    let requestStreamId = body.msgid;
+    let requestTurnCount = 0;
+    let requestModelCallCount = 0;
+    let requestToolNames: string[] = [];
+    let requestRawInput = "";
+    let requestRawError = "";
+    const requestToolRecords: ToolContextRecord[] = [];
+    const recordRequestRawError = (error: unknown) => {
+      if (!isRequestRawLoggingEnabled() || requestRawError) return;
+      requestRawError = getErrorMessage(error);
+    };
+    let preStreamExpired = false;
+    let preStreamExpiryTimer: NodeJS.Timeout | undefined;
+    let preStreamExpiryDeliveryPromise: Promise<void> | undefined;
+    let deliverPreStreamExpiry: (() => Promise<void>) | undefined;
+    const schedulePreStreamExpiryDelivery = () => {
+      if (!deliverPreStreamExpiry) return Promise.resolve();
+      if (!preStreamExpiryDeliveryPromise) {
+        preStreamExpiryDeliveryPromise = deliverPreStreamExpiry().catch(error => {
+          console.error(`[${botConfig.name}] Failed to deliver pre-stream expiry for ${body.msgid}:`, error);
+        });
+      }
+      return preStreamExpiryDeliveryPromise;
+    };
+    let admissionTask: ActiveTaskState | undefined;
+    let requestTaskOwner: ActiveTaskState | undefined;
+    const ownsRequestTask = () => Boolean(
+      requestTaskOwner && activeTasks.get(sessionKey) === requestTaskOwner,
+    );
+    const requestTiming: {
+      sensitivePrecheckMs: number | null;
+      mediaProcessingMs: number | null;
+      mcpLoadMs: number | null;
+      piModelRoundMs: number | null;
+      toolCallMs: number | null;
+      replyQueueMs: number | null;
+      finalSendMs: number | null;
+      agentQueueMs: number | null;
+      activeAgentRequests: number;
+      queuedAgentRequests: number;
+      replyActive: number;
+      replyQueued: number;
+      modelCalls: number;
+    } = {
+      sensitivePrecheckMs: null,
+      mediaProcessingMs: null,
+      mcpLoadMs: null,
+      piModelRoundMs: null,
+      toolCallMs: null,
+      replyQueueMs: null,
+      finalSendMs: null,
+      agentQueueMs: null,
+      activeAgentRequests: 0,
+      queuedAgentRequests: 0,
+      replyActive: 0,
+      replyQueued: 0,
+      modelCalls: 0,
+    };
+    const finishRequestTiming = (terminalStatus: RequestTerminalStatus, errorCategory: string | null = null) => {
+      if (requestTimingFinished) return;
+      requestTimingFinished = true;
+      if (preStreamExpiryTimer) clearTimeout(preStreamExpiryTimer);
+      const finalDeliveryFailed = failedFinalReplies.delete(requestStreamId);
+      const bodyFinalDeliveryFailed = requestStreamId === body.msgid
+        ? false
+        : failedFinalReplies.delete(body.msgid);
+      const hadFinalDeliveryFailure = finalDeliveryFailed || bodyFinalDeliveryFailed;
+      const requestReplaced = Boolean(
+        admissionTask && !ownsRequestTask(),
+      );
+      replyErrorHandlers.delete(requestStreamId);
+      replyErrorHandlers.delete(body.msgid);
+      replyOwnerChecks.delete(requestStreamId);
+      replyOwnerChecks.delete(body.msgid);
+      if (requestTaskOwner && activeTasks.get(sessionKey) === requestTaskOwner) {
+        activeTasks.delete(sessionKey);
+      }
+      const effectiveTerminalStatus = requestReplaced
+        ? "cancelled"
+        : requestReplyAckFailed
+          ? "cancelled"
+          : hadFinalDeliveryFailure && terminalStatus === "completed" ? "error" : terminalStatus;
+      const effectiveErrorCategory = requestReplaced
+        ? "task_replaced"
+        : requestReplyAckFailed
+          ? "reply_ack_timeout"
+          : hadFinalDeliveryFailure && !errorCategory ? "final_card_delivery_failed" : errorCategory;
+      const record = createRequestTimingRecord({
+        requestId: generateReqId("request"),
+        botName: botConfig.name,
+        modelName: config.llm.modelName,
+        toolNames: requestToolNames,
+        totalMs: Math.max(0, monotonicNowMs() - requestStartedAt),
+        turns: requestTurnCount,
+        terminalStatus: effectiveTerminalStatus,
+        errorCategory: effectiveErrorCategory,
+        ...requestTiming,
+        rawTrace: buildRequestRawTrace({
+          userInput: requestRawInput,
+          ...(requestRawError ? { error: requestRawError } : {}),
+          toolRecords: requestToolRecords,
+        }, isRequestRawLoggingEnabled()),
+        activeAgentRequests: agentSlotScheduler.activeCount,
+        queuedAgentRequests: agentSlotScheduler.queuedCount,
+        replyActive: replyScheduler.activeCount,
+        replyQueued: replyScheduler.queuedCount,
+        modelCalls: requestModelCallCount,
+      });
+      if (isRequestRawLoggingEnabled() || shouldSampleRequest(record)) {
+        try {
+          console.log(formatRequestTimingLog(record));
+        } catch {
+          // 指标记录失败不得影响业务请求。
+        }
+      }
+    };
+
+    const requestAbortController = new AbortController();
+    let requestReplyAckFailed = false;
+    const handleRequestReplyError = (error: unknown) => {
+      recordRequestRawError(error);
+      if (!isWeComReplyAckTimeoutError(error)) return;
+      requestReplyAckFailed = true;
+      requestAbortController.abort();
+      console.warn(`[${botConfig.name}] Reply ack timeout for ${body.msgid}; cancelling only this request.`);
+    };
+    replyErrorHandlers.set(body.msgid, handleRequestReplyError);
+    const incomingText = body.msgtype === MessageType.Text ? body.text?.content || "" : "";
+    requestRawInput = incomingText;
+    const incomingIntent = detectActiveMessageIntent(stripBoundaryMentions(incomingText));
+    const controlTargetTask = incomingIntent === "stop" || incomingIntent === "continue_current"
+      ? activeTasks.get(sessionKey)
+      : undefined;
+    admissionTask = incomingIntent === "stop" || incomingIntent === "continue_current"
+      ? undefined
+      : {
+        msgid: body.msgid,
+        cancelled: false,
+        question: "",
+        abortController: requestAbortController,
+        terminalState: "open" as const,
+        cancel: () => requestAbortController.abort(),
+      };
+    const replacedTask = admissionTask ? activeTasks.get(sessionKey) : undefined;
+    const requestOwnerCheck = () => ownsRequestTask()
+      && !requestAbortController.signal.aborted
+      && !preStreamExpired
+      && !requestTimingFinished;
+    if (admissionTask) {
+      requestTaskOwner = admissionTask;
+      replacedTask?.cancel?.();
+      activeTasks.set(sessionKey, admissionTask);
+      replyOwnerChecks.set(body.msgid, requestOwnerCheck);
+    }
+    if (incomingIntent === "stop") {
+      const targetStillActive = controlTargetTask && activeTasks.get(sessionKey) === controlTargetTask;
+      if (targetStillActive) controlTargetTask.cancel?.();
+      await sendCard(frame, body.msgid, targetStillActive ? "已停止当前任务。" : "当前没有正在执行的任务。", true);
+      finishRequestTiming("cancelled", targetStillActive ? "task_stopped" : "no_active_task");
+      return;
+    }
+    const streamId = generateReqId("stream");
+    requestStreamId = streamId;
+    replyErrorHandlers.set(streamId, handleRequestReplyError);
+    if (admissionTask) replyOwnerChecks.set(streamId, requestOwnerCheck);
+    const streamStartedAt = Date.now();
+    let earlyProgressTimer: NodeJS.Timeout | undefined;
+    const preStreamExpiryDelay = Math.max(0, STREAM_SAFE_TTL_MS - (Date.now() - streamStartedAt));
+    preStreamExpiryTimer = setTimeout(() => {
+      preStreamExpired = true;
+      const task = requestTaskOwner;
+      if (task && activeTasks.get(sessionKey) === task) {
+        task.streamExpired = true;
+        task.terminalState = "expired";
+        task.cancelled = true;
+      }
+      requestAbortController.abort();
+      void schedulePreStreamExpiryDelivery();
+      if (earlyProgressTimer) clearInterval(earlyProgressTimer);
+    }, preStreamExpiryDelay);
+    const startEarlyProgress = shouldStartEarlyProgressBeforeParse(body);
+    let earlyProgressQueue = Promise.resolve();
+    const sendEarlyProgress = (content: string) => {
+      if (preStreamExpired || requestAbortController.signal.aborted) return Promise.resolve();
+      const task = earlyProgressQueue.then(
+        () => replyScheduler.scheduleLatest(
+          streamId,
+          () => bot.replyStreamNonBlocking(frame, streamId, content, false),
+          () => requestOwnerCheck(),
+        ),
+        () => replyScheduler.scheduleLatest(
+          streamId,
+          () => bot.replyStreamNonBlocking(frame, streamId, content, false),
+          () => requestOwnerCheck(),
+        ),
+      ).catch(error => {
+        handleRequestReplyError(error);
+        console.error(`[${botConfig.name}] Early progress update failed for ${body.msgid}:`, error);
+      });
+      earlyProgressQueue = task.then(() => undefined, () => undefined);
+      return task;
+    };
+    const sensitiveStartedAt = monotonicNowMs();
     const sensitiveRequestText = extractSensitiveRequestPreflightText(body);
-    const sensitiveRequestDecision = await judgeSensitiveRequestByModel(sensitiveRequestText);
+    requestRawInput = sensitiveRequestText;
+    const saveFailedRequestQuestion = async (content: unknown) => {
+      const question = stringifyModelContent(content).trim();
+      if (!question) return;
+      try {
+        await sessionManager.addMessages(sessionKey, [new HumanMessage({ content: question })]);
+      } catch (saveError) {
+        console.error(`[${botConfig.name}] Failed to persist request question for ${body.msgid}:`, saveError);
+      }
+    };
+    const savePreStreamExpiry = async () => {
+      if ((!preStreamExpired && requestAbortController.signal.aborted) || !ownsRequestTask()) return false;
+      const question = sensitiveRequestText.trim();
+      if (!question) return false;
+      const pauseRequest = toStoredHumanLoopRequest(
+        buildStreamPauseResumeRequest({
+          userQuestion: question,
+          currentQuestion: question,
+          partialAnswer: "",
+          toolContextSummary: "",
+          repoHints: [],
+        }),
+        body.msgid,
+      );
+      const historyPromise = sessionManager.addMessages(sessionKey, [
+        new HumanMessage({ content: question }),
+        new AIMessage(STREAM_EXPIRED_MESSAGE),
+      ]);
+      if ((!preStreamExpired && requestAbortController.signal.aborted) || !ownsRequestTask()) return false;
+      sessionManager.setPendingHumanLoop(sessionKey, pauseRequest);
+      await historyPromise;
+      return true;
+    };
+    deliverPreStreamExpiry = async () => {
+      const saved = await savePreStreamExpiry().catch(error => {
+        console.error(`[${botConfig.name}] Failed to save pre-stream expiry context for ${body.msgid}:`, error);
+        return false;
+      });
+      if (!saved || !ownsRequestTask()) {
+        finishRequestTiming("cancelled", "task_replaced");
+        return;
+      }
+      try {
+        const sent = await expiryReplyScheduler.scheduleIf(
+          () => ownsRequestTask() && !requestReplyAckFailed,
+          () => bot.replyStreamWithCard(frame, streamId, STREAM_EXPIRED_MESSAGE, true),
+          "final",
+        );
+        finishRequestTiming(
+          sent === undefined ? "cancelled" : "ttl_expired",
+          sent === undefined ? "task_replaced" : "stream_expired_before_agent",
+        );
+      } catch (error) {
+        if (isWeComReplyAckTimeoutError(error)) {
+          handleRequestReplyError(error);
+        } else {
+          failedFinalReplies.add(streamId);
+          console.error(`[${botConfig.name}] Failed to send pre-stream expiry for ${body.msgid}:`, error);
+        }
+        finishRequestTiming("ttl_expired", "stream_expired_before_agent");
+      }
+    };
+    if (preStreamExpired) void schedulePreStreamExpiryDelivery();
+    let sensitiveRequestDecision: Awaited<ReturnType<typeof judgeSensitiveRequestByModel>>;
+    try {
+      sensitiveRequestDecision = await withRequestAbort(
+        () => judgeSensitiveRequest(sensitiveRequestText),
+        requestAbortController.signal,
+        "敏感请求预检已取消",
+      );
+      requestTiming.sensitivePrecheckMs = Math.max(0, monotonicNowMs() - sensitiveStartedAt);
+    } catch (error) {
+      recordRequestRawError(error);
+      requestTiming.sensitivePrecheckMs = Math.max(0, monotonicNowMs() - sensitiveStartedAt);
+      if (preStreamExpired && !requestReplyAckFailed) {
+        await schedulePreStreamExpiryDelivery();
+        return;
+      }
+      if (requestAbortController.signal.aborted || (admissionTask && activeTasks.get(sessionKey) !== admissionTask)) {
+        finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_cancelled");
+        return;
+      }
+      try {
+        await sendCard(frame, body.msgid, "本次请求暂时无法处理，请稍后重试。", true);
+      } catch (replyError) {
+        console.error(`[${botConfig.name}] Failed to send sensitive precheck error reply for ${body.msgid}:`, replyError);
+      }
+      finishRequestTiming("error", "sensitive_precheck_error");
+      return;
+    }
+    if (requestAbortController.signal.aborted || (admissionTask && activeTasks.get(sessionKey) !== admissionTask)) {
+      finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_cancelled");
+      return;
+    }
     if (sensitiveRequestDecision.blocked) {
       const auditEvent = buildSensitiveRequestAuditEvent({
         botName: botConfig.name,
@@ -798,7 +1174,7 @@ export async function startBot(botConfig: BotConfig) {
         ...(chatType ? { chatType } : {}),
       }, sensitiveRequestDecision);
       console.warn(`[SECURITY_AUDIT] ${JSON.stringify(auditEvent)}`);
-      await bot.replyStreamWithCard(
+      await sendCard(
         frame,
         body.msgid,
         withMcpEnvironmentNotice(buildSensitiveRequestBlockedReply()),
@@ -811,48 +1187,80 @@ export async function startBot(botConfig: BotConfig) {
           },
         },
       );
+      finishRequestTiming("completed", "sensitive_request_blocked");
       return;
     }
 
-    const streamId = generateReqId("stream");
-    const streamStartedAt = Date.now();
-    const startEarlyProgress = shouldStartEarlyProgressBeforeParse(body);
-    let earlyProgressQueue = Promise.resolve();
-    let earlyProgressTimer: NodeJS.Timeout | undefined;
-    const sendEarlyProgress = (content: string) => {
-      const task = earlyProgressQueue.then(
-        () => bot.replyStream(frame, streamId, content, false),
-        () => bot.replyStream(frame, streamId, content, false),
-      ).catch(error => {
-        console.error(`[${botConfig.name}] Early progress update failed for ${body.msgid}:`, error);
-      });
-      earlyProgressQueue = task.then(() => undefined, () => undefined);
-      return task;
-    };
-
     if (startEarlyProgress) {
-      await bot.replyStreamWithCard(frame, streamId, withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now(), streamStartedAt)), false, {
-        templateCard: {
-          card_type: 'text_notice',
-          main_title: { title: '任务处理中', desc: '正在理解你的消息...' },
-          task_id: `task_${body.msgid}`,
+      try {
+        await withRequestAbort(
+          () => sendCard(frame, streamId, withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now(), streamStartedAt)), false, {
+            templateCard: {
+              card_type: "text_notice",
+              main_title: { title: "任务处理中", desc: "正在理解你的消息..." },
+              task_id: `task_${body.msgid}`,
+            },
+          }),
+          requestAbortController.signal,
+          "早期回复已取消",
+        );
+      } catch (error) {
+        if (preStreamExpired && !requestReplyAckFailed) {
+          await schedulePreStreamExpiryDelivery();
+        } else if (requestAbortController.signal.aborted || !ownsRequestTask()) {
+          finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_replaced");
+        } else {
+          throw error;
         }
-      });
+        return;
+      }
       earlyProgressTimer = setInterval(() => {
         void sendEarlyProgress(withMcpEnvironmentNotice(buildThinkingHeartbeatContent("", [], Date.now(), streamStartedAt)));
       }, THINKING_HEARTBEAT_INTERVAL_MS);
     }
 
     let parsedContent: Awaited<ReturnType<typeof parseWeComMessage>>;
+    const mediaStartedAt = monotonicNowMs();
     let stopThinkingHeartbeat = () => {};
     try {
-      parsedContent = await parseWeComMessage(body, bot);
+      parsedContent = await withRequestAbort(
+        () => parseWeComMessage(body, bot),
+        requestAbortController.signal,
+        "消息解析已取消",
+      );
+      if (typeof parsedContent === "string") requestRawInput = parsedContent;
+      requestTiming.mediaProcessingMs = Math.max(0, monotonicNowMs() - mediaStartedAt);
+    } catch (error) {
+      recordRequestRawError(error);
+      if (preStreamExpired) {
+        await schedulePreStreamExpiryDelivery();
+        return;
+      }
+      if (requestAbortController.signal.aborted || (admissionTask && activeTasks.get(sessionKey) !== admissionTask)) {
+        finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_replaced");
+        return;
+      }
+      await sendCard(frame, streamId, "本次消息暂时无法解析，请稍后重试。", true);
+      finishRequestTiming("error", "message_parse_error");
+      return;
     } finally {
       if (earlyProgressTimer) clearInterval(earlyProgressTimer);
       await earlyProgressQueue;
     }
+    if (preStreamExpired) {
+      await schedulePreStreamExpiryDelivery();
+      return;
+    }
+    if (requestReplyAckFailed) {
+      finishRequestTiming("cancelled", "reply_ack_timeout");
+      return;
+    }
+    if (admissionTask && activeTasks.get(sessionKey) !== admissionTask) {
+      finishRequestTiming("cancelled", "task_replaced");
+      return;
+    }
+
     // --- Session Handling Start ---
-    const memoryGraphBeforeCurrentTurn = session.memoryGraph;
 
     // Handle high-priority system commands (Exact match only)
     const commandText = body.msgtype === MessageType.Text
@@ -861,17 +1269,25 @@ export async function startBot(botConfig: BotConfig) {
     const isHelp = isHelpCommand(commandText);
     const isHardcodedNew = isClearSessionCommand(commandText);
     const replyModeCommand = detectReplyModeCommand(commandText);
-    const activeTask = activeTasks.get(sessionKey);
+    const activeTask = controlTargetTask;
     const activeText = stripBoundaryMentions(commandText);
     const mcpHeaderCommand = parseMcpHeaderCommand(commandText, config.mcpServers);
     let followupQuestion = "";
+    if (incomingIntent === "continue_current" && controlTargetTask && activeTasks.get(sessionKey) !== controlTargetTask) {
+      await sendCard(frame, body.msgid, "当前任务已被新的请求替换，请稍后重试。", true);
+      finishRequestTiming("cancelled", "task_replaced");
+      return;
+    }
+    if (admissionTask && replacedTask?.question) {
+      followupQuestion = buildFollowupQuestion(replacedTask.question, activeText);
+    }
 
     if (mcpHeaderCommand) {
       const projects = extractProjectsFromMcpHeaders(mcpHeaderCommand.headersByServer);
       sessionManager.setMcpHeaderOverrides(sessionKey, mcpHeaderCommand.headersByServer);
       sessionManager.setActiveMcpHeaderCommand(sessionKey, mcpHeaderCommand.command);
       sessionManager.setRepoHints(sessionKey, projects);
-      await bot.replyStreamWithCard(
+      await sendCard(
         frame,
         body.msgid,
         buildMcpHeaderSwitchReply(mcpHeaderCommand),
@@ -884,14 +1300,15 @@ export async function startBot(botConfig: BotConfig) {
           },
         }
       );
+      finishRequestTiming("completed", "mcp_header_switch");
       return;
     }
 
-    if (activeTask && !activeTask.cancelled) {
+    if (activeTask && activeTasks.get(sessionKey) === activeTask && !activeTask.cancelled) {
       const activeIntent = detectActiveMessageIntent(activeText);
       if (activeIntent === "stop") {
-        activeTask.cancelled = true;
-        await bot.replyStreamWithCard(
+        activeTask.cancel?.();
+        await sendCard(
           frame,
           body.msgid,
           "已停止当前任务。",
@@ -904,11 +1321,12 @@ export async function startBot(botConfig: BotConfig) {
             },
           }
         );
+        finishRequestTiming("cancelled", "task_stopped");
         return;
       }
 
       if (activeIntent === "continue_current") {
-        await bot.replyStreamWithCard(
+        await sendCard(
           frame,
           body.msgid,
           "当前任务仍在继续处理，请稍候。",
@@ -921,15 +1339,16 @@ export async function startBot(botConfig: BotConfig) {
             },
           }
         );
+        finishRequestTiming("completed", "continue_current");
         return;
       }
 
       followupQuestion = buildFollowupQuestion(activeTask.question, activeText);
-      activeTask.cancelled = true;
+      activeTask.cancel?.();
     }
 
     if (isHelp) {
-      await bot.replyStreamWithCard(
+      await sendCard(
         frame,
         body.msgid,
         buildHelpReply(),
@@ -942,13 +1361,14 @@ export async function startBot(botConfig: BotConfig) {
           },
         }
       );
+      finishRequestTiming("completed", "help_command");
       return;
     }
 
     if (isHardcodedNew) {
       sessionManager.clearSession(sessionKey);
       processedMsgs.add(body.msgid);
-      await bot.replyStreamWithCard(
+      await sendCard(
         frame,
         body.msgid,
         "已为您清理所有会话记录，我们可以开始新的对话了。",
@@ -961,6 +1381,7 @@ export async function startBot(botConfig: BotConfig) {
           },
         }
       );
+      finishRequestTiming("completed", "session_reset");
       return;
     }
 
@@ -980,9 +1401,10 @@ export async function startBot(botConfig: BotConfig) {
         // 无问题：仅切换模式 + 重新格式化上条回答
         const lastRaw = sessionManager.getLastRawAnswer(sessionKey);
         if (!lastRaw) {
-          await bot.replyStreamWithCard(frame, body.msgid, `已切换到${modeLabel}。暂无可重新格式化的回答。`, true, {
+          await sendCard(frame, body.msgid, `已切换到${modeLabel}。暂无可重新格式化的回答。`, true, {
             templateCard: { card_type: "text_notice", main_title: { title: "模式已切换", desc: modeLabel }, task_id: `task_${body.msgid}` },
           });
+          finishRequestTiming("completed", "reply_mode_switch");
           return;
         }
 
@@ -999,9 +1421,10 @@ export async function startBot(botConfig: BotConfig) {
           }
         }
 
-        await bot.replyStreamWithCard(frame, body.msgid, `已切换到${modeLabel}。\n\n${reformatted}`, true, {
+        await sendCard(frame, body.msgid, `已切换到${modeLabel}。\n\n${reformatted}`, true, {
           templateCard: { card_type: "text_notice", main_title: { title: "模式已切换", desc: modeLabel }, task_id: `task_${body.msgid}` },
         });
+        finishRequestTiming("completed", "reply_mode_switch");
         return;
       }
     }
@@ -1029,7 +1452,7 @@ export async function startBot(botConfig: BotConfig) {
       && !isQueryableProjectsQuestion(originalUserQuestion)
       && isAmbiguousNewTopicWhilePending(pendingText)
     ) {
-      await bot.replyStreamWithCard(
+      await sendCard(
         frame,
         body.msgid,
         "当前还有一个等待补充信息的任务。请回复“继续”并带上补充结果，我会接着处理；如需开启新问题，请先发送“清理会话”。",
@@ -1042,6 +1465,7 @@ export async function startBot(botConfig: BotConfig) {
           },
         }
       );
+      finishRequestTiming("completed", "human_loop_confirmation_required");
       return;
     }
 
@@ -1073,6 +1497,9 @@ export async function startBot(botConfig: BotConfig) {
       }
     }
     // --- Session Handling End ---
+    let cleanupStreamExpiry = async () => {};
+    let cleanupActiveTask = () => {};
+    let requestWasStreamExpired = false;
 
     try {
       if (isQueryableProjectsQuestion(originalUserQuestion)) {
@@ -1086,11 +1513,7 @@ export async function startBot(botConfig: BotConfig) {
         const queryableProjects = extractProjectsFromMcpHeaders(effectiveMcpHeaders);
         const directReply = withMcpEnvironmentNotice(buildQueryableProjectsReply(queryableProjects));
         console.log(`[${botConfig.name}] direct project scope fast path for ${body.msgid}: ${queryableProjects.join(",") || "none"}`);
-        await sessionManager.addMessages(sessionKey, [
-          new HumanMessage({ content: parsedContent as any }),
-          new AIMessage(directReply),
-        ]);
-        await bot.replyStreamWithCard(frame, streamId, directReply, true, {
+        const sent = await sendCard(frame, streamId, directReply, true, {
           templateCard: {
             card_type: "text_notice",
             main_title: {
@@ -1100,6 +1523,13 @@ export async function startBot(botConfig: BotConfig) {
             task_id: `task_${body.msgid}`,
           },
         });
+        if (sent !== undefined && ownsRequestTask()) {
+          await sessionManager.addMessages(sessionKey, [
+            new HumanMessage({ content: parsedContent as any }),
+            new AIMessage(directReply),
+          ]);
+        }
+        finishRequestTiming("completed", "queryable_projects");
         return;
       }
 
@@ -1109,48 +1539,120 @@ export async function startBot(botConfig: BotConfig) {
       const currentQuestion = replyModeCommand.modeSwitch && replyModeCommand.strippedText
         ? replyModeCommand.strippedText
         : rawQuestion;
-      const currentTask: ActiveTaskState = { msgid: body.msgid, cancelled: false, question: currentQuestion };
+      const streamAbortController = requestAbortController;
+      if (admissionTask && activeTasks.get(sessionKey) !== admissionTask) {
+        finishRequestTiming("cancelled", "task_replaced");
+        return;
+      }
+      const previousTask = activeTasks.get(sessionKey);
+      if (previousTask && previousTask !== admissionTask) {
+        previousTask.cancel?.();
+      }
+      const taskBase: ActiveTaskState = admissionTask
+        ? { ...admissionTask, question: currentQuestion }
+        : {
+          msgid: body.msgid,
+          cancelled: false,
+          question: currentQuestion,
+          abortController: streamAbortController,
+          terminalState: "open",
+        };
+      let streamExpired = false;
+      let streamExpiryPromise: Promise<void> | undefined;
+      let streamExpiryTimer: NodeJS.Timeout | undefined;
+      let taskRef: ActiveTaskState | undefined;
+      const cancelCurrentTask = () => {
+        const task = taskRef;
+        if (!task) return;
+        task.cancelled = true;
+        if (task.terminalState !== "final_sent" && task.terminalState !== "expired") task.terminalState = "cancelled";
+        if (streamExpiryTimer) clearTimeout(streamExpiryTimer);
+        if (!streamAbortController.signal.aborted) streamAbortController.abort();
+      };
+      const currentTask: ActiveTaskState = { ...taskBase, cancel: cancelCurrentTask };
+      taskRef = currentTask;
+      requestTaskOwner = currentTask;
       activeTasks.set(sessionKey, currentTask);
-      const runtimeTodoList = createRuntimeTodoList();
-      startTodoItem(runtimeTodoList, "message_parsed");
-      completeTodoItem(runtimeTodoList, "message_parsed", `msgid=${body.msgid}, type=${body.msgtype}`);
-
+      if (!admissionTask) replyOwnerChecks.set(streamId, requestOwnerCheck);
+      const taskAbortListener = () => {
+        const task = taskRef;
+        if (!task) return;
+        task.cancelled = true;
+        if (task.terminalState === "open" && !preStreamExpired) task.terminalState = "cancelled";
+        if (streamExpiryTimer) clearTimeout(streamExpiryTimer);
+      };
+      streamAbortController.signal.addEventListener("abort", taskAbortListener, { once: true });
+      if (streamAbortController.signal.aborted) taskAbortListener();
+      let agentSlotLease: AgentSlotLease | undefined;
+      cleanupActiveTask = () => {
+        agentSlotLease?.release();
+        agentSlotLease = undefined;
+        if (requestTaskOwner === currentTask) requestTaskOwner = undefined;
+        if (activeTasks.get(sessionKey) === currentTask) {
+          activeTasks.delete(sessionKey);
+        }
+      };
+      if (preStreamExpired && !requestReplyAckFailed) {
+        currentTask.streamExpired = true;
+        currentTask.terminalState = "expired";
+        currentTask.cancelled = true;
+        await schedulePreStreamExpiryDelivery();
+        return;
+      }
       if (!startEarlyProgress) {
         // 发送初始进度卡片
-        await bot.replyStreamWithCard(frame, streamId, withMcpEnvironmentNotice("正在处理你的问题，请稍候。"), false, {
-          templateCard: {
-            card_type: 'text_notice',
-            main_title: { title: '任务处理中', desc: '正在理解你的问题...' },
-            task_id: `task_${body.msgid}`,
+        try {
+          await withRequestAbort(
+            () => sendCard(frame, streamId, withMcpEnvironmentNotice("正在处理你的问题，请稍候。"), false, {
+              templateCard: {
+                card_type: 'text_notice',
+                main_title: { title: '任务处理中', desc: '正在理解你的问题...' },
+                task_id: `task_${body.msgid}`,
+              }
+            }),
+            requestAbortController.signal,
+            "初始回复已取消",
+          );
+        } catch (error) {
+          if (preStreamExpired && !requestReplyAckFailed) {
+            await schedulePreStreamExpiryDelivery();
+          } else if (requestAbortController.signal.aborted || !ownsRequestTask()) {
+            finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_replaced");
+          } else {
+            throw error;
           }
-        });
+          return;
+        }
       }
-
+      if (requestReplyAckFailed) {
+        finishRequestTiming("cancelled", "reply_ack_timeout");
+        return;
+      }
+      if (preStreamExpired) {
+        await schedulePreStreamExpiryDelivery();
+        return;
+      }
+      if (!ownsRequestTask()) {
+        finishRequestTiming("cancelled", "task_replaced");
+        return;
+      }
+      const ownsCurrentTask = () => activeTasks.get(sessionKey) === currentTask;
       const shouldStopCurrentTask = () => activeTasks.get(sessionKey) !== currentTask || currentTask.cancelled;
 
       let fullContent = "";
+      let piAgentEnded = false;
+      let piAgentEndFailure: "error" | "aborted" | null = null;
       let flowControl = createDefaultFlowControl();
       let flowControlStreamState = createFlowControlStreamState();
-      let coverNextVisibleContent = false;
       const applyFlowControlPatch = (patch: FlowControlPatch) => {
         flowControl = mergeFlowControl(flowControl, patch);
-        if (patch.stream?.coverPrevious || patch.stream?.mode === "replace") {
-          coverNextVisibleContent = true;
-        }
       };
       let finalContentForPrompt: any = effectiveParsedContent;
-      let intermediateMessages: BaseMessage[] = [];
       const toolContextRecords: ToolContextRecord[] = [];
-      const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean }>();
-      const agentProgressGuard = createAgentProgressGuard({
-        maxToolResults: getMaxAgentToolResultsPerTurn(),
-      });
+      const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean; startedAt: number }>();
       let autoVerificationAgent: any = null;
       let autoVerificationScopedEvidenceTools: any[] = [];
       let repoHints: string[] = [];
-      let recoveryAuditReason = "";
-      let toolErrorLimitReached = false;
-      let toolProgressLimitReached = false;
       let lastUpdateTime = 0;
       let heartbeatInFlight = false;
       let lastHeartbeatTime = 0;
@@ -1160,12 +1662,16 @@ export async function startBot(botConfig: BotConfig) {
         console.log(`[${botConfig.name}] Phase duration for ${body.msgid}: ${phase}=${Date.now() - startedAt}ms`);
       };
       const UPDATE_INTERVAL = 2000;
-      let expiredStreamFinalSent = false;
       let expiredStreamHistorySaved = false;
-      let replyAckTimeoutReconnectTriggered = false;
       let replyStreamQueue = Promise.resolve();
+      let finalReplySent = false;
+      let terminalReplyClaim: "open" | "final_pending" | "final_in_flight" | "final_sent" | "expired" = "open";
+      let finalReplyPromise: Promise<unknown> | undefined;
+      let finalReplyDelivered = false;
+      let expiryPromise: Promise<void> | undefined;
+      let expiryReplyPromise: Promise<unknown> | undefined;
       const visibleStreamSnapshots: string[] = [];
-      let visiblePlanSteps: readonly UserFacingTodoStep[] | undefined;
+      let visiblePlanSteps: readonly VisiblePlanStep[] | undefined;
       let lastPlanSnapshot = "";
       const rememberVisibleStreamSnapshot = (content: string) => {
         const visible = collapseProgressUpdates(stripProtocolNoise(content)).trim();
@@ -1178,16 +1684,10 @@ export async function startBot(botConfig: BotConfig) {
         }
       };
       const saveExpiredStreamHistory = async () => {
-        if (expiredStreamHistorySaved) return;
-        expiredStreamHistorySaved = true;
+        if (expiredStreamHistorySaved || !ownsCurrentTask() || currentTask.terminalState !== "expired") return;
         // 保存当前计划状态，供「继续」时复用：只处理未完成项
         if (visiblePlanSteps && visiblePlanSteps.length > 0) {
-          const statusMap = new Map(runtimeTodoList.items.map(item => [item.id, item.status]));
-          sessionManager.setLastPlanSteps(sessionKey, visiblePlanSteps.map(step => ({
-            id: step.id,
-            task: step.task,
-            status: statusMap.get(step.id) || "pending",
-          })));
+          sessionManager.setLastPlanSteps(sessionKey, visiblePlanSteps.map(step => ({ ...step })));
           console.log(`[${botConfig.name}] Saved plan steps for ${body.msgid}: ${visiblePlanSteps.length} steps`);
         }
         const toolContextSummary = buildToolContextSummary(toolContextRecords);
@@ -1201,16 +1701,20 @@ export async function startBot(botConfig: BotConfig) {
           }),
           body.msgid,
         );
-        sessionManager.setPendingHumanLoop(sessionKey, pauseResumeRequest);
         await sessionManager.addMessages(sessionKey, [
           new HumanMessage({ content: effectiveParsedContent as any }),
           ...(toolContextSummary ? [new SystemMessage(toolContextSummary)] : []),
           new AIMessage(STREAM_EXPIRED_MESSAGE),
         ]);
+        if (!ownsCurrentTask() || currentTask.terminalState !== "expired") return;
+        sessionManager.setPendingHumanLoop(sessionKey, pauseResumeRequest);
+        expiredStreamHistorySaved = true;
       };
       type StreamReplyMode = "normal" | "plan";
       let sendPlanSnapshot: (now?: number) => Promise<boolean>;
+      let expireStreamOnce: (waitForPendingReplies?: boolean) => Promise<void>;
       const safeReplyStreamNow = async (content: string, final = false, mode: StreamReplyMode = "normal") => {
+        if (streamExpired || currentTask.streamExpired) return false;
         if (shouldStopCurrentTask()) return false;
         const safeContent = stripEmptyProtocolContent(content).trim();
         if (!safeContent && !final) return false;
@@ -1220,40 +1724,62 @@ export async function startBot(botConfig: BotConfig) {
             ? safeContent
             : buildIntermediateStreamContent(safeContent);
         if (isStreamExpired(streamStartedAt)) {
-          await saveExpiredStreamHistory();
-          currentTask.cancelled = true;
-          if (!expiredStreamFinalSent) {
-            expiredStreamFinalSent = true;
-            try {
-              await bot.replyStream(frame, streamId, withMcpEnvironmentNotice(STREAM_EXPIRED_MESSAGE), true);
-            } catch (error) {
-              if (!isWeComStreamExpiredError(error)) throw error;
-              console.warn(`[${botConfig.name}] WeCom stream already expired for ${body.msgid}; skip final pause update.`);
-            }
-          }
+          await expireStreamOnce(false);
           return false;
         }
 
+        if (final) {
+          if (terminalReplyClaim !== "open") return false;
+          terminalReplyClaim = "final_pending";
+        }
         try {
-          await bot.replyStream(frame, streamId, replyContent, final);
+          const sendReply = () => {
+            if (final) {
+              if (isStreamExpired(streamStartedAt)) {
+                return Promise.reject(new Error("stream message update expired"));
+              }
+              terminalReplyClaim = "final_in_flight";
+              finalReplyPromise = bot.replyStream(frame, streamId, replyContent, true);
+              return finalReplyPromise;
+            }
+            return bot.replyStreamNonBlocking(frame, streamId, replyContent, false);
+          };
+          const canRunReply = () => !streamExpired
+            && !currentTask.streamExpired
+            && !shouldStopCurrentTask()
+            && (!final || terminalReplyClaim === "final_pending");
+          const replyResult = final
+            ? await replyScheduler.scheduleIf(canRunReply, sendReply, "final")
+            : await replyScheduler.scheduleLatest(streamId, sendReply, canRunReply);
+          if (replyResult === undefined || replyResult === "skipped") {
+            if (final && terminalReplyClaim === "final_pending" && !streamExpired) {
+              terminalReplyClaim = "open";
+            }
+            return false;
+          }
+          if (final) {
+            finalReplyPromise = undefined;
+            finalReplyDelivered = true;
+            terminalReplyClaim = "final_sent";
+            currentTask.terminalState = "final_sent";
+            if (streamExpiryTimer) clearTimeout(streamExpiryTimer);
+          }
           if (!final && mode !== "plan") {
             rememberVisibleStreamSnapshot(safeContent);
           }
           return true;
         } catch (error) {
+          if (final) {
+            finalReplyPromise = undefined;
+            if (terminalReplyClaim === "final_in_flight") terminalReplyClaim = "open";
+          }
           if (isWeComStreamExpiredError(error)) {
-            await saveExpiredStreamHistory();
-            currentTask.cancelled = true;
-            expiredStreamFinalSent = true;
+            await expireStreamOnce(false);
             console.warn(`[${botConfig.name}] WeCom stream expired for ${body.msgid}; stop updating old streamId.`);
             return false;
           }
           if (isWeComReplyAckTimeoutError(error)) {
-            currentTask.cancelled = true;
-            if (!replyAckTimeoutReconnectTriggered) {
-              replyAckTimeoutReconnectTriggered = true;
-              reconnectBotAfterReplyAckTimeout(bot, botConfig.name, body.msgid);
-            }
+            handleRequestReplyError(error);
             return false;
           }
           throw error;
@@ -1263,18 +1789,101 @@ export async function startBot(botConfig: BotConfig) {
         if (!final && mode === "normal" && visiblePlanSteps) {
           return sendPlanSnapshot();
         }
+        const queuedAt = monotonicNowMs();
         const replyTask = replyStreamQueue.then(
-          () => safeReplyStreamNow(content, final, mode),
-          () => safeReplyStreamNow(content, final, mode),
+          () => {
+            requestTiming.replyQueueMs = (requestTiming.replyQueueMs || 0) + Math.max(0, monotonicNowMs() - queuedAt);
+            return safeReplyStreamNow(content, final, mode);
+          },
+          () => {
+            requestTiming.replyQueueMs = (requestTiming.replyQueueMs || 0) + Math.max(0, monotonicNowMs() - queuedAt);
+            return safeReplyStreamNow(content, final, mode);
+          },
         );
         replyStreamQueue = replyTask.then(() => undefined, () => undefined);
         return replyTask;
       };
+      expireStreamOnce = (_waitForPendingReplies = true) => {
+        if (!ownsCurrentTask() || currentTask.terminalState === "cancelled" || currentTask.terminalState === "final_sent") return Promise.resolve();
+        if (expiryPromise) return expiryPromise;
+        expiryPromise = (async () => {
+        if (finalReplyDelivered || terminalReplyClaim === "final_sent" || terminalReplyClaim === "expired") return;
+        const finalInFlight = terminalReplyClaim === "final_in_flight" ? finalReplyPromise : undefined;
+        if (!streamExpired) {
+          requestWasStreamExpired = true;
+          streamExpired = true;
+          currentTask.streamExpired = true;
+          currentTask.terminalState = "expired";
+          currentTask.cancelled = true;
+          streamAbortController.abort();
+        }
+        if (finalInFlight) {
+          try {
+            await finalInFlight;
+          } catch {
+            // 终态发送失败后继续发送暂停通知。
+          }
+          if (finalReplyDelivered) return;
+          if (!ownsCurrentTask() || currentTask.terminalState !== "expired") return;
+          if (terminalReplyClaim === "final_in_flight") terminalReplyClaim = "open";
+        }
+        if (!ownsCurrentTask() || currentTask.terminalState !== "expired") return;
+        terminalReplyClaim = "expired";
+        const historyPromise = saveExpiredStreamHistory().catch(error => {
+          console.error(`[${botConfig.name}] Failed to save stream pause context for ${body.msgid}:`, error);
+        });
+        if (currentTask.streamExpiryMessageSent) {
+          await historyPromise;
+          return;
+        }
+        currentTask.streamExpiryMessageSent = true;
+        try {
+          if (!ownsCurrentTask() || currentTask.terminalState !== "expired") return;
+          expiryReplyPromise = expiryReplyScheduler.scheduleIf(
+            () => ownsCurrentTask() && currentTask.terminalState === "expired",
+            () => bot.replyStream(frame, streamId, withMcpEnvironmentNotice(STREAM_EXPIRED_MESSAGE), true),
+            "final",
+          );
+          try {
+            await expiryReplyPromise;
+          } finally {
+            expiryReplyPromise = undefined;
+          }
+          console.warn(`[${botConfig.name}] Proactively stopped WeCom stream for ${body.msgid} at ${formatElapsedDuration(streamStartedAt)}.`);
+        } catch (error) {
+          await historyPromise;
+          if (isWeComReplyAckTimeoutError(error)) {
+            handleRequestReplyError(error);
+            return;
+          }
+          if (!isWeComStreamExpiredError(error)) throw error;
+          console.warn(`[${botConfig.name}] WeCom stream expired while sending pause notice for ${body.msgid}.`);
+        }
+      })();
+        return expiryPromise;
+      };
+      const scheduleStreamExpiry = () => {
+        if (streamExpiryPromise) return;
+        streamExpiryPromise = expireStreamOnce().catch(error => {
+          console.error(`[${botConfig.name}] Failed to send stream pause notice for ${body.msgid}:`, error);
+        });
+      };
+      const streamExpiryDelay = Math.max(0, STREAM_SAFE_TTL_MS - (Date.now() - streamStartedAt));
+      streamExpiryTimer = setTimeout(scheduleStreamExpiry, streamExpiryDelay);
+      if (preStreamExpired || streamExpiryDelay === 0) scheduleStreamExpiry();
+      if (preStreamExpiryTimer) {
+        clearTimeout(preStreamExpiryTimer);
+        preStreamExpiryTimer = undefined;
+      }
+      cleanupStreamExpiry = async () => {
+        if (streamExpiryTimer) clearTimeout(streamExpiryTimer);
+        await streamExpiryPromise;
+      };
       const buildPlanSnapshot = (now = Date.now()) => {
         if (!visiblePlanSteps) return "";
-        const todoSteps = renderTodoStepsForHeartbeat(runtimeTodoList, getProcessingFrame(now), visiblePlanSteps);
-        if (!todoSteps) return "";
-        return `处理进度 · 已用时 ${formatElapsedDuration(streamStartedAt, now)}\n\n${todoSteps}`;
+        const planSteps = renderVisiblePlanSteps(visiblePlanSteps, getProcessingFrame(now));
+        if (!planSteps) return "";
+        return `处理进度 · 已用时 ${formatElapsedDuration(streamStartedAt, now)}\n\n${planSteps}`;
       };
       sendPlanSnapshot = async (now = Date.now()) => {
         const snapshot = buildPlanSnapshot(now);
@@ -1301,7 +1910,10 @@ export async function startBot(botConfig: BotConfig) {
       };
       const stopThinkingHeartbeatAndDrain = async () => {
         stopThinkingHeartbeat();
-        await replyStreamQueue;
+        await Promise.race([
+          replyStreamQueue,
+          new Promise<void>(resolve => setTimeout(resolve, 5000)),
+        ]);
       };
       heartbeatTimer = setInterval(() => {
         if (heartbeatInFlight || shouldStopCurrentTask()) return;
@@ -1321,33 +1933,35 @@ export async function startBot(botConfig: BotConfig) {
        });
      }, THINKING_HEARTBEAT_INTERVAL_MS);
 
+      const acquireAgentSlot = async () => {
+        const queuedAt = monotonicNowMs();
+        const isQueued = agentSlotScheduler.activeCount >= config.llm.maxConcurrentRequests;
+        if (isQueued) {
+          await withRequestAbort(
+            () => sendCard(frame, streamId, withMcpEnvironmentNotice("当前请求较多，正在排队等待分析资源。"), false),
+            streamAbortController.signal,
+            "排队提示已取消",
+          );
+        }
+        agentSlotLease = await agentSlotScheduler.acquire(streamAbortController.signal);
+        requestTiming.agentQueueMs = Math.max(0, monotonicNowMs() - queuedAt);
+      };
+      await acquireAgentSlot();
+      if (shouldStopCurrentTask()) {
+        finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_replaced");
+        return;
+      }
+
       // --- Planner Logic Start ---
       let plannerResult: Awaited<ReturnType<typeof runPlanner>> = null;
-      const runtimeTodoInstruction = `系统提示：【运行时 TodoList 工具要求】
-当前回答由运行时 TodoList 控制流程完成度，TodoList 是动态计划，不是固定审核清单。
-如果当前工具列表存在 runtime_todolist_update，只需要维护当前问题实际需要的审核节点；不要为了无关节点补“不适用”，也不要输出内部 TodoList 内容。
-如果你需要核对用户整合后的问题，或怀疑历史整合、上下文压缩、提示词增强导致问题失真，必须调用 original_user_question_get 获取整合后的用户问题后再继续分析。
-如果当前问题是“继续”、追问上一轮、需要继承历史里的项目/接口/方法/文件/表字段/已分析行号范围，或担心短时记忆压缩导致锚点丢失，必须先调用 session_memory_graph_query 获取相关历史图索引；不要因为默认上下文里没看到历史细节就要求用户补充。
-测试环境/dev 环境排障硬约束：如果用户已提供接口 URL、query 参数、请求体、返回体，或明确说“可以直接查库/测试环境可查库”，禁止在查询前询问用户补充 type 含义、状态字段、业务节点、同类型正常样本或数据库连接信息。必须先使用可用工具、代码检索、参数映射和测试库只读查询确认；只有这些查询后仍无法确认，或工具/测试库不可达，才允许 Human Loop，并且必须说明已尝试的工具、SQL 或代码证据。
-Human Loop 严格门槛：所有可由 LLM 工具、代码检索、调用链、已保存工具证据、测试/dev 库只读查询验证的信息，都必须先自主核实；只有所有可用路径都核实完仍无法回答，才允许对用户提问。触发 Human Loop 前必须在 context_snapshot.known_facts 写清已核实节点、已分析代码范围、已尝试 SQL/工具/检索条件和剩余最小缺口。
-用户意图边界：每轮先判断用户是在要事实取值、用途解释、上下游定位、流程梳理、取数语句、排障原因、处理方案还是代码修改，并只完成当前明确要求的任务。当用户问“是什么/做什么用/作用是什么/哪里来的到哪里去/谁推送谁消费/谁写入谁读取/谁调用被谁调用/值从哪里来/显示条件是什么”时，只查对象用途、来源去向、上下游、读写点、触发位置和代码证据；适用对象包括 Topic、Redis key、接口、按钮、权限码、字段、表、枚举、配置、定时任务、脚本、页面、模块、服务、类、方法、日志 source、消息模板和第三方回调，不局限于 MQ 队列。即使用户附带异常背景、堆积量、监控截图、日志片段或历史结论，也不得主动升级为异常根因、堆积原因、消费失败、发布变更、配置异常、性能瓶颈或处理建议，除非用户明确问为什么、原因、异常、失败、没生效、怎么处理或怎么修。
-提问前证据门槛：遇到问题默认先查、先论证，实在查不到、查不准或继续查有真实风险时再问；不得把澄清提问当成检索或论证的前置动作。只要用户已经给出对象名、队列/Topic、vhost、Redis key、接口路径、按钮文案、权限码、字段名、表名、配置 key、日志关键词、错误文案、截图 URL、页面路由、类名、方法名或任务名，必须先用这些锚点自主检索、查配置、查调用链或查可用工具；项目、模块或业务归属未知时，先跨项目/全局检索锚点，不得在检索前询问“这是哪个系统/哪个模块/谁负责”。只有已经尝试可用检索路径后仍出现多个无法消歧的候选、锚点完全无结果、工具不可用、或继续操作存在生产数据/写操作风险时，才允许提问；提问必须说明已查锚点、命中候选或无结果原因、剩余最小歧义。
-动态审核节点规则：
-1. 代码/项目/接口/页面/仓库类问题：维护 project_scope_audited，证据写明目标范围和命中的入口一致性。
-2. 最终回答输出 SQL、生产取数 SQL 或声明 dev 校验：维护 sql_correctness_audited；若 dev 库无对应表，evidence 必须写“dev 库无对应表，SQL 未做 dev 执行校验，已通过代码反推结构”。
-3. 需要基于工具、代码、数据库或业务规则下结论：维护 evidence_audited，证据写明核心结论来自哪些已核实事实。
-4. 涉及接口链路、按钮显示、状态流转、回调、MQ、外部推送、缺失日志、下游触达条件或异常拦截：维护 execution_flow_audited。
-5. 只有涉及代码缺陷、配置异常、流程实现归属、历史逻辑归属或需要推动修复时，才维护 owner_contact_audited，并且联系人线索只能来自最终结论实际引用证据。
-没有证据时将当前相关节点标记 blocked 并触发 Human Loop 或说明最小缺口；无关节点不要处理。`;
-      const flowControlInstruction = `系统提示：【流程控制 JSON 协议】
-当你已经能确定下游节点是否需要继续执行某个步骤时，可以输出流程控制协议。协议必须单独放在 <flow_control>...</flow_control> 中，运行时会剥离，用户不可见。
-格式：
-<flow_control>{"next":{"runSqlAudit":false,"skipAuditItems":["execution_flow_audited","owner_contact_audited"]},"stream":{"coverPrevious":true}}</flow_control>
-字段含义：
-- next.runSqlAudit=false：当前最终回答不涉及 SQL 输出或 SQL 审核不适用，下游跳过 SQL 正确性审核；不确定时不要输出该字段，默认继续审核。
-- next.skipAuditItems：当上游已经明确判断某些后续审核节点不需要处理时，列出要跳过的 itemId；运行时只会影响当前动态计划里已经存在的节点。可选值：project_scope_audited、sql_correctness_audited、evidence_audited、execution_flow_audited、owner_contact_audited、final_format_audited。只有明确不适用时才输出；如果最终回答包含 SQL 或声明 dev 校验，不能用 skipAuditItems 跳过 sql_correctness_audited。
-- stream.coverPrevious=true：下一段真实可见内容应覆盖前面已展示的阶段性流式内容；不确定时不要输出该字段，默认追加。
-只输出明确需要改变默认行为的字段，不要把 flow_control 写进最终业务结论。`;
+      const runtimeEvidenceInstruction = `系统提示：【证据核实要求】
+优先使用可用工具、代码检索、已保存证据和测试/dev 库只读查询核实结论；只有所有可用路径都无法确认时才触发 Human Loop，并说明最小缺口。
+如果需要核对整合后的用户问题，调用 original_user_question_get；如果是继续或追问上一轮，调用 session_memory_graph_query 获取相关历史锚点。
+测试环境或 dev 环境已提供 URL、参数或明确允许查库时，不要先询问可由工具确认的字段含义、状态或连接信息。
+每轮只完成用户明确要求的事实取值、用途解释、上下游定位、流程梳理、取数语句、排障原因、处理方案或代码修改；项目范围未知时先使用明确锚点检索，证据充分后立即收敛，不重复宽搜。
+最终结论必须能追溯到用户输入、工具结果、代码证据、数据库结果或明确业务规则；不确定时只说明尚缺的最小证据。`;
+      const flowControlInstruction = `系统提示：【流式内容控制协议】
+如需让下一段真实可见内容覆盖前面的阶段性流式内容，可输出单独的 <flow_control>{"stream":{"coverPrevious":true}}</flow_control>；运行时会剥离该协议，用户不可见。`;
 
       // 提取文本内容进行 Planner 分析
       let textToPlan = "";
@@ -1359,21 +1973,13 @@ Human Loop 严格门槛：所有可由 LLM 工具、代码检索、调用链、�
       }
 
       // 分流决策在 planner 意图分析之后产生（见 Planner Logic End 后的 classifyQuestionDifficulty）
-      let questionDifficulty: QuestionDifficulty = "complex";
-
+      const ENABLE_LEGACY_PLANNER = process.env.ENABLE_LEGACY_PLANNER === "true";
       if (isStreamPauseResume) {
-        startTodoItem(runtimeTodoList, "planner_checked");
-        completeTodoItem(runtimeTodoList, "planner_checked", "stream pause resume: skipped planner/prelude to avoid restarting from head");
         // 复用暂停前保存的计划：已完成项保持 ✓，只处理未完成项
         const storedPlanSteps = sessionManager.getLastPlanSteps(sessionKey);
         let planResumeInstruction = "";
         if (storedPlanSteps && storedPlanSteps.length > 0) {
-          for (const step of storedPlanSteps) {
-            if (step.status === "done" && hasTodoItem(runtimeTodoList, step.id)) {
-              completeTodoItem(runtimeTodoList, step.id, "resumed from saved plan");
-            }
-          }
-          visiblePlanSteps = storedPlanSteps.map(step => ({ id: step.id, task: step.task }));
+          visiblePlanSteps = storedPlanSteps.map(step => ({ ...step }));
           const planProgressText = storedPlanSteps
             .map(step => `${step.status === "done" ? "✓" : "○"} ${step.task}`)
             .join("\n");
@@ -1383,32 +1989,25 @@ Human Loop 严格门槛：所有可由 LLM 工具、代码检索、调用链、�
           void sendPlanSnapshot();
         }
         if (typeof effectiveParsedContent === 'string') {
-          finalContentForPrompt = `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${buildStreamPauseResumeRuntimeInstruction()}${planResumeInstruction}\n\n${effectiveParsedContent}`;
+          finalContentForPrompt = `${buildStreamPauseResumeRuntimeInstruction()}${planResumeInstruction}\n\n${effectiveParsedContent}`;
         } else if (Array.isArray(effectiveParsedContent)) {
           finalContentForPrompt = [
-            { type: 'text', text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${buildStreamPauseResumeRuntimeInstruction()}${planResumeInstruction}\n\n` },
+            { type: 'text', text: `${buildStreamPauseResumeRuntimeInstruction()}${planResumeInstruction}\n\n` },
             ...effectiveParsedContent,
           ];
         }
-      } else if (textToPlan.trim().length > 0) {
+      } else if (ENABLE_LEGACY_PLANNER && textToPlan.trim().length > 0) {
         try {
-          startTodoItem(runtimeTodoList, "planner_checked");
           await sendStageProgress("已收到问题，正在识别意图和检索锚点，继续核实中。", true);
           plannerResult = await runPlanner(textToPlan);
           if (plannerResult) {
-            completeTodoItem(runtimeTodoList, "planner_checked", `intent=${plannerResult.intent || "unknown"}`);
-            syncRuntimeAuditTodoPlan(runtimeTodoList, {
-              question: currentQuestion,
-              plannerIntent: plannerResult.intent,
-              secondaryIntents: plannerResult.secondary_intents,
-            });
-            const initialVisiblePlanSteps = snapshotUserFacingTodoSteps(runtimeTodoList);
-            if (initialVisiblePlanSteps.length > 0) {
-              visiblePlanSteps = initialVisiblePlanSteps;
-              await sendPlanSnapshot();
-            }
-            const queryLimit = isDirectMatchIntent(plannerResult.intent) ? 1 : 16;
-            const queries = plannerResult.queries?.slice(0, queryLimit).map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
+            visiblePlanSteps = [
+              { id: "planner_checked", task: "分析处理思路", status: "done" },
+              { id: "tools_loaded", task: "查询相关信息", status: "pending" },
+              { id: "analysis_finished", task: "整理分析结果", status: "pending" },
+            ];
+            await sendPlanSnapshot();
+            const queries = plannerResult.queries?.map(q => `- ${q.query} (${q.type}, 优先级: ${q.priority})`).join('\n') || '';
             const hypotheses = plannerResult.hypotheses?.map(h => `- ${h.title} (推荐查询: ${h.queries?.join(', ') || ''})`).join('\n') || '';
             
             // 优先使用去实例化检索词，避免品牌/租户/完整文案干扰代码搜索。
@@ -1462,58 +2061,31 @@ ${hypotheses}
 * 首轮代码检索必须保持跨项目发现能力：除非用户明确要求“只查某仓库/某项目”，否则不得把项目名作为过滤参数；如果用户明确指定 GitNexus repo 且工具 schema 支持 repo 参数，当次查询必须携带该 repo。
 * 严禁在代码检索中包含人名、商品名、租户名、订单号等实例数据。
 * 如果意图模糊，参考问题假设进行进一步排查。
-* GitNexus query 成本较高，必须合并查询条件：把项目、核心业务词、动作词、接口/文件锚点尽量放入一次 query/zoekt；同一问题原则上不超过 16 次 query，命中候选文件后改用 code_snippet/context 或已有证据回答。
+* GitNexus query 成本较高，优先合并查询条件；命中候选文件后改用 code_snippet/context 或已有证据回答。
 * 严禁拆分关键词进行多次循环搜索。${smsTemplateEvidenceHint}`;
             
             if (typeof effectiveParsedContent === 'string') {
-              finalContentForPrompt = `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${hasDirectEvidence ? `${buildDirectEvidenceRuntimeInstruction()}\n\n` : ""}${searchPlanHint}\n\n${effectiveParsedContent}`;
+              finalContentForPrompt = `${hasDirectEvidence ? `${buildDirectEvidenceRuntimeInstruction()}\n\n` : ""}${searchPlanHint}\n\n${effectiveParsedContent}`;
             } else if (Array.isArray(effectiveParsedContent)) {
               finalContentForPrompt = [
-                { type: 'text', text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${hasDirectEvidence ? `${buildDirectEvidenceRuntimeInstruction()}\n\n` : ""}${searchPlanHint}\n\n` },
+                { type: 'text', text: `${hasDirectEvidence ? `${buildDirectEvidenceRuntimeInstruction()}\n\n` : ""}${searchPlanHint}\n\n` },
                 ...effectiveParsedContent.map(item => item.type === 'text' ? { ...item, text: stripBoundaryMentions(item.text || '') } : item)
               ];
             }
-          } else {
-            completeTodoItem(runtimeTodoList, "planner_checked", "planner returned empty result, fallback to original question");
           }
         } catch (err) {
           console.error("Planner execution failed:", err);
-          completeTodoItem(runtimeTodoList, "planner_checked", `planner failed, fallback to original question: ${err instanceof Error ? err.message : String(err)}`);
         }
-      } else {
-        startTodoItem(runtimeTodoList, "planner_checked");
-        completeTodoItem(runtimeTodoList, "planner_checked", "empty text, planner skipped");
       }
       if (typeof finalContentForPrompt === 'string') {
-        finalContentForPrompt = finalContentForPrompt.includes("runtime_todolist_update")
-          ? finalContentForPrompt
-          : `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n${finalContentForPrompt}`;
+        finalContentForPrompt = `${runtimeEvidenceInstruction}\n\n${flowControlInstruction}\n\n${finalContentForPrompt}`;
       } else if (Array.isArray(finalContentForPrompt)) {
-        const hasInstruction = finalContentForPrompt.some(item => item.type === "text" && item.text?.includes("runtime_todolist_update"));
-        if (!hasInstruction) {
-          finalContentForPrompt = [
-            { type: "text", text: `${runtimeTodoInstruction}\n\n${flowControlInstruction}\n\n` },
-            ...finalContentForPrompt,
-          ];
-        }
+        finalContentForPrompt = [
+          { type: "text", text: `${runtimeEvidenceInstruction}\n\n${flowControlInstruction}\n\n` },
+          ...finalContentForPrompt,
+        ];
       }
       // --- Planner Logic End ---
-
-      // planner 意图分析后的分流：queries=0 简单直接答；1-2 中等一次查询；>2 复杂完整流程
-      questionDifficulty = isStreamPauseResume ? "complex" : classifyQuestionDifficulty(plannerResult);
-      const useFastPath = questionDifficulty === "simple";
-      // 直接匹配型：SQL/CONFIG/DOC/AUTH 意图，走 agent 但仅提示词区别（关键词匹配、命中即答）
-      const DIRECT_MATCH_REACT_LOOP_CONTROL = {
-        maxToolActions: 4,
-        maxQueryToolActions: 1,
-        maxRepeatedToolActions: 1,
-      };
-      const useDirectMatch = !isStreamPauseResume
-        && !useFastPath
-        && isDirectMatchIntent(plannerResult?.intent);
-      // 直接匹配型无需验证推理链，始终跳过自动验证
-      const skipVerification = questionDifficulty !== "complex" || useDirectMatch;
-      console.log(`[${botConfig.name}] Question difficulty for ${body.msgid}: ${questionDifficulty} (queries=${plannerResult?.queries?.length ?? 0}, directMatch=${useDirectMatch}, intent=${plannerResult?.intent ?? "unknown"})`);
 
       const ensureAutoVerificationAgent = async () => {
         if (autoVerificationAgent) {
@@ -1531,20 +2103,19 @@ ${hypotheses}
           ? sessionMcpHeaderOverrides
           : defaultMcpHeaderCommand?.headersByServer ?? {};
         const toolsLoadStartedAt = Date.now();
-        const tools = await getAllMcpTools(botConfig, mcpHeaderOverrides);
+        const toolsLoadMonotonicStartedAt = monotonicNowMs();
+        const tools = await loadMcpTools(botConfig, mcpHeaderOverrides);
+        requestTiming.mcpLoadMs = Math.max(0, monotonicNowMs() - toolsLoadMonotonicStartedAt);
         logPhaseDuration(`tools_load(count=${tools.length})`, toolsLoadStartedAt);
         const defaultRepoHints = extractProjectsFromMcpHeaders(mcpHeaderOverrides);
         const explicitRepoHints = extractExplicitRepoHints(textToPlan, defaultRepoHints);
         repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints, defaultRepoHints);
-        autoVerificationScopedEvidenceTools = scopeToolsToRepo(tools, repoHints);
-        syncRuntimeAuditTodoPlan(runtimeTodoList, {
-          question: currentQuestion,
+        autoVerificationScopedEvidenceTools = scopeToolsToRepo(
+          filterToolsForKnownProjectScope(tools, repoHints),
           repoHints,
-          ...(plannerResult?.intent ? { plannerIntent: plannerResult.intent } : {}),
-          ...(plannerResult?.secondary_intents ? { secondaryIntents: plannerResult.secondary_intents } : {}),
-        });
-        const agentTools = [
-          ...autoVerificationScopedEvidenceTools,
+        );
+        const agentTools = buildPrimaryPiAgentTools(
+          autoVerificationScopedEvidenceTools,
           buildOriginalQuestionTool({
             originalUserQuestion,
             currentQuestion,
@@ -1554,16 +2125,9 @@ ${hypotheses}
             graph: session.memoryGraph,
             currentQuestion,
           }),
-          buildRuntimeTodoTool(runtimeTodoList),
           buildToolResultFileReadTool(),
-        ];
-        completeTodoItem(runtimeTodoList, "tools_loaded", `tools=${agentTools.length}, repoHints=${repoHints.join(",") || "none"}`);
-        console.log(`[${botConfig.name}] Agent tool budget for ${body.msgid}: directMatch=${useDirectMatch}, maxToolActions=${useDirectMatch ? DIRECT_MATCH_REACT_LOOP_CONTROL.maxToolActions : "default"}, maxQueryToolActions=${useDirectMatch ? DIRECT_MATCH_REACT_LOOP_CONTROL.maxQueryToolActions : "default"}`);
-        autoVerificationAgent = await initializeAgent(agentTools, plannerResult, {
-          reactLoopControl: useDirectMatch
-            ? DIRECT_MATCH_REACT_LOOP_CONTROL
-            : undefined,
-        });
+        );
+        autoVerificationAgent = await initializePiAgent(agentTools, plannerResult);
         return {
           agent: autoVerificationAgent,
           scopedEvidenceTools: autoVerificationScopedEvidenceTools,
@@ -1586,23 +2150,47 @@ ${hypotheses}
           flowControlStreamState = createFlowControlStreamState();
         }
 
-        const stream = await agent.stream({
-          messages: buildMessagesForCurrentTurn({
-            sessionMessages: session.messages,
-            userContent,
-            repoHint: repoHints,
-          }),
-        }, {
-          recursionLimit: useDirectMatch
-            ? Math.min(config.llm.recursionLimit, 8)
-            : config.llm.recursionLimit,
-          streamMode: "messages",
+        const stream = agent.streamPiEvents(String(userContent), {
+          deadlineMs: config.llm.requestTimeoutMs,
+          signal: streamAbortController.signal,
           ...(signal ? { signal } : {}),
-        });
+        }, buildMessagesForCurrentTurn({
+          sessionMessages: session.messages,
+          userContent,
+          repoHint: repoHints,
+        }));
 
-        for await (const [message, metadata] of stream) {
-          const streamMetadata = metadata as AgentStreamMetadata | undefined;
-          if (signal?.aborted || shouldStopCurrentTask()) {
+        for await (const event of stream) {
+          if (event.type === "turn_start") {
+            requestTurnCount += 1;
+            requestModelCallCount += 1;
+          }
+          if (event.type === "agent_end") {
+            piAgentEndFailure = extractPiAgentEndFailure(event);
+            if (piAgentEndFailure === "aborted") {
+              throw new Error("Pi Agent 执行已取消");
+            }
+            if (piAgentEndFailure === "error") {
+              throw new Error("Pi Agent 模型执行失败");
+            }
+            const finalMessage = eventToLegacyMessage(event);
+            const finalText = finalMessage ? stringifyModelContent(finalMessage.content) : "";
+            piAgentEnded = Boolean(finalText.trim());
+            if (piAgentEnded) {
+              fullContent = finalText;
+            }
+            continue;
+          }
+          const message = eventToLegacyMessage(event);
+          if (!message) {
+            if (event.type === "error") throw new Error(event.message);
+            if (event.type === "aborted") throw new Error(STREAM_EXPIRED_MESSAGE);
+            continue;
+          }
+          const metadata: AgentStreamMetadata = {};
+          const streamMetadata = metadata;
+          if (signal?.aborted || streamAbortController.signal.aborted || shouldStopCurrentTask()) {
+            if (streamExpired) throw new Error(STREAM_EXPIRED_MESSAGE);
             fullContent = "";
             throw new Error(STREAM_EXPIRED_MESSAGE);
           }
@@ -1618,8 +2206,6 @@ ${hypotheses}
             continue;
           }
           const msg = message as BaseMessage;
-          intermediateMessages.push(msg);
-
           const type = (msg as any)._getType?.() || msg.constructor.name;
           if (type === "tool" || type === "ToolMessage") {
             const toolMsg = msg as any;
@@ -1627,6 +2213,9 @@ ${hypotheses}
             const entry = toolCallMap.get(id);
             if (entry) {
               entry.completed = true;
+              if (entry.startedAt > 0) {
+                requestTiming.toolCallMs = (requestTiming.toolCallMs || 0) + Math.max(0, monotonicNowMs() - entry.startedAt);
+              }
             }
             const toolRecord: ToolContextRecord = {
               id,
@@ -1638,15 +2227,9 @@ ${hypotheses}
                 : {}),
             };
             toolContextRecords.push(toolRecord);
-            toolMsg.content = filterToolResultForCurrentTurn(toolRecord);
-            console.log(`[Tool Call Result] Name: ${toolRecord.name}, Status: ${toolRecord.status || "unknown"}, Args: ${toolRecord.args}, Result Size: ${stringifyModelContent(toolMsg.content).length}`);
-            const guardDecision = agentProgressGuard.recordToolResult(toolRecord);
-            if (guardDecision.shouldStop) {
-              if (guardDecision.errorCode === "AGENT_TOOL_ERROR_LIMIT") {
-                throw createAgentToolErrorLimitError(guardDecision.reason);
-              }
-              throw createAgentProgressLimitError(guardDecision.reason);
-            }
+            if (isRequestRawLoggingEnabled()) requestToolRecords.push({ ...toolRecord });
+            if (toolRecord.name && !requestToolNames.includes(toolRecord.name)) requestToolNames = [...requestToolNames, toolRecord.name];
+            console.log(`[Tool Call Result] Name: ${toolRecord.name}, Status: ${toolRecord.status || "unknown"}, ArgLength: ${toolRecord.args.length}, Result Size: ${stringifyModelContent(toolMsg.content).length}`);
             continue;
           }
 
@@ -1657,7 +2240,7 @@ ${hypotheses}
                 const id = chunk.id;
                 if (!id) continue;
                 if (!toolCallMap.has(id)) {
-                  toolCallMap.set(id, { name: "", args: "", notified: false, completed: false });
+                  toolCallMap.set(id, { name: "", args: "", notified: false, completed: false, startedAt: monotonicNowMs() });
                 }
                 const entry = toolCallMap.get(id)!;
                 if (chunk.name) entry.name = chunk.name;
@@ -1686,8 +2269,9 @@ ${hypotheses}
                   args: JSON.stringify(tool.args || {}),
                   notified: true,
                   completed: false,
+                  startedAt: monotonicNowMs(),
                 });
-                console.log(`[Tool Call] Name: ${tool.name}, Args: ${JSON.stringify(tool.args)}`);
+                console.log(`[Tool Call] Name: ${tool.name}, ArgLength: ${getToolArgumentLength(tool.args)}`);
                 const statusMsg = buildProgressStreamContent(fullContent, [
                   `> 🔍 正在调用: ${getToolDisplay(tool.name, tool.args)}...`,
                 ]);
@@ -1706,31 +2290,15 @@ ${hypotheses}
               if (extractedDelta.hasControl) {
                 applyFlowControlPatch(extractedDelta.control);
               }
-              const delta = extractedDelta.content;
-              if (delta.trim().length > 0) {
-                if (coverNextVisibleContent) {
-                  fullContent = delta;
-                  coverNextVisibleContent = false;
-                } else if (fullContent && delta.startsWith(fullContent)) {
-                  fullContent = delta;
-                } else {
-                  fullContent += delta;
-                }
-
-                if (fullContent && Date.now() - lastUpdateTime > UPDATE_INTERVAL) {
-                  if (!shouldStopCurrentTask()) {
-                    await safeReplyStream(collapseProgressUpdates(fullContent), false);
-                  }
-                  lastUpdateTime = Date.now();
-                }
-              }
+              // 普通 assistant 文本可能只是“已定位候选/继续核实”等中间状态。
+              // 最终正文只接受 agent_end，避免把中间状态当成用户最终回复。
             }
           }
         }
 
         for (const [id, entry] of toolCallMap.entries()) {
           if (!entry.completed && entry.name) {
-            console.log(`[Tool Call Pending/Final] Name: ${entry.name}, Args: ${entry.args}`);
+            console.log(`[Tool Call Pending/Final] Name: ${entry.name}, ArgLength: ${entry.args.length}`);
           }
         }
 
@@ -1746,72 +2314,19 @@ ${hypotheses}
         signal?: AbortSignal,
       ): Promise<AutoVerificationRoundResult> => {
         const startedAt = Date.now();
-        const result = await runAutoVerificationAgentRound(userContent, resetCandidate, signal);
-        logPhaseDuration(`agent_round(reset=${resetCandidate})`, startedAt);
-        return result;
-      };
-
-      // 简单问题快速路径：planner 已分析（queries=0），跳过 MCP 工具与搜索循环，直接 LLM 回答
-      let fastPathAnswer = "";
-      if (useFastPath) {
-        startTodoItem(runtimeTodoList, "tools_loaded");
-        completeTodoItem(runtimeTodoList, "tools_loaded", "fast path: skipped MCP tool loading");
-        startTodoItem(runtimeTodoList, "analysis_finished");
+        const monotonicStartedAt = monotonicNowMs();
         try {
-          const businessPrompt = await getBusinessPrompt(plannerResult);
-          const baseModel = await getBaseModel();
-          const fastPathStart = Date.now();
-          const fastPathResponse = await baseModel.invoke([
-            new SystemMessage(businessPrompt),
-            ...buildMessagesForCurrentTurn({
-              sessionMessages: session.messages,
-              userContent: currentQuestion,
-              repoHint: [],
-            }),
-          ]);
-          const candidate = stringifyModelContent(fastPathResponse.content);
-          const fastPathDuration = formatElapsedDuration(fastPathStart);
-          if (hasUncertaintyMarkers(candidate)) {
-            console.log(`[${botConfig.name}] Fast path uncertainty detected for ${body.msgid}: falling back to full pipeline (duration=${fastPathDuration})`);
-            completeTodoItem(runtimeTodoList, "analysis_finished", "fast path uncertainty markers detected, fallback to full pipeline");
-            questionDifficulty = "complex";
-          } else {
-            fastPathAnswer = candidate;
-            console.log(`[${botConfig.name}] Fast path completed for ${body.msgid}: duration=${fastPathDuration}, contentLength=${fastPathAnswer.length}`);
-            completeTodoItem(runtimeTodoList, "analysis_finished", `fast path contentLength=${fastPathAnswer.length}, duration=${fastPathDuration}`);
-          }
-        } catch (fastPathError) {
-          console.error(`[${botConfig.name}] Fast path failed for ${body.msgid}, falling back to full pipeline:`, fastPathError);
-          completeTodoItem(runtimeTodoList, "analysis_finished", "fast path error, fallback to full pipeline");
-          questionDifficulty = "complex";
+          return await runAutoVerificationAgentRound(userContent, resetCandidate, signal);
+        } finally {
+          requestTiming.piModelRoundMs = (requestTiming.piModelRoundMs || 0) + Math.max(0, monotonicNowMs() - monotonicStartedAt);
+          logPhaseDuration(`agent_round(reset=${resetCandidate})`, startedAt);
         }
-      }
-
-      // 直接匹配型提示词注入：走 agent，但提示只做关键词匹配、命中即答、不扩展推理
-      if (useDirectMatch && plannerResult) {
-        const directMatchInstruction = `系统提示：【直接匹配回答】
-当前问题可以通过关键词直接匹配代码、配置或数据得到答案，不需要多步逻辑推理。
-1. 优先用规划阶段给出的检索词直接查询，命中即基于证据组织答案
-2. 本次最多执行一次关键词检索，后续只允许读取命中证据所需的最小上下文
-3. 不要扩展检索范围、不要推理因果链、不要多轮假设验证
-4. 证据不足时明确说明未找到，不要推理猜测
-5. 回答中保留关键取值（字段名、参数值、枚举值、错误码、配置值）原文`;
-        if (typeof finalContentForPrompt === 'string') {
-          finalContentForPrompt = `${directMatchInstruction}\n\n${finalContentForPrompt}`;
-        } else if (Array.isArray(finalContentForPrompt)) {
-          finalContentForPrompt = [
-            { type: 'text', text: `${directMatchInstruction}\n\n` },
-            ...finalContentForPrompt,
-          ];
-        }
-        console.log(`[${botConfig.name}] Direct match instruction injected for ${body.msgid}: intent=${plannerResult.intent}`);
-      }
+      };
 
       // 明确入口问题：先精确定位入口/板块，再拉图信息，从代码整理答案。
       // 入口锚点由 planner 模型节点识别（entry_anchors），不用正则。
       const entryAnchors = plannerResult?.entry_anchors?.filter(Boolean) ?? [];
-      const useEntryAnchor = !useFastPath
-        && !isStreamPauseResume
+      const useEntryAnchor = !isStreamPauseResume
         && entryAnchors.length > 0;
       if (useEntryAnchor) {
         const anchorListText = entryAnchors.map(anchor => `- ${anchor}`).join("\n");
@@ -1827,109 +2342,103 @@ ${hypotheses}
         console.log(`[${botConfig.name}] Entry anchor instruction injected for ${body.msgid}: ${entryAnchors.length} anchors`);
       }
 
-      // 记录流式过程中的所有消息，用于容错恢复
+      // Pi 生命周期负责工具选择、继续执行和正常完成。
       try {
-        if (fastPathAnswer) {
-          fullContent = fastPathAnswer;
-        // 快路径只看用户本轮原始输入，避免拼接历史 AI 输出（含"原因分析/调用链/代码位置"等 section）误触发跳过工具加载。
-        } else if (!useFastPath && shouldUseWeComDirectEvidenceFastPath(originalUserQuestion)) {
-          startTodoItem(runtimeTodoList, "tools_loaded");
-          completeTodoItem(runtimeTodoList, "tools_loaded", "direct evidence fast path: skipped MCP tool loading");
-          startTodoItem(runtimeTodoList, "analysis_finished");
-          const businessPrompt = await getBusinessPrompt(plannerResult);
-          const baseModel = await getBaseModel();
-          const fastPathResponse = await baseModel.invoke([
-            new SystemMessage(`${businessPrompt}\n\n${buildDirectEvidenceFastPathInstruction()}`),
-            new HumanMessage(typeof finalContentForPrompt === "string" ? finalContentForPrompt : currentQuestion),
-          ]);
-          fullContent = ensureRecoverySqlAuditMarker(stringifyModelContent(fastPathResponse.content));
-          completeTodoItem(runtimeTodoList, "analysis_finished", `direct evidence fast path contentLength=${fullContent.length}`);
-        } else {
-        startTodoItem(runtimeTodoList, "tools_loaded");
         await sendStageProgress("正在加载 MCP 工具和项目范围，继续核实中。", true);
-        const { scopedEvidenceTools } = await ensureAutoVerificationAgent();
-        await sendStageProgress("已加载可用工具，正在判断是否需要预检索，继续核实中。", true);
-
-        if (!isStreamPauseResume && !hasDirectEvidence && !useDirectMatch && plannerResult && textToPlan.trim().length > 0) {
-          await sendStageProgress("正在执行预检索以缩小证据范围，继续核实中。", true);
-          const prelude = await runSearchLoopPrelude({
-            userQuestion: textToPlan,
-            plannerResult,
-            tools: scopedEvidenceTools,
-            repoHint: repoHints,
-          });
-
-          if (prelude) {
-            if (typeof finalContentForPrompt === 'string') {
-              finalContentForPrompt = `${prelude}\n\n${finalContentForPrompt}`;
-            } else if (Array.isArray(finalContentForPrompt)) {
-              finalContentForPrompt = [
-                { type: 'text', text: `${prelude}\n\n` },
-                ...finalContentForPrompt,
-              ];
-            }
-          }
-        }
-
-        startTodoItem(runtimeTodoList, "analysis_finished");
+        await ensureAutoVerificationAgent();
+        await sendStageProgress("已加载可用工具，继续由 Pi 直接分析问题。", true);
         await sendStageProgress("正在启动业务分析节点，继续核实中。", true);
         await sendStageProgress("业务分析节点已启动，正在调用模型和工具核实证据，继续核实中。", true);
         await runAgentRoundWithTiming(finalContentForPrompt, false);
-        completeTodoItem(runtimeTodoList, "analysis_finished", `contentLength=${fullContent.length}, toolResults=${toolContextRecords.length}`);
-        }
 
-      } catch (err: any) {
-        console.error(`Agent execution error for ${body.msgid}:`, err);
-        blockTodoItem(runtimeTodoList, "analysis_finished", err instanceof Error ? err.message : String(err));
-        
-        if (err.lc_error_code === "AGENT_TOOL_ERROR_LIMIT") {
-          toolErrorLimitReached = true;
-          fullContent = buildAgentToolErrorLimitReply(err.message || "工具查询多次失败");
-          completeTodoItem(runtimeTodoList, "analysis_finished", "tool error limit reached, sent direct user feedback");
-        // 特别处理递归超限错误 (GRAPH_RECURSION_LIMIT)
-        } else if (err.lc_error_code === 'GRAPH_RECURSION_LIMIT' || err.lc_error_code === 'AGENT_TOOL_PROGRESS_LIMIT' || err.message?.includes('Recursion limit')) {
-          toolProgressLimitReached = true;
-          try {
-            console.log(`[${botConfig.name}] [Recovery] Agent progress limit reached for ${body.msgid}, attempting fallback synthesis...`);
-            const baseModel = await getBaseModel();
-            const businessPrompt = await getBusinessPrompt(plannerResult);
-
-            // 构造恢复提示词：将已有的所有中间历史（包括工具调用和结果）发给不带 tools 的大模型进行总结
-            const recoveryMessages = [
-              new SystemMessage(buildProgressLimitRecoverySystemPrompt(businessPrompt)),
-              ...buildMessagesForCurrentTurn({
-                sessionMessages: session.messages,
-                userContent: finalContentForPrompt,
-                repoHint: repoHints,
-              }),
-              ...(buildToolContextSummary(toolContextRecords)
-                ? [new SystemMessage(buildToolContextSummary(toolContextRecords))]
-                : intermediateMessages)
-            ];
-
-            const recoveryResponse = await baseModel.invoke(recoveryMessages);
-            fullContent = ensureRecoverySqlAuditMarker(stringifyModelContent(recoveryResponse.content));
-            recoveryAuditReason = err.lc_error_code === "AGENT_TOOL_PROGRESS_LIMIT"
-              ? "工具调用达到进展守卫上限后的恢复总结"
-              : "LangGraph 递归上限后的恢复总结";
-            completeTodoItem(runtimeTodoList, "analysis_finished", `recovery contentLength=${fullContent.length}`);
-          } catch (recoveryErr) {
-            console.error(`Recovery synthesis failed for ${body.msgid}:`, recoveryErr);
-            const errorFallback = `${buildUserFacingErrorReply(err)}
-
-${buildUserFacingErrorReply(recoveryErr, "恢复处理时发生异常")}`;
-            fullContent = fullContent ? `${fullContent}
-
-${errorFallback}` : errorFallback;
-            completeTodoItem(runtimeTodoList, "analysis_finished", "recovery failed, sent actual error fallback");
+        } catch (err: any) {
+          recordRequestRawError(err);
+          requestExecutionError = true;
+          if (streamExpired) {
+            await cleanupStreamExpiry();
+            console.warn(`[${botConfig.name}] Pi stream stopped at the WeCom safety deadline for ${body.msgid}.`);
+            finishRequestTiming("ttl_expired", "stream_expired");
+            return;
           }
-        } else {
-          const errorFallback = buildUserFacingErrorReply(err);
-          fullContent = fullContent ? `${fullContent}
-
-${errorFallback}` : errorFallback;
-          completeTodoItem(runtimeTodoList, "analysis_finished", "agent error, sent actual error fallback");
+          if (piAgentEndFailure === "aborted") {
+            finishRequestTiming("cancelled", "pi_agent_aborted");
+            return;
+          }
+          if (currentTask.cancelled || requestAbortController.signal.aborted || shouldStopCurrentTask()) {
+            finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_cancelled");
+            return;
+          }
+          console.error(`Agent execution error for ${body.msgid}:`, err);
+          await saveFailedRequestQuestion(effectiveParsedContent);
+          fullContent = "";
+          try {
+            const sent = await sendCard(frame, streamId, "本次分析暂时失败，请稍后重试。", true, {
+              templateCard: {
+                card_type: "text_notice",
+                main_title: { title: "处理失败", desc: "本次分析未能完成" },
+                task_id: `task_${body.msgid}`,
+              },
+            },
+            () => activeTasks.get(sessionKey) === currentTask
+              && !currentTask.cancelled
+              && !streamExpired,
+          );
+          if (sent !== undefined && ownsCurrentTask()) {
+            currentTask.terminalState = "final_sent";
+            if (streamExpiryTimer) clearTimeout(streamExpiryTimer);
+          }
+          } catch (replyError) {
+            console.error(`[${botConfig.name}] Failed to send agent error reply for ${body.msgid}:`, replyError);
+          }
+          finishRequestTiming(
+            currentTask.cancelled || !ownsCurrentTask() ? "cancelled" : "error",
+            requestReplyAckFailed ? "reply_ack_timeout" : "agent_execution_error",
+          );
+          return;
         }
+
+      if (streamExpired) {
+        if (streamExpiryTimer) clearTimeout(streamExpiryTimer);
+        await streamExpiryPromise;
+        finishRequestTiming("ttl_expired", "stream_expired");
+        return;
+      }
+
+      const sendInvalidPiLifecycleReply = async () => {
+        console.error(`[${botConfig.name}] Pi agent_end did not contain a sendable final text for ${body.msgid}`);
+        await saveFailedRequestQuestion(effectiveParsedContent);
+        try {
+          const sent = await sendCard(
+            frame,
+            streamId,
+            "本次分析未返回有效最终结论，请稍后重试。",
+            true,
+            undefined,
+            () => activeTasks.get(sessionKey) === currentTask
+              && !currentTask.cancelled
+              && !streamExpired,
+          );
+          if (sent !== undefined && ownsCurrentTask()) {
+            currentTask.terminalState = "final_sent";
+            if (streamExpiryTimer) clearTimeout(streamExpiryTimer);
+          }
+        } catch (replyError) {
+          console.error(`[${botConfig.name}] Failed to send invalid lifecycle reply for ${body.msgid}:`, replyError);
+        }
+      };
+
+      if (!piAgentEnded) {
+        fullContent = "";
+        if (currentTask.cancelled || requestAbortController.signal.aborted || shouldStopCurrentTask()) {
+          finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_cancelled");
+          return;
+        }
+        await sendInvalidPiLifecycleReply();
+        finishRequestTiming(
+          currentTask.cancelled || !ownsCurrentTask() ? "cancelled" : "error",
+          requestReplyAckFailed ? "reply_ack_timeout" : "pi_agent_end_stop_text_missing",
+        );
+        return;
       }
 
       // 自动续查和最终评审期间继续维持心跳，终态发送前再统一停止。
@@ -1947,57 +2456,12 @@ ${errorFallback}` : errorFallback;
         fullContent = "";
       }
 
-      if (toolErrorLimitReached && fullContent) {
-        fullContent = collapseProgressUpdates(stripEmptyProtocolContent(fullContent));
-        const toolContextSummary = buildToolContextSummary(toolContextRecords);
-        await sessionManager.addMessages(sessionKey, [
-          new HumanMessage({ content: effectiveParsedContent as any }),
-          ...(toolContextSummary ? [new SystemMessage(toolContextSummary)] : []),
-          new AIMessage(fullContent),
-        ]);
-        stopThinkingHeartbeat();
-        if (!shouldStopCurrentTask()) {
-          await safeReplyStream(fullContent, true);
-        }
-        if (activeTasks.get(sessionKey) === currentTask) {
-          activeTasks.delete(sessionKey);
-        }
-        return;
-      }
-
       if (fullContent) {
-        const missingPriorityAnchors = typeof finalContentForPrompt === "string"
-          ? getMissingPriorityAnswerAnchors(finalContentForPrompt, fullContent)
-          : [];
-        if (missingPriorityAnchors.length > 0) {
-          try {
-            const baseModel = await getBaseModel();
-            fullContent = await repairAnswerForMissingPriorityAnchors({
-              model: baseModel,
-              questionWithHistory: finalContentForPrompt,
-              answer: fullContent,
-            });
-            if (hasTodoItem(runtimeTodoList, "evidence_audited")) {
-              completeTodoItem(runtimeTodoList, "evidence_audited", `已补齐历史优先锚点覆盖：${missingPriorityAnchors.join(", ")}`);
-            }
-          } catch (anchorRepairError) {
-            console.error(`[${botConfig.name}] Failed to repair answer priority anchors for ${body.msgid}:`, anchorRepairError);
-          }
-        }
-
         const humanLoopRequest = detectHumanLoopRequest(fullContent);
-        const proposedHumanLoopReply = humanLoopRequest ? buildHumanLoopReply(humanLoopRequest) : "";
-        const repeatedHumanLoopOutput = hasRepeatedInputOutput(
-          memoryGraphBeforeCurrentTurn,
-          currentQuestion,
-          proposedHumanLoopReply,
-        );
-        if (humanLoopRequest && repeatedHumanLoopOutput) {
+        if (humanLoopRequest) {
           const storedRequest = toStoredHumanLoopRequest(humanLoopRequest, body.msgid);
           sessionManager.setPendingHumanLoop(sessionKey, storedRequest);
           fullContent = buildHumanLoopReply(storedRequest);
-        } else if (humanLoopRequest) {
-          fullContent = "当前信息仍未形成最终结论，且图记忆未检测到重复输入输出，将继续基于现有线索核实。";
         } else if (activePendingHumanLoop) {
           sessionManager.clearPendingHumanLoop(sessionKey);
         }
@@ -2006,306 +2470,69 @@ ${errorFallback}` : errorFallback;
 
       // 发送最终结果
       fullContent = collapseProgressUpdates(stripEmptyProtocolContent(fullContent));
-
-      const sqlAuditEvidence = buildSqlAuditEvidence(fullContent, toolContextRecords, summarizeTodoList(runtimeTodoList));
-      syncRuntimeAuditTodoPlan(runtimeTodoList, {
-        question: currentQuestion,
-        answer: fullContent,
-        repoHints,
-        toolResultCount: toolContextRecords.length,
-        sqlAuditEvidence,
-        skipAuditItems: flowControl.next.skipAuditItems,
-        ...(plannerResult?.intent ? { plannerIntent: plannerResult.intent } : {}),
-        ...(plannerResult?.secondary_intents ? { secondaryIntents: plannerResult.secondary_intents } : {}),
-      });
-      const skipAuditItems = new Set(flowControl.next.skipAuditItems);
-      const shouldSkipSqlAudit = !flowControl.next.runSqlAudit || skipAuditItems.has("sql_correctness_audited");
-      if (hasTodoItem(runtimeTodoList, "sql_correctness_audited")) {
-        if (shouldSkipSqlAudit && !isSqlAuditEvidenceBlocking(sqlAuditEvidence)) {
-          console.log(`[${botConfig.name}] FlowControl skipped SQL audit for ${body.msgid}: ${sqlAuditEvidence}`);
-          completeTodoItem(runtimeTodoList, "sql_correctness_audited", `flow_control: 上游声明不需要 SQL 审核；${sqlAuditEvidence}`);
-        } else {
-          applySqlAuditEvidence(runtimeTodoList, sqlAuditEvidence);
+      if (!fullContent) {
+        if (currentTask.cancelled || requestAbortController.signal.aborted || shouldStopCurrentTask()) {
+          finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_cancelled");
+          return;
         }
-      }
-      completeSkippedAuditItems(runtimeTodoList, flowControl.next.skipAuditItems);
-      if (recoveryAuditReason) {
-        completeRecoveryAuditItems(runtimeTodoList, {
-          question: currentQuestion,
-          answer: fullContent,
-          repoHints,
-          toolResultCount: toolContextRecords.length,
-          reason: recoveryAuditReason,
-        });
-      }
-      completeAnswerSupportedAuditItems(runtimeTodoList, {
-        question: currentQuestion,
-        answer: fullContent,
-        repoHints,
-        toolResultCount: toolContextRecords.length,
-        sqlAuditEvidence,
-        skipAuditItems: flowControl.next.skipAuditItems,
-        ...(plannerResult?.intent ? { plannerIntent: plannerResult.intent } : {}),
-        ...(plannerResult?.secondary_intents ? { secondaryIntents: plannerResult.secondary_intents } : {}),
-      });
-      const incompleteAuditItems = getIncompleteAuditTodoItems(runtimeTodoList);
-      const auditPassed = incompleteAuditItems.length === 0;
-      if (!auditPassed && !skipVerification) {
-        const auditFailureMessage = buildIncompleteAuditTodoMessage(incompleteAuditItems);
-        console.error(`[${botConfig.name}] Runtime TodoList audit incomplete for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}\n${auditFailureMessage}`);
-        // 已有实质回答时保留正文并附一句缺口提示，不用审核兜底模板替换掉真实答案
-        if (fullContent.trim().length >= 200) {
-          const blockedItemCount = incompleteAuditItems.filter(item => item.status === "blocked").length;
-          fullContent = `${fullContent}\n\n（提示：${blockedItemCount > 0 ? "部分结论因查询预算受限未完全核实" : "部分审核项未完成"}，如需要可继续追问核实。）`;
-          console.log(`[${botConfig.name}] Audit incomplete but kept substantive answer for ${body.msgid}: contentLength=${fullContent.length}`);
-        } else {
-          const auditFallbackModel = await getBaseModel();
-          fullContent = await generateUserFacingAuditFallbackMessage({
-            question: currentQuestion,
-            items: incompleteAuditItems,
-            model: auditFallbackModel,
-          });
-        }
-      } else if (!auditPassed) {
-        console.log(`[${botConfig.name}] Skipped audit fallback for ${body.msgid}: difficulty=${questionDifficulty}, incompleteItems=${incompleteAuditItems.length}`);
-      }
-
-      startTodoItem(runtimeTodoList, "final_checked");
-      const initialCandidate = fullContent;
-      const initialToolRecords = [...toolContextRecords];
-      const finalReviewModel = await getBaseModel();
-      let initialRoundPending = true;
-      let latestCandidate = initialCandidate;
-      let autoVerificationResult: Awaited<ReturnType<typeof runAutoVerificationLoop>>;
-      const verificationStartedAt = Date.now();
-
-      if (skipVerification && !shouldStopCurrentTask()) {
-        // 简单/中等难度问题跳过自动验证与最终评审闸门，直接发送
-        const skipResolution: FinalReplyResolutionResult = {
-          ready: true,
-          action: "send",
-          answer: initialCandidate,
-          reason: `skipped verification for ${questionDifficulty} question`,
-          source: "candidate",
-          review: {
-            ready: true,
-            action: "send",
-            reason: `skipped verification for ${questionDifficulty} question`,
-          },
-        };
-        autoVerificationResult = {
-          content: initialCandidate,
-          finalResolution: skipResolution,
-          exitReason: "passthrough",
-          rounds: 0,
-          toolRecords: initialToolRecords,
-          evidenceGaps: [],
-        };
-        console.log(`[${botConfig.name}] Skipped auto verification for ${body.msgid}: difficulty=${questionDifficulty}`);
-      } else {
-
-      try {
-        if (shouldStopCurrentTask()) {
-          throw new Error(STREAM_EXPIRED_MESSAGE);
-        }
-        autoVerificationResult = await runAutoVerificationLoop({
-          startedAt: streamStartedAt,
-          now: Date.now,
-          async runRound(context: AutoVerificationRoundContext) {
-            if (shouldStopCurrentTask()) {
-              throw new Error(STREAM_EXPIRED_MESSAGE);
-            }
-            if (initialRoundPending) {
-              initialRoundPending = false;
-              return {
-                content: initialCandidate,
-                evidenceGaps: [],
-                toolRecords: initialToolRecords,
-              };
-            }
-
-            const continuationPrompt = buildAutoVerificationContinuationPrompt({
-              question: currentQuestion,
-              candidate: latestCandidate,
-              evidenceGaps: context.evidenceGaps,
-              usedToolCalls: context.usedToolCalls,
-              accumulatedEvidenceSummary: buildToolContextSummary([...context.accumulatedToolRecords]),
-              correction: context.correction,
-            });
-            await sendStageProgress(
-              context.correction
-                ? "上一轮未产生新证据，正在调整工具参数后执行一次纠偏查询。"
-                : "最终评审仍缺少直接证据，正在继续调用工具核实。",
-              true,
-            );
-            const roundResult = await runAgentRoundWithTiming(continuationPrompt, true, context.signal);
-            latestCandidate = roundResult.content;
-            return {
-              ...roundResult,
-              evidenceGaps: [...context.evidenceGaps],
-            };
-          },
-          canContinue: () => !toolProgressLimitReached,
-          async reviewFinal({ content, signal }) {
-            if (signal.aborted || shouldStopCurrentTask()) {
-              throw new Error(STREAM_EXPIRED_MESSAGE);
-            }
-            return resolveFinalReplyWithModel({
-              question: currentQuestion,
-              answer: content,
-              streamSnapshots: visibleStreamSnapshots,
-              model: finalReviewModel,
-              memoryGraph: memoryGraphBeforeCurrentTurn,
-            });
-          },
-        });
-      } catch (autoVerificationError: any) {
-        let errorContent: string;
-        let errorReason: string;
-
-        if (autoVerificationError?.lc_error_code === "AGENT_TOOL_ERROR_LIMIT") {
-          errorReason = autoVerificationError.message || "工具查询多次失败";
-          errorContent = buildAgentToolErrorLimitReply(errorReason);
-        } else if (
-          autoVerificationError?.lc_error_code === "AGENT_TOOL_PROGRESS_LIMIT"
-          || autoVerificationError?.lc_error_code === "GRAPH_RECURSION_LIMIT"
-          || autoVerificationError?.message?.includes("Recursion limit")
-        ) {
-          errorReason = autoVerificationError.message || "工具调用达到进展保护上限";
-          try {
-            const businessPrompt = await getBusinessPrompt(plannerResult);
-            const recoveryResponse = await finalReviewModel.invoke([
-              new SystemMessage(buildProgressLimitRecoverySystemPrompt(businessPrompt)),
-              ...buildMessagesForCurrentTurn({
-                sessionMessages: session.messages,
-                userContent: finalContentForPrompt,
-                repoHint: repoHints,
-              }),
-              ...(buildToolContextSummary(toolContextRecords)
-                ? [new SystemMessage(buildToolContextSummary(toolContextRecords))]
-                : intermediateMessages),
-            ]);
-            errorContent = ensureRecoverySqlAuditMarker(stringifyModelContent(recoveryResponse.content));
-          } catch (recoveryError) {
-            errorContent = `${buildUserFacingErrorReply(autoVerificationError)}
-
-${buildUserFacingErrorReply(recoveryError, "恢复处理时发生异常")}`;
-          }
-        } else {
-          errorReason = autoVerificationError instanceof Error
-            ? autoVerificationError.message
-            : String(autoVerificationError);
-          errorContent = buildUserFacingErrorReply(autoVerificationError);
-        }
-
-        const errorResolution: FinalReplyResolutionResult = {
-          ready: false,
-          action: "continue",
-          answer: errorContent,
-          reason: errorReason,
-          source: "error",
-          review: {
-            ready: false,
-            action: "continue",
-            reason: errorReason,
-          },
-        };
-        autoVerificationResult = {
-          content: errorContent,
-          finalResolution: errorResolution,
-          exitReason: "passthrough",
-          rounds: 0,
-          toolRecords: [...toolContextRecords],
-          evidenceGaps: [errorReason],
-        };
-      }
-      }
-      logPhaseDuration(`auto_verification(rounds=${autoVerificationResult.rounds}, exit=${autoVerificationResult.exitReason})`, verificationStartedAt);
-
-      fullContent = autoVerificationResult.content;
-      const finalResolution = autoVerificationResult.finalResolution;
-      const isResumeTurn = (activePendingHumanLoop?.resumeCount ?? 0) > 0;
-      const repeatedClarificationOutput = hasRepeatedInputOutput(
-        memoryGraphBeforeCurrentTurn,
-        currentQuestion,
-        fullContent,
-      );
-      const clarificationRequest = shouldSendFinalReply(finalResolution) || isResumeTurn || !repeatedClarificationOutput
-        ? null
-        : detectClarificationContent(fullContent, currentQuestion);
-      let humanLoopReply: string | null = null;
-      if (clarificationRequest) {
-        console.log(`[${botConfig.name}] Clarification content detected without human_loop protocol, converting to Human Loop for ${body.msgid}`);
-        const storedClarification = toStoredHumanLoopRequest(clarificationRequest, body.msgid);
-        sessionManager.setPendingHumanLoop(sessionKey, storedClarification);
-        humanLoopReply = buildHumanLoopReply(storedClarification);
-      }
-      const finalDeliveryInput: FinalReplyDeliveryInput = {
-        content: fullContent,
-        finalResolution,
-        humanLoopReply,
-        userQuestion: currentQuestion,
-      };
-      const finalDelivery: FinalReplyDeliveryResult = autoVerificationResult.exitReason === "no-progress"
-        ? {
-          content: AUTO_VERIFICATION_NO_PROGRESS_REPLY,
-          shouldSendFinal: true,
-          reason: "auto verification correction produced no new evidence",
-          source: "no_progress",
-        }
-        : resolveFinalReplyDelivery(finalDeliveryInput);
-      if (finalDelivery.source === "blocked" && finalResolution.action === "human_loop") {
-        sessionManager.setPendingHumanLoop(
-          sessionKey,
-          toStoredHumanLoopRequest(buildBlockedFinalHumanLoopRequest(finalDeliveryInput), body.msgid),
+        await sendInvalidPiLifecycleReply();
+        finishRequestTiming(
+          currentTask.cancelled || !ownsCurrentTask() ? "cancelled" : "error",
+          requestReplyAckFailed ? "reply_ack_timeout" : "pi_agent_end_stop_text_missing",
         );
+        return;
       }
+
+      const finalDelivery: FinalReplyDeliveryResult = {
+        content: fullContent,
+        shouldSendFinal: Boolean(piAgentEnded && fullContent.trim() && !requestExecutionError),
+        reason: piAgentEnded && fullContent.trim() && !requestExecutionError
+          ? "Pi agent_end 已返回最终回答"
+          : "Pi agent_end 未返回可发送的最终回答",
+        source: "candidate",
+      };
       fullContent = finalDelivery.content;
 
-      // 存原始回答，供模式切换时重新格式化
-      if (fullContent && !shouldStopCurrentTask()) {
-        sessionManager.setLastRawAnswer(sessionKey, fullContent);
-      }
-
-      // 默认业务回答模式：将技术回答转为业务语言；dev 模式跳过；错误回复保留原貌
-      const currentReplyMode = sessionManager.getReplyMode(sessionKey);
-      const isErrorReply = finalDelivery.source === "error";
-      if (fullContent && currentReplyMode === "business" && !isErrorReply && !shouldStopCurrentTask()) {
-        try {
-          const rewriteStart = Date.now();
-          const rewritten = await rewriteAnswerForBusiness(currentQuestion, fullContent);
-          const rewriteDuration = formatElapsedDuration(rewriteStart);
-          console.log(`[${botConfig.name}] Business answer rewrite completed for ${body.msgid}: duration=${rewriteDuration}, originalLength=${fullContent.length}, rewrittenLength=${rewritten.length}`);
-          fullContent = rewritten;
-        } catch (rewriteError) {
-          console.error(`[${botConfig.name}] Business answer rewrite failed for ${body.msgid}, using original answer:`, rewriteError);
+      // Pi 输出即为最终回答；终态发送通过共享调度器串行交付，TTL 仍保持有效。
+      let finalHistoryPersisted = false;
+      await stopThinkingHeartbeatAndDrain();
+      if (finalDelivery.shouldSendFinal && !shouldStopCurrentTask() && !finalReplySent) {
+        finalReplySent = true;
+        console.log(`[${botConfig.name}] Final reply for ${body.msgid}: totalElapsed=${formatElapsedDuration(streamStartedAt)}`);
+        const finalSendStartedAt = monotonicNowMs();
+        const sent = await safeReplyStream(fullContent, true);
+        if (sent) {
+          requestTiming.finalSendMs = Math.max(0, monotonicNowMs() - finalSendStartedAt);
+          if (ownsCurrentTask()) {
+            finalHistoryPersisted = true;
+            sessionManager.setLastRawAnswer(sessionKey, fullContent);
+            const finalToolContextSummary = buildToolContextSummary(toolContextRecords);
+            void sessionManager.addMessages(sessionKey, [
+              new HumanMessage({ content: effectiveParsedContent as any }),
+              ...(finalToolContextSummary ? [new SystemMessage(finalToolContextSummary)] : []),
+              new AIMessage(fullContent),
+            ]).catch(error => {
+              console.error(`[${botConfig.name}] Failed to persist final reply for ${body.msgid}:`, error);
+            });
+          }
+          finishRequestTiming("completed", requestExecutionError ? "agent_execution_error" : null);
+        } else {
+          finishRequestTiming(streamExpired ? "ttl_expired" : "cancelled", streamExpired ? "stream_expired" : "final_send_skipped");
         }
-      } else if (fullContent && (currentReplyMode === "dev" || isErrorReply)) {
-        console.log(`[${botConfig.name}] Skipped business rewrite for ${body.msgid}: mode=${currentReplyMode}, isErrorReply=${isErrorReply}, contentLength=${fullContent.length}`);
       }
-
-      if (fullContent && !shouldStopCurrentTask()) {
+      if (
+        fullContent
+        && !finalHistoryPersisted
+        && !shouldStopCurrentTask()
+      ) {
         const finalToolContextSummary = buildToolContextSummary(toolContextRecords);
-        await sessionManager.addMessages(sessionKey, [
+        void sessionManager.addMessages(sessionKey, [
           new HumanMessage({ content: effectiveParsedContent as any }),
           ...(finalToolContextSummary ? [new SystemMessage(finalToolContextSummary)] : []),
           new AIMessage(fullContent),
-        ]);
-      }
-      if (finalDelivery.shouldSendFinal) {
-        completeTodoItem(runtimeTodoList, "final_checked", `finalLength=${fullContent.trim().length}; source=${finalDelivery.source}; review=${finalDelivery.reason}`);
-      } else {
-        console.error(`[${botConfig.name}] Final reply blocked for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}; ${finalDelivery.reason}`);
-        completeTodoItem(runtimeTodoList, "final_checked", finalDelivery.reason);
-      }
-      if (auditPassed) {
-        assertTodoListComplete(runtimeTodoList);
-        console.log(`[${botConfig.name}] Runtime TodoList completed for ${body.msgid}: ${summarizeTodoList(runtimeTodoList)}`);
-      }
-      await stopThinkingHeartbeatAndDrain();
-      if (!shouldStopCurrentTask() && fullContent) {
-        console.log(`[${botConfig.name}] Final reply for ${body.msgid}: totalElapsed=${formatElapsedDuration(streamStartedAt)}`);
-        await safeReplyStream(fullContent || "未获取到有效回复", true);
+        ]).catch(error => {
+          console.error(`[${botConfig.name}] Failed to persist final reply for ${body.msgid}:`, error);
+        });
       }
       // 恢复轮完成后清理保存的计划，避免后续普通轮次误复用
       if (isStreamPauseResume && sessionManager.getLastPlanSteps(sessionKey)) {
@@ -2315,15 +2542,35 @@ ${buildUserFacingErrorReply(recoveryError, "恢复处理时发生异常")}`;
         activeTasks.delete(sessionKey);
       }
     } catch (error) {
+      recordRequestRawError(error);
+      if (error instanceof AgentSlotCancelledError) {
+        finishRequestTiming(
+          requestWasStreamExpired ? "ttl_expired" : "cancelled",
+          requestWasStreamExpired ? "stream_expired" : "agent_queue_cancelled",
+        );
+        return;
+      }
+      finishRequestTiming("error", "request_processing_error");
       stopThinkingHeartbeat();
       console.error(`Outer error processing message ${body.msgid}:`, error);
-      const activeTaskAfterError = activeTasks.get(sessionKey);
-      if (activeTaskAfterError?.msgid === body.msgid) {
-        activeTasks.delete(sessionKey);
+      cleanupActiveTask();
+    } finally {
+      await cleanupStreamExpiry();
+      stopThinkingHeartbeat();
+      if (!requestTimingFinished) {
+        finishRequestTiming("cancelled", "request_ended_without_final_reply");
       }
+      cleanupActiveTask();
     }
   });
 
+  bot.on("disconnected", reason => {
+    console.warn(`[${botConfig.name}] WeCom WebSocket disconnected: ${reason}; cancelling active streams for this bot.`);
+    for (const task of activeTasks.values()) {
+      task.cancelled = true;
+      task.abortController?.abort();
+    }
+  });
   bot.on("connected", () => console.log(`[${botConfig.name}] WeCom WebSocket connected.`));
   bot.on("authenticated", () => {
     if (reconnectState.reconnectWatchdogTimer) {
@@ -2341,7 +2588,7 @@ ${buildUserFacingErrorReply(recoveryError, "恢复处理时发生异常")}`;
 
   bot.connect();
   const contextWindow = getModelContextWindow();
-  console.log(`[${botConfig.name}] WeCom Bot starting... Model: ${config.llm.modelName}, Recursion Limit: ${config.llm.recursionLimit}, Context Window: ${contextWindow} tokens`);
+  console.log(`[${botConfig.name}] WeCom Bot starting... Model: ${config.llm.modelName}, Context Window: ${contextWindow} tokens`);
 }
 
 export async function startBots() {

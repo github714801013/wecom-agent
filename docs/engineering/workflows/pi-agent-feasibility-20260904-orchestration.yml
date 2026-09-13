@@ -1,0 +1,496 @@
+schema_version: 3
+orchestrator_version: 3
+revision: 4
+task_id: pi-agent-feasibility-20260904
+task:
+  title: 精简换成 Pi 智能体可行性
+  source: local
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-04T13:55:27+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feature/search-iteration
+  base_branch: null
+  base_commit: null
+  migration: null
+route: business_consultation
+flow_definition:
+  version: 1
+  task_type: business_consultation
+  option_id: business_consultation_standard
+  name: 标准业务咨询
+  purpose: 适用于需要以代码事实、调用链证据和日志记录回答业务问题的咨询任务。
+  stage_ids:
+  - gitnexus-inquiry
+  - loki-inquiry
+  stages:
+  - id: gitnexus-inquiry
+    skill: null
+    mcp:
+      server: remote_gitnexus
+      tools:
+      - query
+      - context
+      - code_snippet
+      - impact
+      - trace
+      fallback: local_workspace_search
+      scope: dynamic
+    execution_mode: sub_agent
+    kind: mcp
+    host_action: null
+    reference_mutation: false
+    skills: []
+    agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+      source=local_search、authority=non_gitnexus。
+    orchestration_mode: mcp_prompt
+    evidence_policy:
+      gitnexus_first: true
+      require_query_record: true
+      allow_local_fallback: true
+      local_fallback_only_when:
+      - repository_unindexed
+      - service_unavailable
+      - authorization_unavailable
+      - timeout
+      - index_stale
+      - aggregate_unsupported
+      - capability_unavailable
+      local_search_root: workspace.path
+      local_evidence_source: local_search
+      local_evidence_authority: non_gitnexus
+      local_search_cannot_prove:
+      - call_graph
+      - impact
+      - cross_project_trace
+      - complete_consumers
+    completion_gate:
+      id: inquiry_record
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: user_confirmation
+      action: execute_gitnexus_inquiry
+      prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+        Agent。
+      allow_skip: research_not_needed
+      reuse: same_task_readonly_exact
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: plans/pi-agent-feasibility-20260904-gitnexus-inquiry.md
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: research
+      index_path: research/index.yml
+      path: gitnexus
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: loki-inquiry
+    skill: loki-cli
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - loki-cli
+    agent_prompt: 按 quality/diagnostics 的 loki-cli-specs.md 确认租户与 LogQL 规则后，调用 `uv
+      run --with pyyaml --script <dev-spec-gen-root>/scripts/loki_cli.py --tenant
+      <编码> <logcli 子命令和参数>` 执行日志查询；查询结果按问题→日志证据→未确认项分层回传结构化 handoff，禁止把推断写成事实。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: inquiry_record
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: user_confirmation
+      action: execute_loki_inquiry
+      prompt: 执行只读 Loki 日志查询；按 loki-cli-specs.md 调用 loki_cli.py 写入正式调研记录，不修改工作区或外部系统。查询是否执行必须由用户确认；未确认不得派发执行
+        Agent。
+      allow_skip: research_not_needed
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: diagnostics
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - loki-cli
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  transitions:
+    complete:
+      gitnexus-inquiry: loki-inquiry
+      loki-inquiry: null
+    skipped:
+      gitnexus-inquiry: loki-inquiry
+      loki-inquiry: null
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  research_mode: null
+flow_selection:
+  task_type: business_consultation
+  option_id: business_consultation_standard
+  selection_mode: preset
+  stage_ids:
+  - gitnexus-inquiry
+  - loki-inquiry
+  omitted_stages: []
+  skill_audit:
+    checked:
+    - skill: loki-cli
+      source: missing
+    skipped:
+    - stage_id: loki-inquiry
+      skill: loki-cli
+      reason: skill_initially_unavailable
+  name: 标准业务咨询
+  purpose: 适用于需要以代码事实、调用链证据和日志记录回答业务问题的咨询任务。
+route_history: []
+rollback_history: []
+flow_selection_epoch: 0
+awaiting_flow_selection: null
+code_relationship_graphs: []
+stages:
+- id: gitnexus-inquiry
+  skill: null
+  mcp:
+    server: remote_gitnexus
+    tools:
+    - query
+    - context
+    - code_snippet
+    - impact
+    - trace
+    fallback: local_workspace_search
+    scope: dynamic
+  execution_mode: sub_agent
+  kind: mcp
+  host_action: null
+  reference_mutation: false
+  skills: []
+  agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+    source=local_search、authority=non_gitnexus。
+  orchestration_mode: mcp_prompt
+  evidence_policy:
+    gitnexus_first: true
+    require_query_record: true
+    allow_local_fallback: true
+    local_fallback_only_when:
+    - repository_unindexed
+    - service_unavailable
+    - authorization_unavailable
+    - timeout
+    - index_stale
+    - aggregate_unsupported
+    - capability_unavailable
+    local_search_root: workspace.path
+    local_evidence_source: local_search
+    local_evidence_authority: non_gitnexus
+    local_search_cannot_prove:
+    - call_graph
+    - impact
+    - cross_project_trace
+    - complete_consumers
+  completion_gate:
+    id: inquiry_record
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: user_confirmation
+    action: execute_gitnexus_inquiry
+    prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+      Agent。
+    allow_skip: research_not_needed
+    reuse: same_task_readonly_exact
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: plans/pi-agent-feasibility-20260904-gitnexus-inquiry.md
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+    index_sha256: a6190739557bd2b7ed15d6d14c0a4433854a99ee68673acdb69faf3b6b6df2f8
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files:
+  - path: plans/pi-agent-feasibility-20260904-gitnexus-inquiry.md
+    sha256: 6c637a73fb4ea5cf2252f38d77f2a3f4c4fa4d66bc459962df982cbbee15cff9
+  handoff_summary: 完成 Pi 智能体替换可行性只读调研：可行但应作为可插拔底层 Agent 内核，不应直接替换企业微信、MCP、证据治理和安全业务层。
+  evidence: &id001
+  - kind: verification
+    summary: Pi 官方 README：https://github.com/earendil-works/pi；Pi agent-core 提供有状态
+      Agent、prompt/continue、事件流、abort/waitForIdle 和 AgentTool 生命周期。
+    recorded_at: '2026-09-04T14:24:54+00:00'
+  - kind: verification
+    summary: Pi 官方 coding-agent 文档明确核心不内置 MCP，CLI 默认继承进程权限；超时需由调用方通过 AbortSignal 实现。
+    recorded_at: '2026-09-04T14:24:54+00:00'
+  - kind: verification
+    summary: 当前项目 src/graph.ts 使用 LangChain createAgent；src/wecom-adapter.ts 集中承担
+      Planner、MCP、工具结果、自动验证、最终评审、企微流式与业务重写；src/mcp-client.ts、session-manager.ts 和安全护栏不能直接删除。
+    recorded_at: '2026-09-04T14:24:54+00:00'
+  - kind: verification
+    summary: 建议先以 PiAgentAdapter + LangChain StructuredTool 到 Pi AgentTool 桥接做 PoC，只在简单问题或
+      /dev 模式灰度，保留 LangChain fallback。
+    recorded_at: '2026-09-04T14:24:54+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-04T14:24:54+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: execute_gitnexus_inquiry
+    command: 执行只读 GitNexus 调研（scope=dynamic）
+    authorization: 执行只读 GitNexus 调研，评估当前项目精简替换为 Pi 智能体的可行性。
+    authorized_at: '2026-09-04T14:11:55+00:00'
+  answer_confirmations: []
+  host_action_baseline: null
+- id: loki-inquiry
+  skill: loki-cli
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - loki-cli
+  agent_prompt: 按 quality/diagnostics 的 loki-cli-specs.md 确认租户与 LogQL 规则后，调用 `uv run
+    --with pyyaml --script <dev-spec-gen-root>/scripts/loki_cli.py --tenant <编码> <logcli
+    子命令和参数>` 执行日志查询；查询结果按问题→日志证据→未确认项分层回传结构化 handoff，禁止把推断写成事实。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: inquiry_record
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: user_confirmation
+    action: execute_loki_inquiry
+    prompt: 执行只读 Loki 日志查询；按 loki-cli-specs.md 调用 loki_cli.py 写入正式调研记录，不修改工作区或外部系统。查询是否执行必须由用户确认；未确认不得派发执行
+      Agent。
+    allow_skip: research_not_needed
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: awaiting
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - loki-cli
+  required_action: null
+  confirmed_at: null
+  confirmation_request:
+    action: execute_loki_inquiry
+    command: 执行只读 Loki 日志查询
+    impact: 执行只读 Loki 日志查询；按 loki-cli-specs.md 调用 loki_cli.py 写入正式调研记录，不修改工作区或外部系统。查询是否执行必须由用户确认；未确认不得派发执行
+      Agent。
+    reason: 执行只读 Loki 日志查询；按 loki-cli-specs.md 调用 loki_cli.py 写入正式调研记录，不修改工作区或外部系统。查询是否执行必须由用户确认；未确认不得派发执行
+      Agent。
+    requested_at: '2026-09-04T14:24:57+00:00'
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+current_stage: loki-inquiry
+current_skill: loki-cli
+stage_status: awaiting
+next_skill: loki-cli
+resume_from: confirmation:loki-inquiry:execute_loki_inquiry
+continuation_mode: authorization
+required_action: 请确认是否执行当前阶段：执行只读 Loki 日志查询
+handoff_summary: 当前阶段等待用户确认：执行只读 Loki 日志查询。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-09-04T14:24:58+00:00'
+initialization:
+  selection_id: olA-6Bsy7KLjMo_JZ5jn4w
+  purpose: init
+  selection_stage: final
+  chosen_at: '2026-09-04T13:57:01+00:00'
+  definition:
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 8c3a6bfb7a7f190a696a300ab9afe8874cdf80090ad82e567ef9c33d9b95bbb4
+  stages_sha256: c0b38500b4c3609e722e0b9f84bdc773c9ec170a2124433dff0a0f9511e37f85
+  flow_definition_sha256: 17b1b427062031376cc15530ccef8608a558b084524d6a5a6f7ca8fe31359f29
+  provenance: cli_selection

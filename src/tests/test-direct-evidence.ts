@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { extractExplicitRepoHints } from "../graph.js";
 import {
   buildDirectEvidenceRuntimeInstruction,
+  buildEntryAnchorGraphInstruction,
   hasDirectEvidenceAnchors,
   shouldUseDirectEvidenceFastPath,
   shouldUseWeComDirectEvidenceFastPath,
@@ -32,5 +33,13 @@ const runtimeInstruction = buildDirectEvidenceRuntimeInstruction();
 assert.match(runtimeInstruction, /优先核实这些精确锚点/);
 assert.match(runtimeInstruction, /不要反问请求参数是否应该有值/);
 assert.match(runtimeInstruction, /跳过额外预检索/);
+
+// 入口锚点指令：入口由 planner 模型节点识别（entry_anchors），指令包含三步策略
+const entryAnchorInstruction = buildEntryAnchorGraphInstruction();
+assert.match(entryAnchorInstruction, /入口锚点优先/);
+assert.match(entryAnchorInstruction, /精确可见信息优先定位/);
+assert.match(entryAnchorInstruction, /先定位板块再精确查询/);
+assert.match(entryAnchorInstruction, /拉取图信息/);
+assert.match(entryAnchorInstruction, /从代码整理答案/);
 
 console.log("direct evidence 验证通过");

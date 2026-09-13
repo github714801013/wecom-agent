@@ -73,9 +73,9 @@ assertEqual(config.mcpServers[0]?.headerProfiles["/neo"]?.projects, "small-oa,ji
 assertEqual(config.mcpServers[0]?.type, "http", "config should parse Streamable HTTP MCP transport type");
 assertEqual(config.bots[0]?.defaultMcpHeaderCommand, "/oa", "bot should configure default MCP header command");
 assertEqual(config.tools.cacheTtlMinutes, 15, "config should parse MCP tools cache TTL");
-assertEqual(config.tools.maxAgentToolResultsPerTurn, 64, "config should default max agent tool results per turn to 64");
 assertEqual(config.vision.enabled, true, "config should enable image vision analysis by default");
 assertEqual(config.vision.modelName, "gemini-3.1-pro-preview", "config should default image vision model");
+assertEqual(config.llm.maxConcurrentRequests, 4, "config should default concurrent agent requests");
 
 const resolved = resolveEnvPlaceholders({
   secret: "${TEST_SECRET_VALUE}",

@@ -1,0 +1,25 @@
+selection_id: czqFruURA39gRZCu6rZYVQ
+purpose: init
+selection_stage: workspace
+task_id: pi-agent-migration-20260904
+state_path: D:\workplace\typescript\wecom-agent\docs\engineering\workflows\pi-agent-migration-20260904-orchestration.yml
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-04T15:28:29+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feat/pi-agent-migration
+  base_branch: null
+  base_commit: null
+  migration: null
+definition:
+  path: ''
+  sha256: ''
+route: null
+stages: []
+stages_sha256: 5a509c50f7fb158ed7dcb723a0af28e3b8d3db571506536dc5d2936aea952811
+expected_revision: null
+selection_epoch: null
+status: issued
+created_at: '2026-09-04T15:28:29+00:00'

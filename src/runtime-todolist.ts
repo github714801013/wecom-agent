@@ -938,14 +938,31 @@ function getUserFacingTodoTask(item: RuntimeTodoItem) {
   return USER_FACING_TODO_TASKS[item.id] || item.task;
 }
 
-// 面向用户展示的步骤清单渲染：done 打 ✓，未完成用中性标记 ○。
+export interface UserFacingTodoStep {
+  id: string;
+  task: string;
+}
+
+export function snapshotUserFacingTodoSteps(todoList: RuntimeTodoList): UserFacingTodoStep[] {
+  return todoList.items.map(item => ({
+    id: item.id,
+    task: getUserFacingTodoTask(item),
+  }));
+}
+
+// 面向用户展示的步骤清单渲染：done 打 ✓，进行中用旋转帧动画，未完成用中性标记 ○。
 // 只展示用户能理解的任务阶段，不暴露 MCP、审核项 id、工具名等内部实现细节。
-export function renderTodoStepsForHeartbeat(todoList: RuntimeTodoList, _heartbeatFrame: string) {
-  if (todoList.items.length === 0) return "";
-  const lines = todoList.items.map(item => {
-    const done = item.status === "done";
-    const marker = done ? "✓" : "○";
-    return `${marker} ${getUserFacingTodoTask(item)}`;
+export function renderTodoStepsForHeartbeat(
+  todoList: RuntimeTodoList,
+  heartbeatFrame: string,
+  visibleSteps: readonly UserFacingTodoStep[] = snapshotUserFacingTodoSteps(todoList),
+) {
+  if (visibleSteps.length === 0) return "";
+  const statuses = new Map(todoList.items.map(item => [item.id, item.status]));
+  const lines = visibleSteps.map(item => {
+    const status = statuses.get(item.id);
+    const marker = status === "done" ? "✓" : status === "in_progress" && heartbeatFrame ? heartbeatFrame : "○";
+    return `${marker} ${item.task}`;
   });
   return `【处理进度】\n${lines.join("\n")}`;
 }

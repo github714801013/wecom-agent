@@ -1,0 +1,1418 @@
+schema_version: 3
+orchestrator_version: 3
+revision: 15
+task_id: pi-unbounded-tool-bugfix
+task:
+  title: 修复 Pi 工具查询后无法持续生成最终结果
+  source: 用户反馈 Pi 工具查询流程停滞，要求由 Pi 持续调用工具直至查到结果
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-06T08:47:20+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feat/pi-agent-migration
+  base_branch: null
+  base_commit: null
+  migration: null
+workspace_binding:
+  confirmed: true
+  decision: current_workspace_current_branch
+  path: D:\workplace\typescript\wecom-agent
+  branch: feat/pi-agent-migration
+  base_branch: null
+  base_commit: null
+  confirmed_at: '2026-09-06T08:47:20+00:00'
+route: bug_fix
+flow_definition:
+  version: 1
+  task_type: bug_fix
+  option_id: bug_fix_standard
+  name: 标准 Bug 修复
+  purpose: 适用于已有明确缺陷现象、需要完整诊断和修复闭环的任务。
+  stage_ids:
+  - loki-inquiry
+  - gitnexus-inquiry
+  - diagnosing-bugs
+  - implement
+  - code-review
+  - verify
+  - show-me
+  stages:
+  - id: loki-inquiry
+    skill: loki-cli
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - loki-cli
+    agent_prompt: 按 quality/diagnostics 的 loki-cli-specs.md 确认租户与 LogQL 规则后，调用 `uv
+      run --with pyyaml --script <dev-spec-gen-root>/scripts/loki_cli.py --tenant
+      <编码> <logcli 子命令和参数>` 执行日志查询；查询结果按问题→日志证据→未确认项分层回传结构化 handoff，禁止把推断写成事实。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: inquiry_record
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: user_confirmation
+      action: execute_loki_inquiry
+      prompt: 执行只读 Loki 日志查询；按 loki-cli-specs.md 调用 loki_cli.py 写入正式调研记录，不修改工作区或外部系统。查询是否执行必须由用户确认；未确认不得派发执行
+        Agent。
+      allow_skip: research_not_needed
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: diagnostics
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - loki-cli
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: gitnexus-inquiry
+    skill: null
+    mcp:
+      server: remote_gitnexus
+      tools:
+      - query
+      - context
+      - code_snippet
+      - impact
+      - trace
+      fallback: local_workspace_search
+      scope: dynamic
+    execution_mode: sub_agent
+    kind: mcp
+    host_action: null
+    reference_mutation: false
+    skills: []
+    agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+      source=local_search、authority=non_gitnexus。
+    orchestration_mode: mcp_prompt
+    evidence_policy:
+      gitnexus_first: true
+      require_query_record: true
+      allow_local_fallback: true
+      local_fallback_only_when:
+      - repository_unindexed
+      - service_unavailable
+      - authorization_unavailable
+      - timeout
+      - index_stale
+      - aggregate_unsupported
+      - capability_unavailable
+      local_search_root: workspace.path
+      local_evidence_source: local_search
+      local_evidence_authority: non_gitnexus
+      local_search_cannot_prove:
+      - call_graph
+      - impact
+      - cross_project_trace
+      - complete_consumers
+    completion_gate:
+      id: inquiry_record
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: user_confirmation
+      action: execute_gitnexus_inquiry
+      prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+        Agent。
+      allow_skip: research_not_needed
+      reuse: same_task_readonly_exact
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: plans/pi-unbounded-tool-bugfix-gitnexus-inquiry.md
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: research
+      index_path: research/index.yml
+      path: gitnexus
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: diagnosing-bugs
+    skill: diagnosing-bugs
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - diagnosing-bugs
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: diagnosis_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: diagnostics
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: implement
+    skill: implement
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - ponytail
+    - tdd
+    - implement
+    - ponytail-review
+    agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+      时不执行编译。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: implementation_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: engineering
+      index_path: engineering/index.yml
+      path: .
+      max_level: 3
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - ponytail
+    - ponytail-review
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: code-review
+    skill: code-review
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - code-review
+    - ponytail-review
+    agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+      HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: review_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: git
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - ponytail-review
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: verify
+    skill: verify
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - verify
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: verification_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: .
+      max_level: 3
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - verify
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  - id: show-me
+    skill: show-me
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - show-me
+    agent_prompt: 展示本次 task 的有效代码修改：读取当前 canonical state 的阶段证据与正式产物，并在当前 workspace
+      使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；只展示可验证范围，不执行任何写入，不替代 commit、push 或其他外部操作授权。
+    orchestration_mode: null
+    evidence_policy: null
+    completion_gate:
+      id: show_me_evidence
+      require_evidence: true
+      require_output_files: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics: []
+    reference_topics_snapshot: null
+    output_files: []
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+  transitions:
+    complete:
+      loki-inquiry: gitnexus-inquiry
+      gitnexus-inquiry: diagnosing-bugs
+      diagnosing-bugs: implement
+      implement: code-review
+      code-review: verify
+      verify: show-me
+      show-me: null
+    skipped:
+      loki-inquiry: gitnexus-inquiry
+      gitnexus-inquiry: diagnosing-bugs
+      diagnosing-bugs: implement
+      implement: code-review
+      code-review: verify
+      verify: show-me
+      show-me: null
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 5dfc8cd4830f25f4e37fa4d2555db5d9b6ac0053706aec8485bc47e81557b737
+  research_mode: null
+flow_selection:
+  task_type: bug_fix
+  option_id: bug_fix_standard
+  selection_mode: preset
+  stage_ids:
+  - loki-inquiry
+  - gitnexus-inquiry
+  - diagnosing-bugs
+  - implement
+  - code-review
+  - verify
+  - show-me
+  omitted_stages: []
+  skill_audit:
+    checked:
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    - skill: diagnosing-bugs
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\diagnosing-bugs\SKILL.md
+    - skill: implement
+      source: builtin
+    - skill: loki-cli
+      source: missing
+    - skill: ponytail
+      source: missing
+    - skill: ponytail-review
+      source: missing
+    - skill: show-me
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\show-me\SKILL.md
+    - skill: tdd
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\tdd\SKILL.md
+    - skill: verify
+      source: missing
+    skipped:
+    - stage_id: code-review
+      skill: ponytail-review
+      reason: skill_initially_unavailable
+    - stage_id: implement
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: implement
+      skill: ponytail-review
+      reason: skill_initially_unavailable
+    - stage_id: loki-inquiry
+      skill: loki-cli
+      reason: skill_initially_unavailable
+    - stage_id: verify
+      skill: verify
+      reason: skill_initially_unavailable
+  name: 标准 Bug 修复
+  purpose: 适用于已有明确缺陷现象、需要完整诊断和修复闭环的任务。
+route_history: []
+rollback_history: []
+flow_selection_epoch: 0
+awaiting_flow_selection: null
+code_relationship_graphs: []
+stages:
+- id: loki-inquiry
+  skill: loki-cli
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - loki-cli
+  agent_prompt: 按 quality/diagnostics 的 loki-cli-specs.md 确认租户与 LogQL 规则后，调用 `uv run
+    --with pyyaml --script <dev-spec-gen-root>/scripts/loki_cli.py --tenant <编码> <logcli
+    子命令和参数>` 执行日志查询；查询结果按问题→日志证据→未确认项分层回传结构化 handoff，禁止把推断写成事实。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: inquiry_record
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: user_confirmation
+    action: execute_loki_inquiry
+    prompt: 执行只读 Loki 日志查询；按 loki-cli-specs.md 调用 loki_cli.py 写入正式调研记录，不修改工作区或外部系统。查询是否执行必须由用户确认；未确认不得派发执行
+      Agent。
+    allow_skip: research_not_needed
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: skipped
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files: []
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence:
+  - 用户原话：跳过loki查询
+  skip_reason: 用户明确选择跳过当前只读 Loki 调研
+  skip_basis: research_not_needed
+  initially_unavailable_skills:
+  - loki-cli
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: skip_gitnexus_inquiry
+    command: 不执行调研阶段 loki-inquiry
+    authorization: 跳过loki查询
+    authorized_at: '2026-09-06T10:29:28+00:00'
+  answer_confirmations: []
+  host_action_baseline: null
+- id: gitnexus-inquiry
+  skill: null
+  mcp:
+    server: remote_gitnexus
+    tools:
+    - query
+    - context
+    - code_snippet
+    - impact
+    - trace
+    fallback: local_workspace_search
+    scope: dynamic
+  execution_mode: sub_agent
+  kind: mcp
+  host_action: null
+  reference_mutation: false
+  skills: []
+  agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+    source=local_search、authority=non_gitnexus。
+  orchestration_mode: mcp_prompt
+  evidence_policy:
+    gitnexus_first: true
+    require_query_record: true
+    allow_local_fallback: true
+    local_fallback_only_when:
+    - repository_unindexed
+    - service_unavailable
+    - authorization_unavailable
+    - timeout
+    - index_stale
+    - aggregate_unsupported
+    - capability_unavailable
+    local_search_root: workspace.path
+    local_evidence_source: local_search
+    local_evidence_authority: non_gitnexus
+    local_search_cannot_prove:
+    - call_graph
+    - impact
+    - cross_project_trace
+    - complete_consumers
+  completion_gate:
+    id: inquiry_record
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: user_confirmation
+    action: execute_gitnexus_inquiry
+    prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；未确认不得派发执行
+      Agent。
+    allow_skip: research_not_needed
+    reuse: same_task_readonly_exact
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: plans/pi-unbounded-tool-bugfix-gitnexus-inquiry.md
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+    index_sha256: a6190739557bd2b7ed15d6d14c0a4433854a99ee68673acdb69faf3b6b6df2f8
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files:
+  - path: plans/pi-unbounded-tool-bugfix-gitnexus-inquiry.md
+    sha256: 75233228ade01eece55b9e9a721e3877734ad36e2137813254853a6e106bbaa6
+  handoff_summary: GitNexus 不可用，已按节点允许的降级规则核验当前 worktree。Pi runtime 的事件流在 agent_end
+    与 promptPromise.finally 中无条件结束，可能在 followUp 后续轮次发出前退订，导致最终 assistant 文本丢失；适配器空正文时只能走固定兜底。
+  evidence:
+  - kind: verification
+    summary: GitNexus list_repos 未收录 wecom-agent；主 query 返回 Repository is not available
+      through this MCP server，因此按 evidence_policy 降级为当前工作区只读核验，source=local_search、authority=non_gitnexus。
+    recorded_at: '2026-09-06T10:38:07+00:00'
+  - kind: verification
+    summary: src/pi-agent-runtime.ts:323-339：turn_end 仅在无正文/过程文本且存在 toolResults 时调用
+      agent.followUp，但同一事件处理会在 agent_end 时将 ended=true。
+    recorded_at: '2026-09-06T10:38:07+00:00'
+  - kind: verification
+    summary: src/pi-agent-runtime.ts:349-369：agent.prompt(...).finally 无条件设置 ended=true；事件流结束后先
+      unsubscribe，再 waitForIdle，followUp 后续事件存在被丢弃的生命周期竞态。
+    recorded_at: '2026-09-06T10:38:07+00:00'
+  - kind: verification
+    summary: src/wecom-adapter.ts:1611-1647：message_end/agent_end 才提取 assistant 文本，工具事件不产生最终正文；src/wecom-adapter.ts:2010-2014：fullContent
+      为空时发送固定兜底。
+    recorded_at: '2026-09-06T10:38:07+00:00'
+  - kind: verification
+    summary: src/wecom-adapter.ts:2132-2139：外层异常仅记录日志，未保证发送确定性最终错误回复。
+    recorded_at: '2026-09-06T10:38:07+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-06T10:38:07+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: execute_gitnexus_inquiry
+    command: 执行只读 GitNexus 调研（scope=dynamic）
+    authorization: 同意执行当前节点要求的只读 GitNexus 调研
+    authorized_at: '2026-09-06T10:31:33+00:00'
+  answer_confirmations: []
+  host_action_baseline: null
+- id: diagnosing-bugs
+  skill: diagnosing-bugs
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - diagnosing-bugs
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: diagnosis_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files:
+  - path: plans/pi-unbounded-tool-bugfix-gitnexus-inquiry.md
+    sha256: 75233228ade01eece55b9e9a721e3877734ad36e2137813254853a6e106bbaa6
+  handoff_summary: 已建立并实际运行最小可复现反馈环：Pi 依赖源码证明 agent_end 是一次 run 的最后事件，而现有 facade 在
+    agent_end 或原 prompt Promise 结算时会提前结束消费；该机制可丢失通过文本启发式排队的 followUp 后续轮次。用户已明确指定以
+    Pi agent_end 作为唯一完成语义，因此根因是宿主自行判定完成并注入 followUp 的设计，而非 Pi 工具次数限制。
+  evidence:
+  - kind: verification
+    summary: 已运行并读取：src/pi-agent-runtime.ts:318-369；其 streamPiEvents 在 turn_end 依文本判断调用
+      agent.followUp，并在 agent_end 与 promptPromise.finally 处设置 ended=true，finally 先
+      unsubscribe 后 waitForIdle。
+    recorded_at: '2026-09-06T10:42:20+00:00'
+  - kind: verification
+    summary: 已运行并读取：node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js:147-170；Pi
+      在没有工具与 followUp 队列为空后才 emit agent_end，agent_end 是每次 run 的最终事件。
+    recorded_at: '2026-09-06T10:42:20+00:00'
+  - kind: verification
+    summary: 已运行并读取：node_modules/@earendil-works/pi-agent-core/dist/agent.js:177-179、323、340-347；followUp
+      由 Pi 队列消费，prompt 会等整个 loop 完成。
+    recorded_at: '2026-09-06T10:42:20+00:00'
+  - kind: verification
+    summary: 已运行并读取：src/wecom-adapter.ts:1611-1647、2010-2014；adapter 在 message_end
+      与 agent_end 都覆盖 fullContent，空内容走固定兜底。
+    recorded_at: '2026-09-06T10:42:20+00:00'
+  - kind: verification
+    summary: 用户新决策：全部改为 Pi 的生命周期，Pi 完成才算真正完成。
+    recorded_at: '2026-09-06T10:42:20+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-06T10:42:20+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: implement
+  skill: implement
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - ponytail
+  - tdd
+  - implement
+  - ponytail-review
+  agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+    时不执行编译。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: implementation_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+    index_sha256: fe9f6360bba9ca7a7c7bf49835bf2ee55cea88b6541c47953c641f53a19798e1
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files:
+  - path: plans/pi-unbounded-tool-bugfix-implementation.md
+    sha256: 82d81fc7cd76ce510eab6fa6616ab2c98f68da8c9411c77e4902d14c8d6c6449
+  handoff_summary: 已将完成语义收敛到 Pi 生命周期：streamPiEvents 与兼容 stream 不再因 prompt Promise
+    结算而提前结束，只有收到 Pi agent_end 才结束事件流；移除适配器对 message_end 的最终正文覆盖、Pi followUp 文本启发式救援，以及主适配器和诊断服务的宿主工具结果/错误/重复调用上限。保留
+    Pi 自身工具循环、单工具超时、请求超时和取消边界。
+  evidence:
+  - kind: verification
+    summary: src/pi-agent-runtime.ts：删除 isProgressOnlyAssistantText/needsPiAnswerRescue；移除
+      turn_end 中 agent.followUp；streamPiEvents 与 stream 的 prompt finally 仅唤醒消费者，不再设置
+      ended=true，ended 只由 agent_end 设置。
+    recorded_at: '2026-09-06T10:56:59+00:00'
+  - kind: verification
+    summary: src/wecom-adapter.ts：message_end 不再覆盖 fullContent，最终文本仅在 agent_end 事件处理；删除
+      agent-progress-guard 在主 Pi 路径的记录与阻断。
+    recorded_at: '2026-09-06T10:56:59+00:00'
+  - kind: verification
+    summary: src/diagnostic-server.ts：删除宿主 progress guard 与 maxToolResults 配置依赖，诊断调用不再自行限制工具结果次数。
+    recorded_at: '2026-09-06T10:56:59+00:00'
+  - kind: verification
+    summary: src/config.ts：删除 maxAgentToolResultsPerTurn 配置字段；src/tests/test-config.ts
+      同步删除旧断言。
+    recorded_at: '2026-09-06T10:56:59+00:00'
+  - kind: verification
+    summary: 验证：npx tsc --noEmit && npm test，退出码 0；npm test 输出 Pi MCP plugin tests
+      passed。
+    recorded_at: '2026-09-06T10:56:59+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail
+  - ponytail-review
+  required_action: null
+  confirmed_at: '2026-09-06T10:56:59+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: code-review
+  skill: code-review
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - code-review
+  - ponytail-review
+  agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+    HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: review_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+    index_sha256: 2629145e0da05b1998a9c203c6bd10f6ad259b76165074b36803e283ca3be51b
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: 9d015c6c2f6fa9f91b339b6055871b6b9b083d061ba12911082e8f4c741a4004
+  output_files:
+  - path: reviews/pi-unbounded-tool-bugfix-code-review.md
+    sha256: 887265abf4b295122feff1ad9e2295c56b10f9605a2e445234e5048d9b5f7f94
+  handoff_summary: 完成当前工作区未提交改动审查。Pi facade 的完成标志已收敛为 agent_end；prompt Promise 结算不再提前结束，适配器
+    message_end 不再覆盖最终正文，也不再使用宿主工具结果/错误/重复调用上限。隔离审查 worktree 与主工作区不同步，审查记录已明确以主工作区核验为准。
+  evidence:
+  - kind: verification
+    summary: 已核验 src/pi-agent-runtime.ts：ended 只由 agent_end 设置，prompt finally 仅唤醒消费者。
+    recorded_at: '2026-09-06T11:05:03+00:00'
+  - kind: verification
+    summary: 已核验 src/wecom-adapter.ts：agent_end 设置 piAgentEnded，message_end 不参与最终正文，未收到
+      agent_end 的 Pi 路径抛出错误而不进入最终交付。
+    recorded_at: '2026-09-06T11:05:03+00:00'
+  - kind: verification
+    summary: 已核验主适配器和诊断服务不再引用 agent-progress-guard；config 不再含 maxAgentToolResultsPerTurn。
+    recorded_at: '2026-09-06T11:05:03+00:00'
+  - kind: verification
+    summary: 已执行 npx tsc --noEmit && npm test，退出码 0；输出 Pi MCP plugin tests passed。
+    recorded_at: '2026-09-06T11:05:03+00:00'
+  - kind: verification
+    summary: 已记录审查：docs/engineering/reviews/pi-unbounded-tool-bugfix-code-review.md
+    recorded_at: '2026-09-06T11:05:03+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail-review
+  required_action: null
+  confirmed_at: '2026-09-06T11:05:03+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: verify
+  skill: verify
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - verify
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: verification_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: .
+    max_level: 3
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 8926263e5a14882633bbc1720e231440c499aec135782235f0fce79bf048d75c
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 2629145e0da05b1998a9c203c6bd10f6ad259b76165074b36803e283ca3be51b
+  output_files:
+  - path: plans/pi-unbounded-tool-bugfix-verification.md
+    sha256: 4da9e0fb9d136d0eb9e1e4bd9d8f6e01b246c5893dd23e67111b31c4854888c7
+  handoff_summary: 验证完成：Pi 生命周期完成语义的类型检查、现有 Pi MCP 回归测试与未提交差异空白检查均通过。
+  evidence:
+  - kind: verification
+    summary: 已执行 npx tsc --noEmit && npm test && git diff HEAD --check，退出码 0。
+    recorded_at: '2026-09-06T11:07:00+00:00'
+  - kind: verification
+    summary: npm test 输出 Pi MCP plugin tests passed。
+    recorded_at: '2026-09-06T11:07:00+00:00'
+  - kind: verification
+    summary: git diff --check 未报告空白错误，仅有 Git CRLF/LF 转换提示。
+    recorded_at: '2026-09-06T11:07:00+00:00'
+  - kind: verification
+    summary: 验证记录：docs/engineering/plans/pi-unbounded-tool-bugfix-verification.md。
+    recorded_at: '2026-09-06T11:07:00+00:00'
+  - kind: verification
+    summary: 未连接真实企业微信请求，且未新增可控 fake Agent 生命周期测试；该限制已如实记录。
+    recorded_at: '2026-09-06T11:07:00+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - verify
+  required_action: null
+  confirmed_at: '2026-09-06T11:07:00+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+- id: show-me
+  skill: show-me
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - show-me
+  agent_prompt: 展示本次 task 的有效代码修改：读取当前 canonical state 的阶段证据与正式产物，并在当前 workspace 使用只读
+    Git 信息核对 git diff HEAD 和未跟踪代码文件；只展示可验证范围，不执行任何写入，不替代 commit、push 或其他外部操作授权。
+  orchestration_mode: null
+  evidence_policy: null
+  completion_gate:
+    id: show_me_evidence
+    require_evidence: true
+    require_output_files: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics: []
+  reference_topics_snapshot: []
+  output_files:
+  - path: reviews/pi-unbounded-tool-bugfix-show-me.md
+    sha256: 76292d287c3afdd22385bf927acde2c71e7fa1978d2d2e6b20ff77a9ba2b220d
+  handoff_summary: 已展示并核对本次 Pi 生命周期改动：只有 Pi agent_end 才允许完成和发送 final=true；message_end、prompt
+    Promise 结算及宿主工具限制均不再决定完成。当前验证命令通过，未提交或推送。
+  evidence: &id001
+  - kind: verification
+    summary: 展示记录：docs/engineering/reviews/pi-unbounded-tool-bugfix-show-me.md。
+    recorded_at: '2026-09-06T11:08:27+00:00'
+  - kind: verification
+    summary: 已核对 git status 与 git diff --name-only HEAD；当前工作区包含此前历史未提交改动及本次改动，未执行写入型
+      Git 操作。
+    recorded_at: '2026-09-06T11:08:27+00:00'
+  - kind: verification
+    summary: 已验证 npx tsc --noEmit && npm test && git diff HEAD --check 退出码为 0。
+    recorded_at: '2026-09-06T11:08:27+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-06T11:08:27+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+current_stage: show-me
+current_skill: show-me
+stage_status: complete
+next_skill: null
+resume_from: completed
+continuation_mode: auto
+required_action: null
+handoff_summary: 阶段 show-me 已完成，任务编排中的全部阶段已结束。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-09-06T11:08:34+00:00'
+initialization:
+  selection_id: _p-QwxeGirgUenqpa5Gcjg
+  purpose: init
+  selection_stage: final
+  chosen_at: '2026-09-06T08:51:02+00:00'
+  definition:
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 5dfc8cd4830f25f4e37fa4d2555db5d9b6ac0053706aec8485bc47e81557b737
+  stages_sha256: 748bad86f1787de9f6c326fa114f6cdd62e9b7f28d12517da92c7c6502de51e7
+  flow_definition_sha256: 4d2784d55509db7ebe8407f84a87faea7ce403c0c9ed0d53a878e6a6b0e66733
+  provenance: cli_selection

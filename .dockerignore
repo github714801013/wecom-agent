@@ -1,6 +1,7 @@
-node_modules
-dist
-.env
-*.tar.gz
-deploy.sh
-*.log
+**
+!package.json
+!package-lock.json
+!pnpm-lock.yaml
+!tsconfig.json
+!src/
+!src/**

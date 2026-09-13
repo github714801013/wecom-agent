@@ -32,7 +32,6 @@
 | `mcpServers[].headerProfiles` | 以指令为 key 的可切换 MCP headers；多个 MCP 使用相同 key 时会同步切换 | `{"/neo":{"projects":"small-oa,jiuyun-oa"}}` |
 | `bots[].mcpHeaders` | 指定机器人对指定 MCP server 注入的静态 headers | `{"gitnexus":{"x-robot":"robot-a"}}` |
 | `bots[].defaultMcpHeaderCommand` | 机器人默认启用的 MCP header 指令 | `"/oa"` |
-| `tools.maxAgentToolResultsPerTurn` | 每轮 Agent 允许的证据工具结果上限，仍可用环境变量 `AGENT_MAX_TOOL_RESULTS_PER_TURN` 临时覆盖 | `64` |
 
 MCP header 指令：
 

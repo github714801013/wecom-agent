@@ -123,6 +123,36 @@ assert.ok(querySummary.fileId);
 assert.ok(querySummary.matches?.some(match => match.file === "src/order-service.ts" && match.line === 42));
 assert.match(readStoredToolResult(querySummary.fileId!, 0, 300), /OrderService/);
 
+// MCP 常在 JSON 之后追加 markdown 页脚：不得因此判定为解析失败而丢弃证据
+const gitnexusPayload = `{
+  "processes": [
+    {
+      "id": "proc_1",
+      "summary": "AutoMkc → 调货",
+      "process_symbols": [
+        { "name": "AutoMkc", "file_path": "oa999UI/AutoMkc.aspx.cs", "line_start": 42, "line_end": 80 }
+      ]
+    }
+  ],
+  "errors": []
+}
+
+---
+**Next:** To understand a specific symbol in depth, use context({name: "<symbol_name>"}) to see categorized refs.`;
+const [footeredQueryTool] = createPiMcpPluginTools([{
+  name: "query",
+  description: "带页脚的检索结果",
+  schema: { type: "object", properties: {} },
+  invoke: async () => `${gitnexusPayload}${" ".repeat(9_000)}`,
+}]);
+assert.ok(footeredQueryTool);
+const footeredSummary = JSON.parse(textOf(await footeredQueryTool.execute("footered-query-1", {}))) as {
+  kind?: string;
+  matches?: Array<{ file?: string; line?: number }>;
+};
+assert.equal(footeredSummary.kind, "evidence_summary", "JSON 后的 markdown 页脚不得导致证据被丢弃");
+assert.ok(footeredSummary.matches?.some(match => match.file === "oa999UI/AutoMkc.aspx.cs" && match.line === 42));
+
 const veryLargeStructuredQuery = JSON.stringify({
   results: [{
     file_path: "src/very-large.ts",

@@ -4,6 +4,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import {
   createPiAgentFacade,
   createPiMcpPluginTools,
+  formatPiBudgetNote,
   formatPiLifecycleLog,
   sanitizeLifecycleError,
   summarizeContentBlocks,
@@ -110,6 +111,44 @@ const retainedHostTools = createPiMcpPluginTools([{
   invoke: async () => "ok",
 }]);
 assert.equal(retainedHostTools.length, 1, "通用 Pi 适配器不得影响独立流程的 Todo 工具");
+
+// 时间预算：工具返回边界必须携带运行期剩余时间，供模型决定是否继续检索
+const budget = () => "[时间预算] 已用 30s / 上限 480s，剩余 450s";
+const [budgetTool] = createPiMcpPluginTools([{
+  name: "query",
+  description: "带预算的运行期工具",
+  schema: { type: "object", properties: {} },
+  invoke: async () => "small result",
+}], { budget });
+assert.ok(budgetTool);
+const budgetText = (await budgetTool.execute("budget-1", {})).content[0];
+assert.ok(budgetText && budgetText.type === "text");
+assert.match(budgetText.text, /small result/);
+assert.match(budgetText.text, /\[时间预算\]/, "运行期工具结果必须携带剩余时间提示");
+
+const [noBudgetTool] = createPiMcpPluginTools([{
+  name: "query",
+  description: "无预算工具",
+  schema: { type: "object", properties: {} },
+  invoke: async () => "small result",
+}]);
+assert.ok(noBudgetTool);
+const noBudgetText = (await noBudgetTool.execute("budget-2", {})).content[0];
+assert.ok(noBudgetText && noBudgetText.type === "text");
+assert.equal(noBudgetText.text, "small result", "未提供预算时不得改变工具结果原文");
+
+// 收尾判据：剩余时间不足时必须明确要求停止检索
+const startedAt = 1_000_000;
+assert.match(
+  formatPiBudgetNote(startedAt, 480_000, startedAt + 420_000),
+  /剩余时间不足，必须立即用现有证据给出最终结论/,
+  "剩余不足 90 秒时必须要求收尾",
+);
+assert.doesNotMatch(
+  formatPiBudgetNote(startedAt, 480_000, startedAt + 60_000),
+  /剩余时间不足/,
+  "剩余充足时不得要求收尾",
+);
 
 const controller = new AbortController();
 controller.abort();

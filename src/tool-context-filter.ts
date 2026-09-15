@@ -67,8 +67,11 @@ function hasEnoughOverlap(record: ToolContextRecord) {
   return tokens.some(token => content.includes(token));
 }
 
+// 运行期会在工具结果末尾追加 [时间预算] 注记，判定内容价值时需先剥离。
+const TRAILING_BUDGET_NOTE_PATTERN = /\n*\[时间预算\][\s\S]*$/u;
+
 export function isLikelyIrrelevantToolResult(content: string) {
-  const normalized = content.trim();
+  const normalized = content.trim().replace(TRAILING_BUDGET_NOTE_PATTERN, "").trim();
   if (!normalized || normalized === "[]" || normalized === "{}") return true;
   return NO_HIT_PATTERNS.some(pattern => pattern.test(normalized));
 }

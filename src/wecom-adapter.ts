@@ -16,7 +16,7 @@ import {
   type HumanLoopRequest,
 } from "./human-loop.js";
 import { rewriteAnswerForBusiness } from "./business-answer-rewrite.js";
-import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, formatElapsedDuration, getProcessingFrame, stripProtocolNoise } from "./progress-updates.js";
+import { buildIntermediateStreamContent, buildProgressStreamContent, buildThinkingHeartbeatContent, collapseProgressUpdates, formatElapsedDuration, getProcessingFrame, PROGRESS_KEYWORDS, stripProtocolNoise } from "./progress-updates.js";
 import {
   consumeFlowControlDelta,
   createDefaultFlowControl,
@@ -782,6 +782,7 @@ export interface BotRuntimeDependencies {
   judgeSensitiveRequestByModel?: typeof judgeSensitiveRequestByModel;
   getAllMcpTools?: typeof getAllMcpTools;
   initializeAgent?: typeof initializePrimaryPiAgent;
+  requestTimeoutMs?: number;
 }
 
 export async function startBot(botConfig: BotConfig, client?: WSClient, dependencies: BotRuntimeDependencies = {}) {
@@ -793,6 +794,7 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
   const judgeSensitiveRequest = dependencies.judgeSensitiveRequestByModel || judgeSensitiveRequestByModel;
   const loadMcpTools = dependencies.getAllMcpTools || getAllMcpTools;
   const initializePiAgent = dependencies.initializeAgent || initializePrimaryPiAgent;
+  const requestDeadlineMs = dependencies.requestTimeoutMs ?? config.llm.requestTimeoutMs;
   const reconnectState: BotReconnectState = { reconnectExhaustedTimer: null, reconnectWatchdogTimer: null };
   const replyScheduler: ReplyScheduler = createReplyScheduler();
   const expiryReplyScheduler: ReplyScheduler = createReplyScheduler();
@@ -1642,6 +1644,8 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
       let fullContent = "";
       let piAgentEnded = false;
       let piAgentEndFailure: "error" | "aborted" | null = null;
+      // 时间上限降级用：累计模型已经流出的助手文本，避免超时后整轮成果丢失。
+      let partialAssistantText = "";
       let flowControl = createDefaultFlowControl();
       let flowControlStreamState = createFlowControlStreamState();
       const applyFlowControlPatch = (patch: FlowControlPatch) => {
@@ -2151,7 +2155,7 @@ ${hypotheses}
         }
 
         const stream = agent.streamPiEvents(String(userContent), {
-          deadlineMs: config.llm.requestTimeoutMs,
+          deadlineMs: requestDeadlineMs,
           signal: streamAbortController.signal,
           ...(signal ? { signal } : {}),
         }, buildMessagesForCurrentTurn({
@@ -2290,6 +2294,9 @@ ${hypotheses}
               if (extractedDelta.hasControl) {
                 applyFlowControlPatch(extractedDelta.control);
               }
+              if (extractedDelta.content) {
+                partialAssistantText = `${partialAssistantText}${extractedDelta.content}`.slice(-40_000);
+              }
               // 普通 assistant 文本可能只是“已定位候选/继续核实”等中间状态。
               // 最终正文只接受 agent_end，避免把中间状态当成用户最终回复。
             }
@@ -2342,6 +2349,33 @@ ${hypotheses}
         console.log(`[${botConfig.name}] Entry anchor instruction injected for ${body.msgid}: ${entryAnchors.length} anchors`);
       }
 
+      // 时间上限降级交付：把本轮已产生的助手文本作为“部分结论”发出，而不是丢弃整轮成果。
+      const deliverDeadlineDegradedReply = async () => {
+        const partial = collapseProgressUpdates(stripEmptyProtocolContent(partialAssistantText)).trim();
+        const progressOnly = !partial || PROGRESS_KEYWORDS.some(keyword => partial.endsWith(keyword));
+        const elapsed = formatElapsedDuration(streamStartedAt);
+        const degradedAnswer = progressOnly
+          ? `⏱ 本次耗时 ${elapsed}，已到本轮时间上限，仍在核实中，暂未形成可交付结论。建议把问题缩小到具体项目、接口或页面后重试。`
+          : `${partial}\n\n⏱ 本次耗时 ${elapsed}，已到本轮时间上限；以上为已确认的部分结论，未覆盖的部分尚未核实。`;
+        console.warn(`[${botConfig.name}] Pi request deadline reached for ${body.msgid}: partialChars=${partial.length}, progressOnly=${progressOnly}`);
+        await stopThinkingHeartbeatAndDrain();
+        const sent = await safeReplyStream(degradedAnswer, true);
+        if (sent && ownsCurrentTask()) {
+          currentTask.terminalState = "final_sent";
+          if (streamExpiryTimer) clearTimeout(streamExpiryTimer);
+          fullContent = degradedAnswer;
+          const degradedToolSummary = buildToolContextSummary(toolContextRecords);
+          void sessionManager.addMessages(sessionKey, [
+            new HumanMessage({ content: effectiveParsedContent as any }),
+            ...(degradedToolSummary ? [new SystemMessage(degradedToolSummary)] : []),
+            new AIMessage(degradedAnswer),
+          ]).catch(error => {
+            console.error(`[${botConfig.name}] Failed to persist degraded reply for ${body.msgid}:`, error);
+          });
+        }
+        return Boolean(sent);
+      };
+
       // Pi 生命周期负责工具选择、继续执行和正常完成。
       try {
         await sendStageProgress("正在加载 MCP 工具和项目范围，继续核实中。", true);
@@ -2361,6 +2395,15 @@ ${hypotheses}
             return;
           }
           if (piAgentEndFailure === "aborted") {
+            // SDK 在截止中止后仍可能补发 agent_end(aborted)：此时必须走降级交付，而不是静默结束。
+            if (Date.now() - streamStartedAt >= requestDeadlineMs) {
+              await deliverDeadlineDegradedReply();
+              finishRequestTiming(
+                currentTask.cancelled || !ownsCurrentTask() ? "cancelled" : "ttl_expired",
+                requestReplyAckFailed ? "reply_ack_timeout" : "pi_request_timeout",
+              );
+              return;
+            }
             finishRequestTiming("cancelled", "pi_agent_aborted");
             return;
           }
@@ -2433,6 +2476,15 @@ ${hypotheses}
           finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_cancelled");
           return;
         }
+        // 时间上限：交付已确认要点，而不是丢弃整轮成果。
+        if (Date.now() - streamStartedAt >= requestDeadlineMs) {
+          await deliverDeadlineDegradedReply();
+          finishRequestTiming(
+            currentTask.cancelled || !ownsCurrentTask() ? "cancelled" : "ttl_expired",
+            requestReplyAckFailed ? "reply_ack_timeout" : "pi_request_timeout",
+          );
+          return;
+        }
         await sendInvalidPiLifecycleReply();
         finishRequestTiming(
           currentTask.cancelled || !ownsCurrentTask() ? "cancelled" : "error",
@@ -2500,7 +2552,10 @@ ${hypotheses}
         finalReplySent = true;
         console.log(`[${botConfig.name}] Final reply for ${body.msgid}: totalElapsed=${formatElapsedDuration(streamStartedAt)}`);
         const finalSendStartedAt = monotonicNowMs();
-        const sent = await safeReplyStream(fullContent, true);
+        const sent = await safeReplyStream(
+          `${fullContent}\n\n⏱ 本次耗时 ${formatElapsedDuration(streamStartedAt)}`,
+          true,
+        );
         if (sent) {
           requestTiming.finalSendMs = Math.max(0, monotonicNowMs() - finalSendStartedAt);
           if (ownsCurrentTask()) {

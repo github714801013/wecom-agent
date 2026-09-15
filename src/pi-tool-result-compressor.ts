@@ -49,9 +49,47 @@ function firstNumber(record: JsonRecord, keys: readonly string[]) {
   return undefined;
 }
 
+function firstJsonValueEnd(text: string, start: number) {
+  const open = text[start];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") inString = false;
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === open) depth += 1;
+    else if (char === close) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
 function parseJson(text: string): unknown {
+  const trimmed = text.trim();
   try {
-    return JSON.parse(text);
+    return JSON.parse(trimmed);
+  } catch {
+    // MCP 常在 JSON 之后追加 markdown 页脚或提示行；截取首个完整 JSON 值重试。
+  }
+  const start = trimmed.search(/[[{]/u);
+  if (start < 0) return undefined;
+  const end = firstJsonValueEnd(trimmed, start);
+  if (end < 0) return undefined;
+  try {
+    return JSON.parse(trimmed.slice(start, end + 1));
   } catch {
     return undefined;
   }

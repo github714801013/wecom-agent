@@ -30,6 +30,7 @@ export interface PiAgentRuntimeOptions {
   model?: string;
   baseUrl?: string;
   apiKey?: string;
+  budget?: PiRunBudgetNote;
   onEvent?: (event: PiAgentEvent) => void | Promise<void>;
 }
 
@@ -137,6 +138,21 @@ export function filterPiAgentTools(tools: any[]) {
   return tools.filter(tool => tool?.name !== "runtime_todolist_update");
 }
 
+/** 运行期时间预算注记：工具执行时实时计算剩余时间，供模型决定是否继续检索。 */
+export type PiRunBudgetNote = () => string;
+
+const PI_WRAP_UP_REMAINING_SECONDS = 90;
+
+export function formatPiBudgetNote(startedAt: number, deadlineMs: number, now = Date.now()) {
+  const elapsedSeconds = Math.max(0, Math.round((now - startedAt) / 1000));
+  const limitSeconds = Math.max(1, Math.round(deadlineMs / 1000));
+  const remainingSeconds = Math.max(0, limitSeconds - elapsedSeconds);
+  const base = `[时间预算] 已用 ${elapsedSeconds}s / 上限 ${limitSeconds}s，剩余 ${remainingSeconds}s`;
+  return remainingSeconds <= PI_WRAP_UP_REMAINING_SECONDS
+    ? `${base}。剩余时间不足，必须立即用现有证据给出最终结论，不要再发起新的检索。`
+    : `${base}。请据此判断是否继续检索。`;
+}
+
 /** 将现有 MCP 工具注册为 Pi AgentTool，保留工具的 invoke 契约。 */
 export function createPiMcpPluginTools(
   tools: any[],
@@ -176,8 +192,10 @@ export function createPiMcpPluginTools(
         const content = isToolResultFileReadTool(tool)
           ? serializePiToolResult(result)
           : compressPiToolResult(tool.name, result, params);
+        const budgetNote = options.budget?.().trim();
+        const text = budgetNote ? `${content}\n\n${budgetNote}` : content;
         return {
-          content: [{ type: "text" as const, text: content }],
+          content: [{ type: "text" as const, text }],
           details: { toolCallId },
         };
       },
@@ -187,6 +205,7 @@ export function createPiMcpPluginTools(
 export interface PiMcpPluginOptions {
   toolTimeoutMs?: number;
   signal?: AbortSignal;
+  budget?: PiRunBudgetNote | undefined;
 }
 
 function createPiModel(modelName: string, baseUrl: string) {
@@ -212,6 +231,7 @@ export function createPiAgent(options: Omit<PiAgentRuntimeOptions, "prompt" | "s
   const baseUrl = options.baseUrl || config.llm.baseUrl;
   const tools = createPiMcpPluginTools(options.tools || [], {
     toolTimeoutMs: options.toolTimeoutMs || config.llm.toolTimeoutMs,
+    budget: options.budget,
   });
 
   return new Agent({
@@ -398,7 +418,8 @@ function eventToMessage(event: PiAgentEvent): BaseMessage | null {
 export function createPiAgentFacade(
   options: Omit<PiAgentRuntimeOptions, "prompt" | "signal" | "deadlineMs" | "onEvent">,
 ): PiAgentFacade {
-  const agent = createPiAgent(options);
+  let budgetNote: PiRunBudgetNote = () => "";
+  const agent = createPiAgent({ ...options, budget: () => budgetNote() });
   let activeAbort: (() => void) | undefined;
   return {
     async *streamPiEvents(prompt, streamOptions: { signal?: AbortSignal; deadlineMs?: number } = {}, contextMessages: BaseMessage[] = []) {
@@ -463,6 +484,8 @@ export function createPiAgentFacade(
       if (streamOptions.signal?.aborted) abort();
       else streamOptions.signal?.addEventListener("abort", abort, { once: true });
       const deadlineMs = streamOptions.deadlineMs ?? config.llm.requestTimeoutMs;
+      const runStartedAt = Date.now();
+      budgetNote = () => formatPiBudgetNote(runStartedAt, deadlineMs);
       const timer = deadlineMs > 0
         ? setTimeout(abort, deadlineMs)
         : undefined;

@@ -1,0 +1,1869 @@
+schema_version: 3
+orchestrator_version: 3
+revision: 16
+task_id: timeout-recovery
+task:
+  title: 修复 Pi 请求超时无回答
+  source: user
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-14T14:01:54+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feat/pi-agent-migration
+  base_branch: null
+  base_commit: null
+  migration: null
+workspace_binding:
+  confirmed: true
+  decision: current_workspace_current_branch
+  path: D:\workplace\typescript\wecom-agent
+  branch: feat/pi-agent-migration
+  base_branch: null
+  base_commit: null
+  confirmed_at: '2026-09-14T14:01:54+00:00'
+route: bug_fix
+flow_definition:
+  version: 1
+  task_type: bug_fix
+  option_id: bug_fix_standard
+  name: 标准 Bug 修复
+  purpose: 适用于已有明确缺陷现象、需要完整诊断和修复闭环的任务。
+  stage_ids:
+  - loki-inquiry
+  - gitnexus-inquiry
+  - diagnosing-bugs
+  - implement
+  - bugfix-spec-sync
+  - code-review
+  - verify
+  - show-me
+  stages:
+  - id: loki-inquiry
+    skill: loki-cli
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - loki-cli
+    agent_prompt: 按 quality/diagnostics 的 loki-cli-specs.md 确认租户与 LogQL 规则后，调用 `uv
+      run --with pyyaml --script <dev-spec-gen-root>/scripts/loki_cli.py --tenant
+      <编码> <logcli 子命令和参数>` 执行日志查询；查询结果按问题→日志证据→未确认项分层回传结构化 handoff，禁止把推断写成事实。
+    orchestration_mode: null
+    evidence_policy: null
+    fallback_verification: []
+    completion_gate:
+      id: inquiry_record
+      require_evidence: true
+      require_output_files: false
+    artifact_policy:
+      allowed_roots:
+      - workspace/docs/engineering
+      required_output: false
+    confirmation_policy:
+      mode: user_confirmation
+      action: execute_loki_inquiry
+      prompt: 执行只读 Loki 日志查询；按 loki-cli-specs.md 调用 loki_cli.py 写入正式调研记录，不修改工作区或外部系统。查询是否执行必须由用户确认；用户明确选择跳过时记录未执行和跳过依据，服务故障仍走
+        fallback/blocked。
+      allow_skip: research_not_needed
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: diagnostics
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    jira_input_snapshot: null
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - loki-cli
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+    review_manifest: null
+    artifact_amendments: []
+  - id: gitnexus-inquiry
+    skill: null
+    mcp:
+      server: remote_gitnexus
+      tools:
+      - query
+      - context
+      - code_snippet
+      - impact
+      - trace
+      fallback: local_workspace_search
+      scope: dynamic
+    execution_mode: sub_agent
+    kind: mcp
+    host_action: null
+    reference_mutation: false
+    skills: []
+    agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+      source=local_search、authority=non_gitnexus。 调研前先检查 docs/engineering/specs/ 下是否存在文件名前缀完全等于当前
+      task_id 的 spec 文档；存在则优先完整读取作为本次调研上下文，不存在则记录并继续，不得阻塞；禁止读取与当前 task_id 无关的 spec。
+    orchestration_mode: mcp_prompt
+    evidence_policy:
+      gitnexus_first: true
+      require_query_record: true
+      allow_local_fallback: true
+      local_fallback_only_when:
+      - repository_unindexed
+      - service_unavailable
+      - authorization_unavailable
+      - timeout
+      - index_stale
+      - aggregate_unsupported
+      - capability_unavailable
+      local_search_root: workspace.path
+      local_evidence_source: local_search
+      local_evidence_authority: non_gitnexus
+      local_search_cannot_prove:
+      - call_graph
+      - impact
+      - cross_project_trace
+      - complete_consumers
+    fallback_verification: []
+    completion_gate:
+      id: inquiry_record
+      require_evidence: true
+      require_output_files: false
+    artifact_policy:
+      allowed_roots:
+      - workspace/docs/engineering
+      required_output: false
+    confirmation_policy:
+      mode: user_confirmation
+      action: execute_gitnexus_inquiry
+      prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；用户明确选择跳过时记录未执行和跳过依据，服务故障仍走
+        fallback/blocked。
+      allow_skip: research_not_needed
+      reuse: same_task_readonly_exact
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: plans/timeout-recovery-gitnexus-inquiry.md
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: research
+      index_path: research/index.yml
+      path: gitnexus
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    jira_input_snapshot: null
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+    review_manifest: null
+    artifact_amendments: []
+  - id: diagnosing-bugs
+    skill: diagnosing-bugs
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - diagnosing-bugs
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    fallback_verification: []
+    completion_gate:
+      id: diagnosis_evidence
+      require_evidence: true
+      require_output_files: false
+    artifact_policy:
+      allowed_roots:
+      - workspace/docs/engineering
+      required_output: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: diagnostics
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    jira_input_snapshot: null
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+    review_manifest: null
+    artifact_amendments: []
+  - id: implement
+    skill: implement
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - ponytail
+    - tdd
+    - implement
+    - ponytail-review
+    agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+      时不执行编译。完成交接时必须用 task_files 声明本阶段实际改动的 workspace 相对文件（新增、删除、重命名都要声明），供 code-review
+      的审查范围交集使用。
+    orchestration_mode: null
+    evidence_policy: null
+    fallback_verification: []
+    completion_gate:
+      id: implementation_evidence
+      require_evidence: true
+      require_output_files: false
+    artifact_policy:
+      allowed_roots:
+      - workspace/docs/engineering
+      required_output: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: engineering
+      index_path: engineering/index.yml
+      path: .
+      max_level: 3
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    jira_input_snapshot: null
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - ponytail
+    - ponytail-review
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+    review_manifest: null
+    artifact_amendments: []
+  - id: bugfix-spec-sync
+    skill: bugfix-spec-sync
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - bugfix-spec-sync
+    agent_prompt: 定位与修复同步本任务对应的开发文档:在 docs/engineering/specs/ 下查找文件名前缀完全等于当前 task_id
+      的 Markdown spec 文档。命中时,先完整读取该文档作为修复上下文,校验本次修复与既有设计一致,再把根因、修复方案与验证结论同步更新回该文档(保留原文与来源),并将更新后文档路径与
+      SHA-256 登记为正式 output_files;多个前缀冲突时归属最长匹配本 task_id 的文档。未找到匹配 task_id 前缀的 spec
+      时,记录"无对应开发文档"为证据并跳过同步,不得新建占位文件、不得阻塞流程。禁止读取或回写与该 task_id 无关的 spec 文件。
+    orchestration_mode: null
+    evidence_policy: null
+    fallback_verification: []
+    completion_gate:
+      id: bugfix_spec_sync_evidence
+      require_evidence: true
+      require_output_files: false
+    artifact_policy:
+      allowed_roots:
+      - workspace/docs/engineering/specs
+      required_output: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    jira_input_snapshot: null
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - bugfix-spec-sync
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+    review_manifest: null
+    artifact_amendments: []
+  - id: code-review
+    skill: code-review
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - code-review
+    - ponytail-review
+    agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+      HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中
+      files 为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+      是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+      HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+      时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+    orchestration_mode: null
+    evidence_policy: null
+    fallback_verification:
+    - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+    - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+    - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+    completion_gate:
+      id: review_evidence
+      require_evidence: true
+      require_output_files: false
+    artifact_policy:
+      allowed_roots:
+      - workspace/docs/engineering
+      required_output: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: git
+      max_level: 3
+    - topic: shared
+      index_path: shared/index.yml
+      path: .
+      max_level: 2
+    reference_topics_snapshot: null
+    output_files: []
+    jira_input_snapshot: null
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - ponytail-review
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+    review_manifest: null
+    artifact_amendments: []
+  - id: verify
+    skill: verify
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - verify
+    agent_prompt: null
+    orchestration_mode: null
+    evidence_policy: null
+    fallback_verification:
+    - 执行与本次改动相关的既有自动化测试，记录命令、通过/失败计数与失败输出摘要。
+    - 对改动路径做边界与错误分支检查（空输入、异常路径、越界取值），逐条记录结论。
+    - 核对实现是否满足规格与任务单的验收条件，逐条给出可验证证据。
+    completion_gate:
+      id: verification_evidence
+      require_evidence: true
+      require_output_files: false
+    artifact_policy:
+      allowed_roots:
+      - workspace/docs/engineering
+      required_output: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics:
+    - topic: quality
+      index_path: quality/index.yml
+      path: .
+      max_level: 3
+    - topic: delivery
+      index_path: delivery/index.yml
+      path: .
+      max_level: 3
+    reference_topics_snapshot: null
+    output_files: []
+    jira_input_snapshot: null
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills:
+    - verify
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+    review_manifest: null
+    artifact_amendments: []
+  - id: show-me
+    skill: show-me
+    mcp: null
+    execution_mode: main_agent
+    kind: skill
+    host_action: null
+    reference_mutation: false
+    skills:
+    - show-me
+    agent_prompt: 展示本次 task 的有效代码修改：读取当前 canonical state 的阶段证据与正式产物，并在当前 workspace
+      使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；只展示可验证范围，不执行任何写入，不替代 commit、push 或其他外部操作授权。
+    orchestration_mode: null
+    evidence_policy: null
+    fallback_verification: []
+    completion_gate:
+      id: show_me_evidence
+      require_evidence: true
+      require_output_files: false
+    artifact_policy:
+      allowed_roots:
+      - workspace/docs/engineering
+      required_output: false
+    confirmation_policy:
+      mode: none
+    status_transitions:
+      pending:
+      - in_progress
+      - blocked
+      - awaiting
+      - skipped
+      in_progress:
+      - complete
+      - blocked
+      - awaiting
+      - skipped
+      blocked:
+      - in_progress
+      - awaiting
+      awaiting:
+      - in_progress
+      - blocked
+      - skipped
+      complete: []
+      skipped: []
+    decision_record_path: null
+    inquiry_record_path: null
+    status: pending
+    required_files: []
+    reference_topics: []
+    reference_topics_snapshot: null
+    output_files: []
+    jira_input_snapshot: null
+    handoff_summary: ''
+    evidence: []
+    blocked_reason: null
+    failure_evidence: []
+    skip_reason: null
+    skip_basis: null
+    initially_unavailable_skills: []
+    required_action: null
+    confirmed_at: null
+    confirmation_request: null
+    answer_confirmation_request: null
+    question_choice_request: null
+    question_choices: []
+    authorizations: []
+    answer_confirmations: []
+    host_action_baseline: null
+    review_manifest: null
+    artifact_amendments: []
+  transitions:
+    complete:
+      loki-inquiry: gitnexus-inquiry
+      gitnexus-inquiry: diagnosing-bugs
+      diagnosing-bugs: implement
+      implement: bugfix-spec-sync
+      bugfix-spec-sync: code-review
+      code-review: verify
+      verify: show-me
+      show-me: null
+    skipped:
+      loki-inquiry: gitnexus-inquiry
+      gitnexus-inquiry: diagnosing-bugs
+      diagnosing-bugs: implement
+      implement: bugfix-spec-sync
+      bugfix-spec-sync: code-review
+      code-review: verify
+      verify: show-me
+      show-me: null
+  non_skippable_stages: []
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 6fae5bdf8faef3e96c75eb67a9f71a1580f8a87c33315cee5bb57ae2776a9c3c
+  research_mode: null
+flow_selection:
+  task_type: bug_fix
+  option_id: bug_fix_standard
+  selection_mode: preset
+  stage_ids:
+  - loki-inquiry
+  - gitnexus-inquiry
+  - diagnosing-bugs
+  - implement
+  - bugfix-spec-sync
+  - code-review
+  - verify
+  - show-me
+  omitted_stages: []
+  preselected_skips: []
+  research_targets: []
+  skill_audit:
+    checked:
+    - skill: bugfix-spec-sync
+      source: missing
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    - skill: diagnosing-bugs
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\diagnosing-bugs\SKILL.md
+    - skill: implement
+      source: builtin
+    - skill: loki-cli
+      source: missing
+    - skill: ponytail
+      source: missing
+    - skill: ponytail-review
+      source: missing
+    - skill: show-me
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\show-me\SKILL.md
+    - skill: tdd
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\tdd\SKILL.md
+    - skill: verify
+      source: missing
+    skipped:
+    - stage_id: bugfix-spec-sync
+      skill: bugfix-spec-sync
+      reason: skill_initially_unavailable
+    - stage_id: code-review
+      skill: ponytail-review
+      reason: skill_initially_unavailable
+    - stage_id: implement
+      skill: ponytail
+      reason: skill_initially_unavailable
+    - stage_id: implement
+      skill: ponytail-review
+      reason: skill_initially_unavailable
+    - stage_id: loki-inquiry
+      skill: loki-cli
+      reason: skill_initially_unavailable
+    - stage_id: verify
+      skill: verify
+      reason: skill_initially_unavailable
+  skip_confirmation: all_inquiry
+  skip_confirmation_choice:
+    choice: all_inquiry
+    chosen_at: '2026-09-14T14:02:49+00:00'
+    source: cli
+  name: 标准 Bug 修复
+  purpose: 适用于已有明确缺陷现象、需要完整诊断和修复闭环的任务。
+route_history: []
+rollback_history: []
+flow_selection_epoch: 0
+awaiting_flow_selection: null
+code_relationship_graphs: []
+stages:
+- id: loki-inquiry
+  skill: loki-cli
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - loki-cli
+  agent_prompt: 按 quality/diagnostics 的 loki-cli-specs.md 确认租户与 LogQL 规则后，调用 `uv run
+    --with pyyaml --script <dev-spec-gen-root>/scripts/loki_cli.py --tenant <编码> <logcli
+    子命令和参数>` 执行日志查询；查询结果按问题→日志证据→未确认项分层回传结构化 handoff，禁止把推断写成事实。
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: inquiry_record
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: user_confirmation
+    action: execute_loki_inquiry
+    prompt: 执行只读 Loki 日志查询；按 loki-cli-specs.md 调用 loki_cli.py 写入正式调研记录，不修改工作区或外部系统。查询是否执行必须由用户确认；用户明确选择跳过时记录未执行和跳过依据，服务故障仍走
+      fallback/blocked。
+    allow_skip: research_not_needed
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+    index_sha256: 0b8642b9da6f96fcf591144b76ebe386b55758b0af4270b2d691be7997b8fa53
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: a83eb02344e8910e1d5dcbd4d1a9a5f2a49bad24a139fac9162933792201e46c
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: Loki 只读调研已执行：本服务日志不在 Loki，缺陷日志证据改由测试环境容器日志取得并已量化。
+  evidence:
+  - kind: verification
+    summary: loki_cli --center dev query 返回“区域中心 dev 没有可查询租户”，开发中心未配置可查询租户。
+    recorded_at: '2026-09-14T14:04:53+00:00'
+  - kind: verification
+    summary: 在九机生产租户 10000 以 {job=~".+"} |= "wecom-agent" 检索近 30 分钟无任何命中，本服务日志未进入
+      Loki。
+    recorded_at: '2026-09-14T14:04:53+00:00'
+  - kind: verification
+    summary: 根因：docker-compose.yml 使用 logging.driver=json-file 且无日志外发配置，容器日志只保留在宿主机
+      docker log。
+    recorded_at: '2026-09-14T14:04:53+00:00'
+  - kind: verification
+    summary: 改用只读 docker logs 取得同源证据：测试环境 04:02 部署后共 16 次请求，7 次以 480 秒硬超时收场（errorCategory=pi_agent_end_stop_text_missing），piModelRoundMs
+      均为约 480004ms。
+    recorded_at: '2026-09-14T14:04:53+00:00'
+  - kind: verification
+    summary: 轮次统计：失败请求 turns=30/33/35/36/42/43/52；391 个 turn_end 中 stopReason 为 toolUse
+      377 次、stop 仅 5 次，仅 10 轮产出过文本。
+    recorded_at: '2026-09-14T14:04:53+00:00'
+  - kind: verification
+    summary: 每轮耗时中位 10.0s、p90 22.0s，且不随轮次增长；成功请求也达 285s/467s。
+    recorded_at: '2026-09-14T14:04:53+00:00'
+  - kind: verification
+    summary: 工具分布：16 次请求约 577 次调用（query 154、read_query 98、code_snippet 84、tool_result_file_read
+      77、route_map 54），无并发排队（agentQueueMs=0）。
+    recorded_at: '2026-09-14T14:04:53+00:00'
+  - kind: verification
+    summary: 未确认项：容器日志未记录每次模型请求的上下文 token 数与逐轮上下文大小，无法直接量化上下文膨胀对单轮耗时的影响。
+    recorded_at: '2026-09-14T14:04:53+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - loki-cli
+  required_action: null
+  confirmed_at: '2026-09-14T14:04:53+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: execute_loki_inquiry
+    command: 执行只读 Loki 日志查询
+    authorization: 用户在流程选择阶段选择 --skip-confirmation all_inquiry，视为同意执行该只读调研阶段。
+    authorized_at: '2026-09-14T14:02:49+00:00'
+    source: skip_confirmation
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: gitnexus-inquiry
+  skill: null
+  mcp:
+    server: remote_gitnexus
+    tools:
+    - query
+    - context
+    - code_snippet
+    - impact
+    - trace
+    fallback: local_workspace_search
+    scope: dynamic
+  execution_mode: sub_agent
+  kind: mcp
+  host_action: null
+  reference_mutation: false
+  skills: []
+  agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+    source=local_search、authority=non_gitnexus。 调研前先检查 docs/engineering/specs/ 下是否存在文件名前缀完全等于当前
+    task_id 的 spec 文档；存在则优先完整读取作为本次调研上下文，不存在则记录并继续，不得阻塞；禁止读取与当前 task_id 无关的 spec。
+  orchestration_mode: mcp_prompt
+  evidence_policy:
+    gitnexus_first: true
+    require_query_record: true
+    allow_local_fallback: true
+    local_fallback_only_when:
+    - repository_unindexed
+    - service_unavailable
+    - authorization_unavailable
+    - timeout
+    - index_stale
+    - aggregate_unsupported
+    - capability_unavailable
+    local_search_root: workspace.path
+    local_evidence_source: local_search
+    local_evidence_authority: non_gitnexus
+    local_search_cannot_prove:
+    - call_graph
+    - impact
+    - cross_project_trace
+    - complete_consumers
+  fallback_verification: []
+  completion_gate:
+    id: inquiry_record
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: user_confirmation
+    action: execute_gitnexus_inquiry
+    prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；用户明确选择跳过时记录未执行和跳过依据，服务故障仍走
+      fallback/blocked。
+    allow_skip: research_not_needed
+    reuse: same_task_readonly_exact
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: plans/timeout-recovery-gitnexus-inquiry.md
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: research
+    index_path: research/index.yml
+    path: gitnexus
+    max_level: 3
+    index_sha256: 8a435f1b3f3fface27c979c82d3fa5b46dae96b9ea942996fc3ab09fca1a9724
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: a83eb02344e8910e1d5dcbd4d1a9a5f2a49bad24a139fac9162933792201e46c
+  output_files:
+  - path: docs/engineering/plans/timeout-recovery-gitnexus-inquiry.md
+    sha256: 87cfa1ed956f804a347943305c0e9640a0a5e7e3be7b97a7453f55acd5357806
+  jira_input_snapshot: null
+  handoff_summary: GitNexus 判定本仓库未索引，按 fallback 完成受限本地取证并写出正式调研记录。
+  evidence:
+  - kind: verification
+    summary: GitNexus list_repos 返回 35 个已索引仓库且不含本工作区；query(repo="wecom-agent") 返回
+      Repository is not available through this MCP server，判定 repository_unindexed。
+    recorded_at: '2026-09-14T14:06:39+00:00'
+  - kind: verification
+    summary: 本地证据标记 source=local_search、authority=non_gitnexus；未发现文件名前缀为 timeout-recovery
+      的既有规格文档。
+    recorded_at: '2026-09-14T14:06:39+00:00'
+  - kind: verification
+    summary: 截止接线：config.ts:43 requestTimeoutMs=480000 → wecom-adapter.ts:2154 deadlineMs
+      → pi-agent-runtime.ts:455-468 abort() 置 ended 后 agent.abort()，超时路径不产生终态类型。
+    recorded_at: '2026-09-14T14:06:39+00:00'
+  - kind: verification
+    summary: 终态判定：wecom-adapter.ts:147 要求 assistant+stop；wecom-adapter.ts:151-161
+      仅映射 error/aborted，toolUse 返回 null，与 turn_end 中 toolUse 377 次、stop 5 次吻合。
+    recorded_at: '2026-09-14T14:06:39+00:00'
+  - kind: verification
+    summary: 轮次预算：pi-agent-runtime.ts:210-228 未设置步数或时间上限；recursionLimit 未传入 streamPiEvents；模型侧预算仅在提示词
+      business-base-prompt.md:20/73 与 business-prompt.md:473/475，且与代码 480s、企微 TTL
+      9 分钟三档不一致。
+    recorded_at: '2026-09-14T14:06:39+00:00'
+  - kind: verification
+    summary: 压缩边界：pi-tool-result-compressor.ts:5 阈值 8000 仅覆盖证据类工具，其余工具在 20000 字符内原样透传；pi-agent-runtime.ts:176-178
+      读取工具绕过压缩。
+    recorded_at: '2026-09-14T14:06:39+00:00'
+  - kind: verification
+    summary: 未确认项已记录：Pi SDK 中止后的 agent_end 行为、运行时未压缩工具清单、调用图与跨项目影响、遥测数据复核、是否存在进程级外部看门狗。
+    recorded_at: '2026-09-14T14:06:39+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-14T14:06:39+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations:
+  - action: execute_gitnexus_inquiry
+    command: 执行只读 GitNexus 调研（scope=dynamic）
+    authorization: 用户在流程选择阶段选择 --skip-confirmation all_inquiry，视为同意执行该只读调研阶段。
+    authorized_at: '2026-09-14T14:02:49+00:00'
+    source: skip_confirmation
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: diagnosing-bugs
+  skill: diagnosing-bugs
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - diagnosing-bugs
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: diagnosis_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: diagnostics
+    max_level: 3
+    index_sha256: 0b8642b9da6f96fcf591144b76ebe386b55758b0af4270b2d691be7997b8fa53
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: a83eb02344e8910e1d5dcbd4d1a9a5f2a49bad24a139fac9162933792201e46c
+  output_files:
+  - path: docs/engineering/plans/timeout-recovery-diagnosis.md
+    sha256: d587cebebcaa7cc4398f483e50f2f5509a342cdbd912fa5f37455179903ee7d6
+  jira_input_snapshot: null
+  handoff_summary: 已建立紧反馈环并复现红灯，完成复现、最小化、假设排序与判别取证，缺陷拆为无终态与无收敛信号两面。
+  evidence:
+  - kind: verification
+    summary: 反馈环：node --loader ts-node/esm .scratch/timeout-recovery/loop-deadline-terminal.ts
+      输出 [loop] elapsedMs=35 events=[]，随后 AssertionError 断言失败；断言内容为截止到达后必须出现可识别终止事件。
+    recorded_at: '2026-09-14T14:09:54+00:00'
+  - kind: verification
+    summary: 最小复现三要素：永不自行结束的 Pi 执行、截止触发 abort、结束后无 agent_end；移除任一要素即转绿。
+    recorded_at: '2026-09-14T14:09:54+00:00'
+  - kind: verification
+    summary: 假设排序（可falsify）：H1 运行期不注入已用时间导致提示词的收尾规则不可执行；H2 穷尽类规则压制收敛规则（business-prompt.md:371/374、business-base-prompt.md:10）；H3
+      单轮成本约 10s；H4 分页读取占 13% 轮次；H5 追问重跑属跨请求。
+    recorded_at: '2026-09-14T14:09:54+00:00'
+  - kind: verification
+    summary: 反证：单轮耗时不随轮次增长（0-9 轮 11.4s，40+ 轮 9.5s），上下文膨胀不是主因。
+    recorded_at: '2026-09-14T14:09:54+00:00'
+  - kind: verification
+    summary: 判别证据：business-base-prompt.md:32 已要求临近截止即收尾但运行期无时钟事实；三档时间口径不一致（提示词 4-5
+      分钟、代码 480s、企微 TTL 9 分钟）；线上末轮仍在开新战线；超时被归类为 pi_agent_end_stop_text_missing 与缺少文本不可区分。
+    recorded_at: '2026-09-14T14:09:54+00:00'
+  - kind: verification
+    summary: 结论：面 A 无终态（直接导致拿不到结果且分类误导），面 B 无收敛信号（模型无从得知时间预算）；两面需同时处理。
+    recorded_at: '2026-09-14T14:09:54+00:00'
+  - kind: verification
+    summary: 待用户决策：超时降级回答是否允许使用非 agent_end(stop) 的历史非空 assistant 文本。
+    recorded_at: '2026-09-14T14:09:54+00:00'
+  - kind: verification
+    summary: 未确认项：Pi SDK abort 后是否补发 agent_end 及其 stopReason；模型收到剩余时间提示后是否收敛需真实流量验证。
+    recorded_at: '2026-09-14T14:09:54+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-14T14:09:54+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: implement
+  skill: implement
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - ponytail
+  - tdd
+  - implement
+  - ponytail-review
+  agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+    时不执行编译。完成交接时必须用 task_files 声明本阶段实际改动的 workspace 相对文件（新增、删除、重命名都要声明），供 code-review
+    的审查范围交集使用。
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: implementation_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 446c01c2d9f0b667a3f5beac97de8c77b7e584ff949c86dad15137f7bc22b7b7
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 0b8642b9da6f96fcf591144b76ebe386b55758b0af4270b2d691be7997b8fa53
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: a83eb02344e8910e1d5dcbd4d1a9a5f2a49bad24a139fac9162933792201e46c
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: 按 TDD 实现时间预算注入与超时降级交付：工具结果携带运行期剩余时间，时间上限到达时发送已确认要点而非失败卡片，并对齐提示词口径。
+  evidence:
+  - kind: verification
+    summary: 红→绿：先写断言再实现。新增运行期预算断言（工具结果必须携带 [时间预算]）与超时降级集成断言（deadline 到达必须交付部分结论并标注原因）；实现前后者失败。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: src/pi-agent-runtime.ts：新增 PiRunBudget（describe 惰性求值）与 formatPiBudgetNote；createPiMcpPluginTools
+      在结果边界追加预算注记；createPiAgentFacade 按流启动时间与 deadlineMs 设置 describe，剩余不足 90 秒时追加“必须立即收尾”。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: src/wecom-adapter.ts：requestDeadlineMs 可注入（BotRuntimeDependencies.requestTimeoutMs）；累计流式
+      assistant 文本 partialAssistantText；!piAgentEnded 分支在到达时间上限时发送“部分结论 + 超时标注”并持久化会话，errorCategory
+      记为 pi_request_timeout。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: src/prompts/business-base-prompt.md：删除与代码不一致的固定“4 分钟/第 5 分钟”口径，改为以运行时
+      [时间预算] 为准。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: npm test 退出码 0（含 tsc 与 Pi runtime 测试）。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: 'node --loader ts-node/esm src/tests/test-pi-primary-path.ts 退出码 0；日志显示
+      Pi request deadline reached: partialChars=28，request timing 为 terminalStatus=ttl_expired、errorCategory=pi_request_timeout。'
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: node --loader ts-node/esm src/tests/test-business-prompt.ts、test-pi-tool-result-compression.ts、test-tool-context-filter.ts、test-request-timing.ts
+      均退出码 0。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: 跳过项：ponytail 与 ponytail-review 在节点预检中不可用，无法按 Skill 正文执行；本阶段已按会话内 ponytail
+      准则（最小改动、复用既有 seam）实施，未声称执行了不可用 Skill。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: 未确认项：模型收到剩余时间提示后是否实际收敛，需部署后真实流量验证，本地测试无法断言。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  - kind: verification
+    summary: 临时诊断环 .scratch/timeout-recovery/loop-deadline-terminal.ts 已按收尾要求删除，无残留调试代码。
+    recorded_at: '2026-09-14T14:29:40+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail
+  - ponytail-review
+  required_action: null
+  confirmed_at: '2026-09-14T14:29:40+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: bugfix-spec-sync
+  skill: bugfix-spec-sync
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - bugfix-spec-sync
+  agent_prompt: 定位与修复同步本任务对应的开发文档:在 docs/engineering/specs/ 下查找文件名前缀完全等于当前 task_id
+    的 Markdown spec 文档。命中时,先完整读取该文档作为修复上下文,校验本次修复与既有设计一致,再把根因、修复方案与验证结论同步更新回该文档(保留原文与来源),并将更新后文档路径与
+    SHA-256 登记为正式 output_files;多个前缀冲突时归属最长匹配本 task_id 的文档。未找到匹配 task_id 前缀的 spec 时,记录"无对应开发文档"为证据并跳过同步,不得新建占位文件、不得阻塞流程。禁止读取或回写与该
+    task_id 无关的 spec 文件。
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: bugfix_spec_sync_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering/specs
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: skipped
+  required_files: []
+  reference_topics:
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: a83eb02344e8910e1d5dcbd4d1a9a5f2a49bad24a139fac9162933792201e46c
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence:
+  - 节点 initial_test 预检结果：skills=[bugfix-spec-sync]，status=unavailable；未提供 skill_md_path，无法核验正文。
+  - 本任务没有既有规格文档（docs/engineering/specs 下无 timeout-recovery 前缀文件），因此不存在需要同步的规格条目。
+  - 等价回写已手工完成：docs/engineering/plans/timeout-recovery-diagnosis.md 新增“实施结果”小节，记录面
+    A/面 B 的实现点、被证实的假设 H1、未验证项与刻意未做项。
+  - 未声称执行了不可用的 Skill。
+  skip_reason: bugfix-spec-sync Skill 在节点预检中判定不可用，无法按 Skill 正文执行
+  skip_basis: execution_failed
+  initially_unavailable_skills:
+  - bugfix-spec-sync
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: code-review
+  skill: code-review
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - code-review
+  - ponytail-review
+  agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+    HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中 files
+    为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+    是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+    HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+    时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification:
+  - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+  - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+  - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+  completion_gate:
+    id: review_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 0b8642b9da6f96fcf591144b76ebe386b55758b0af4270b2d691be7997b8fa53
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+    index_sha256: acce6dff6f319ffa247e0dc601fbb754ebe6454265e1dfabedc396280f518c8e
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+    index_sha256: a83eb02344e8910e1d5dcbd4d1a9a5f2a49bad24a139fac9162933792201e46c
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: 完成 Standards 与 Spec 双轴审查；确认问题已全部修复并复验通过。
+  evidence:
+  - kind: verification
+    summary: 范围：git diff HEAD 限定本次声明的 5 个文件（pi-agent-runtime.ts、wecom-adapter.ts、business-base-prompt.md、test-pi-agent-runtime.ts、test-pi-primary-path.ts）；节点未公开
+      review_manifest，按声明 task_files 取范围并如实记录。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: Standards 轴：无硬违规（README 未规定编码/命名/测试/架构规范）。判断性味道 5 项：降级发送与终态发送重复、PiRunBudget
+      单方法接口属投机抽象、describe 命名不表意、formatPiBudgetNote 参数成组、测试两段重复。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: Spec 轴确认缺陷：面 A 可达性未闭环——SDK 若在截止中止后补发 agent_end(aborted)，旧路径直接以 cancelled/pi_agent_aborted
+      静默返回，既绕过降级分支也不产生 pi_request_timeout。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: 修复 1（对应 Spec 可达性）：抽出 deliverDeadlineDegradedReply，catch 中 agent_end(aborted)
+      且已达时间上限时改走降级交付；同时消除 Standards 的重复代码味道。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: 修复 2（对应 Spec c4）：降级交付改为先 stopThinkingHeartbeatAndDrain 再用 safeReplyStream(degradedAnswer,
+      true)，与正常终态发送一致，避免心跳覆盖与终态争用。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: 修复 3（对应 Spec c2）：部分文本经 collapseProgressUpdates 后若仍以 PROGRESS_KEYWORDS
+      结尾则判定为阶段性话术，改发纯超时说明，不再把“继续核实中”包装成已确认结论。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: 修复 4（对应 Spec c3）：isLikelyIrrelevantToolResult 先剥离结尾 [时间预算] 注记再判定，避免空结果因追加注记被误判为有效证据。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: 修复 5（对应 Standards 味道）：PiRunBudget 接口改为 PiRunBudgetNote 函数类型，describe
+      更名；formatPiBudgetNote 导出以便直接断言收尾判据。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: 复验：npx tsc --noEmit 退出码 0；npm test 退出码 0；test-pi-agent-runtime（含收尾判据断言）退出码
+      0；test-pi-primary-path（含超时降级与 agent_end(aborted) 降级两条集成路径）退出码 0，日志显示两条路径均 partialChars>0、progressOnly=false、terminalStatus=ttl_expired、errorCategory=pi_request_timeout；test-tool-context-filter
+      与 test-pi-tool-result-compression 退出码 0。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: 尚未修复并如实保留的判断性味道：formatPiBudgetNote 的三个数值参数成组（改动收益低于噪声）；测试中两段 createPiMcpPluginTools
+      结构相似。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  - kind: verification
+    summary: ponytail-review 在节点预检中不可用，未执行，未声称完成。
+    recorded_at: '2026-09-14T14:37:10+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail-review
+  required_action: null
+  confirmed_at: '2026-09-14T14:37:10+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest:
+    base_ref: HEAD
+    head: ab2f8dce7cb1629f4f45d8e383d3feb910d14dbf
+    files:
+    - path: src/pi-agent-runtime.ts
+      status: M
+      sha256: dbac86c863fa76067aac03269b49f9327e3497b67a3d2e690de3589e4d72ece6
+    - path: src/prompts/business-base-prompt.md
+      status: M
+      sha256: 967dea1401cb9aaa2434a6397c7a958414d156a39a824e08c59ceac1b4366614
+    - path: src/tests/test-pi-agent-runtime.ts
+      status: M
+      sha256: ed2fc8c9006c3108734a685523c3272cc62605a5472697b97d35e63d5af83474
+    - path: src/tests/test-pi-primary-path.ts
+      status: M
+      sha256: e7c5fb52928ebd166a2ff187b4bf5e9b7f72c3e3f454b8b7a2a2c95ad1ebe9af
+    - path: src/wecom-adapter.ts
+      status: M
+      sha256: a9a1273525937e5e9d510f37625c017162ed10815e0317e914bc01b0bb38c669
+    excluded: []
+    task_files_declared: 5
+    digest: b64da5d7b1d2a4378abf655b778c0c862140bf44367ac5055871c5caf653a242
+    instruction: 只审查 files 列出的本任务改动（已声明的 workspace 相对文件；?? 为声明的未跟踪新增、missing 为声明的已删除/缺失）；excluded
+      是范围外的其他已跟踪改动，仅审计不审查；修复后仅复审 sha256 变化的文件；当前 HEAD 与 head 不一致时必须全量复审。
+    captured_at: '2026-09-14T14:30:57+00:00'
+  artifact_amendments: []
+- id: verify
+  skill: verify
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - verify
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification:
+  - 执行与本次改动相关的既有自动化测试，记录命令、通过/失败计数与失败输出摘要。
+  - 对改动路径做边界与错误分支检查（空输入、异常路径、越界取值），逐条记录结论。
+  - 核对实现是否满足规格与任务单的验收条件，逐条给出可验证证据。
+  completion_gate:
+    id: verification_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: skipped
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: .
+    max_level: 3
+  reference_topics_snapshot:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+    index_sha256: 0b8642b9da6f96fcf591144b76ebe386b55758b0af4270b2d691be7997b8fa53
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: .
+    max_level: 3
+    index_sha256: acce6dff6f319ffa247e0dc601fbb754ebe6454265e1dfabedc396280f518c8e
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence:
+  - 替代项 1（既有自动化测试）：npm test exit=0；test-pi-agent-runtime exit=0；test-pi-primary-path
+    exit=0；test-pi-tool-result-compression exit=0；test-tool-context-filter exit=0；test-business-prompt
+    exit=0；test-list-repos-scope exit=0；test-request-timing exit=0。共 8 条命令，全部通过，0
+    条 AssertionError，无失败输出可摘要。
+  - 替代项 2（边界与错误分支，逐条结论）：a) 到时间上限且无任何部分文本——只发超时说明，断言不得出现“已确认的部分结论”，实测 partialChars=0、progressOnly=true
+    通过；b) 未提供预算函数——工具结果原文不变，断言通过；c) 剩余时间充足（剩余 420s）——formatPiBudgetNote 不含收尾要求，断言通过；d)
+    剩余不足（剩余 60s）——必须要求收尾，断言通过；e) 非 stop / 空内容 / 协议清理后为空——仍走原有失败终态，既有断言全部通过，未被降级分支误吞；f)
+    截止中止后补发 agent_end(aborted)——走降级交付，partialChars=18，断言通过。
+  - 替代项 3（规格与验收核对）：面 A“超时不丢整轮成果”已验证——三条集成路径分别覆盖直接超时（partialChars=28）、agent_end(aborted)
+    补发（18）、空部分文本（0），均产出终态回复且 errorCategory=pi_request_timeout、terminalStatus=ttl_expired；面
+    B“运行期时间事实”已验证——工具结果携带 [时间预算]，剩余不足 90 秒时要求立即收尾；既有约束未破坏——未新增任何固定工具次数/递归次数上限，agent_end(stop)
+    仍是唯一正常完成语义（既有断言通过）。
+  - 未执行 verify Skill 本身：节点 skill_md_path 为空、initial_test 判定 unavailable，无法核验正文；未声称执行。
+  - 本地无法验证项（需部署后真实流量）：模型收到剩余时间提示后是否实际减少轮次、pi_request_timeout 占比是否下降。
+  skip_reason: verify Skill 在节点预检中判定不可用，无法按 Skill 正文执行
+  skip_basis: execution_failed
+  initially_unavailable_skills:
+  - verify
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: show-me
+  skill: show-me
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - show-me
+  agent_prompt: 展示本次 task 的有效代码修改：读取当前 canonical state 的阶段证据与正式产物，并在当前 workspace 使用只读
+    Git 信息核对 git diff HEAD 和未跟踪代码文件；只展示可验证范围，不执行任何写入，不替代 commit、push 或其他外部操作授权。
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: show_me_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: complete
+  required_files: []
+  reference_topics: []
+  reference_topics_snapshot: []
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: 已只读展示本次有效改动、缺陷证据、审查缺口与验证结果；未执行提交、推送或部署。
+  evidence: &id001
+  - kind: verification
+    summary: 改动范围（git diff HEAD）：src/pi-agent-runtime.ts +27、src/wecom-adapter.ts
+      +56、src/tool-context-filter.ts +5、src/prompts/business-base-prompt.md 3 行、src/tests/test-pi-agent-runtime.ts
+      +39、src/tests/test-pi-primary-path.ts +122，共 6 文件 +246/-6。
+    recorded_at: '2026-09-14T14:41:57+00:00'
+  - kind: verification
+    summary: 新增产物：docs/engineering/plans/timeout-recovery-gitnexus-inquiry.md、docs/engineering/plans/timeout-recovery-diagnosis.md、docs/engineering/workflows/timeout-recovery-orchestration.yml。
+    recorded_at: '2026-09-14T14:41:57+00:00'
+  - kind: verification
+    summary: 缺陷证据：测试环境 16 次请求中 7 次 piModelRoundMs≈480004ms 后被中止并记为 pi_agent_end_stop_text_missing；391
+      个 turn_end 中 toolUse 377、stop 5；每轮中位 10.0s、p90 22.0s 且不随轮次增长。
+    recorded_at: '2026-09-14T14:41:57+00:00'
+  - kind: verification
+    summary: 修复要点：工具结果携带运行期 [时间预算]（剩余 ≤90s 要求立即收尾）；到时间上限时降级交付已确认要点并区分分类，覆盖直接超时、agent_end(aborted)
+      补发、无部分文本三种路径。
+    recorded_at: '2026-09-14T14:41:57+00:00'
+  - kind: verification
+    summary: 审查缺口修复：SDK 补发 agent_end(aborted) 原本会静默返回并绕过降级分支，已接入同一降级交付函数。
+    recorded_at: '2026-09-14T14:41:57+00:00'
+  - kind: verification
+    summary: 验证：npm test 与 7 个相关测试文件全部 exit=0，0 条断言失败；三条降级路径实测 partialChars 分别为 28/18/0。
+    recorded_at: '2026-09-14T14:41:57+00:00'
+  - kind: verification
+    summary: 未提交、未推送、未部署；verify 与 ponytail-review 与 bugfix-spec-sync Skill 不可用，已如实记录跳过而未声称执行。
+    recorded_at: '2026-09-14T14:41:57+00:00'
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: '2026-09-14T14:41:57+00:00'
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+current_stage: show-me
+current_skill: show-me
+stage_status: complete
+next_skill: null
+resume_from: completed
+continuation_mode: auto
+required_action: null
+handoff_summary: 阶段 show-me 已完成，任务编排中的全部阶段已结束。
+evidence: *id001
+blocked_reason: null
+failure_evidence: []
+invalidated_outputs: []
+limits:
+  handoff_summary_max_chars: 1200
+  evidence_summary_max_chars: 500
+  max_inline_evidence_items: 20
+updated_at: '2026-09-14T14:42:03+00:00'
+initialization:
+  selection_id: v9Ct3VDEh6wsnBQtvOmIkw
+  purpose: init
+  selection_stage: final
+  chosen_at: '2026-09-14T14:03:03+00:00'
+  definition:
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 6fae5bdf8faef3e96c75eb67a9f71a1580f8a87c33315cee5bb57ae2776a9c3c
+  stages_sha256: 670f93663215672aa44c4da23ac2437bfa30a0a6c951387dedb5f05fac385e9a
+  flow_definition_sha256: 054b27890797c305022ba25559c82b5f1d002ca76be2ad79ce3687cd995a8fdc
+  provenance: cli_selection
+task_files:
+- path: src/pi-agent-runtime.ts
+  sha256: dbac86c863fa76067aac03269b49f9327e3497b67a3d2e690de3589e4d72ece6
+  stage_id: implement
+  recorded_at: '2026-09-14T14:29:40+00:00'
+- path: src/prompts/business-base-prompt.md
+  sha256: 967dea1401cb9aaa2434a6397c7a958414d156a39a824e08c59ceac1b4366614
+  stage_id: implement
+  recorded_at: '2026-09-14T14:29:40+00:00'
+- path: src/tests/test-pi-agent-runtime.ts
+  sha256: ed2fc8c9006c3108734a685523c3272cc62605a5472697b97d35e63d5af83474
+  stage_id: implement
+  recorded_at: '2026-09-14T14:29:40+00:00'
+- path: src/tests/test-pi-primary-path.ts
+  sha256: e7c5fb52928ebd166a2ff187b4bf5e9b7f72c3e3f454b8b7a2a2c95ad1ebe9af
+  stage_id: implement
+  recorded_at: '2026-09-14T14:29:40+00:00'
+- path: src/wecom-adapter.ts
+  sha256: a9a1273525937e5e9d510f37625c017162ed10815e0317e914bc01b0bb38c669
+  stage_id: implement
+  recorded_at: '2026-09-14T14:29:40+00:00'

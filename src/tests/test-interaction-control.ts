@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import {
   buildFollowupQuestion,
+  buildLatestMessageContext,
   buildQuestionWithHistory,
   detectActiveMessageIntent,
   extractConfirmedAnchorsFromHistory,
@@ -34,6 +35,17 @@ assert.match(withHistory, /当前问题：\n那良品单呢/);
 assert.match(withHistory, /先结合“相关历史”和“当前问题”整合成一个明确问题/);
 assert.match(withHistory, /已确认锚点必须优先继承/);
 assert.match(withHistory, /不要重新放宽到其它项目、其它技术栈或宽泛业务词/);
+
+const latestContext = buildLatestMessageContext("给我 SQL", {
+  previousQuestion: "定位订单锁单原因",
+  partialAnswer: "已确认订单入口在 queryOrderLock。",
+  toolContextSummary: "repo=oa-order file=src/lock.ts line=42 evidence=lock rule",
+  repoHints: ["oa-order"],
+});
+assert.match(latestContext, /被替换的在途请求/);
+assert.match(latestContext, /定位订单锁单原因/);
+assert.match(latestContext, /给我 SQL/);
+assert.match(latestContext, /不要因为旧请求存在就强行拼接两个独立问题/);
 
 const anchoredFollowup = buildQuestionWithHistory(
   [

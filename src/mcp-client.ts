@@ -3,7 +3,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { loadMcpTools } from "@langchain/mcp-adapters";
+import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { config, type BotConfig, type McpServerConfig } from "./config.js";
@@ -229,12 +230,104 @@ export function withMcpServerLoadTimeout<T>(promise: Promise<T>, label: string, 
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
 
-type McpTool = Awaited<ReturnType<typeof loadMcpTools>>[number];
+export interface McpSdkTool {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface McpSdkClient {
+  listTools(params?: { cursor?: string }, options?: RequestOptions): Promise<{ tools: McpSdkTool[]; nextCursor?: string }>;
+  callTool(params: { name: string; arguments?: Record<string, unknown> }, resultSchema?: unknown, options?: RequestOptions): Promise<CallToolResult>;
+  close(): Promise<void>;
+}
+
+type McpSdkClientLease = Pick<McpSdkClient, "callTool"> & {
+  dispose(): Promise<void>;
+};
+
+function createMcpSdkClientLease(client: McpSdkClient): McpSdkClientLease {
+  let activeCalls = 0;
+  let retired = false;
+  let closed = false;
+  let closePromise: Promise<void> | undefined;
+  const closeIfIdle = () => {
+    if (!retired || activeCalls > 0 || closed) return closePromise ?? Promise.resolve();
+    closed = true;
+    closePromise = client.close();
+    return closePromise;
+  };
+  return {
+    async callTool(params, resultSchema, options) {
+      if (retired) throw new Error("MCP 客户端已过期，请重试当前请求");
+      activeCalls += 1;
+      try {
+        return await client.callTool(params, resultSchema, options);
+      } finally {
+        activeCalls -= 1;
+        await closeIfIdle();
+      }
+    },
+    async dispose() {
+      retired = true;
+      await closeIfIdle();
+    },
+  };
+}
+
+function normalizeMcpCallToolResult(result: CallToolResult) {
+  if (result.isError || result.structuredContent !== undefined) return result;
+  const content = result.content;
+  if (!Array.isArray(content) || content.length !== 1) return result;
+  const [item] = content;
+  if (!item || item.type !== "text") return result;
+  return item.text;
+}
+
+export function createMcpSdkTool(
+  definition: McpSdkTool,
+  client: Pick<McpSdkClient, "callTool">,
+) {
+  return {
+    name: definition.name,
+    description: definition.description || definition.name,
+    schema: definition.inputSchema,
+    invoke: async (args: unknown, extra?: { signal?: AbortSignal; toolCallId?: string }) => {
+      const argumentsValue = args && typeof args === "object" && !Array.isArray(args)
+        ? args as Record<string, unknown>
+        : {};
+      const result = await client.callTool(
+        { name: definition.name, arguments: argumentsValue },
+        undefined,
+        extra?.signal ? { signal: extra.signal } : undefined,
+      );
+      return normalizeMcpCallToolResult(result);
+    },
+  };
+}
+
+export async function loadMcpSdkTools(
+  _serverName: string,
+  client: McpSdkClient,
+  options?: RequestOptions,
+) {
+  const tools: McpSdkTool[] = [];
+  let cursor: string | undefined;
+  do {
+    const result = await client.listTools(cursor ? { cursor } : undefined, options);
+    tools.push(...result.tools);
+    cursor = result.nextCursor;
+  } while (cursor);
+  return tools.map(toolDefinition => createMcpSdkTool(toolDefinition, client));
+}
+
+type McpTool = ReturnType<typeof createMcpSdkTool>;
 
 type McpToolsCacheEntry = {
   expiresAt: number;
   tools?: McpTool[];
   pending?: Promise<McpTool[]>;
+  dispose?: () => Promise<void>;
 };
 
 export function buildMcpToolsCacheKey(bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {
@@ -251,11 +344,16 @@ export function getMcpToolsCacheTtlMs(cacheTtlMinutes = config.tools.cacheTtlMin
   return cacheTtlMinutes * 60 * 1000;
 }
 
+export interface McpToolsCacheLoadResult {
+  tools: McpTool[];
+  dispose?: () => Promise<void>;
+}
+
 export function createMcpToolsCache(ttlMs: number, now = () => Date.now()) {
   const entries = new Map<string, McpToolsCacheEntry>();
 
   return {
-    async get(key: string, loader: () => Promise<McpTool[]>) {
+    async get(key: string, loader: () => Promise<McpTool[] | McpToolsCacheLoadResult>) {
       const current = now();
       const cached = entries.get(key);
       if (cached?.tools && cached.expiresAt > current) {
@@ -267,12 +365,15 @@ export function createMcpToolsCache(ttlMs: number, now = () => Date.now()) {
       }
 
       const pending = loader()
-        .then(tools => {
+        .then(async loaded => {
+          const next = Array.isArray(loaded) ? { tools: loaded } : loaded;
+          await cached?.dispose?.().catch(() => undefined);
           entries.set(key, {
-            tools,
+            tools: next.tools,
             expiresAt: now() + ttlMs,
+            ...(next.dispose ? { dispose: next.dispose } : {}),
           });
-          return tools;
+          return next.tools;
         })
         .catch(error => {
           entries.delete(key);
@@ -290,8 +391,9 @@ export function createMcpToolsCache(ttlMs: number, now = () => Date.now()) {
 
 const mcpToolsCache = createMcpToolsCache(getMcpToolsCacheTtlMs());
 
-async function loadFreshMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {
-  const allTools = [];
+async function loadFreshMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}): Promise<McpToolsCacheLoadResult> {
+  const allTools: McpTool[] = [];
+  const leases: McpSdkClientLease[] = [];
 
   for (const server of config.mcpServers) {
     let client: Client | undefined;
@@ -311,7 +413,13 @@ async function loadFreshMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOver
       );
       
       await withMcpServerLoadTimeout(client.connect(transport), `${server.name} MCP connect`);
-      const tools = await withMcpServerLoadTimeout(loadMcpTools(server.name, client), `${server.name} MCP tools load`);
+      const lease = createMcpSdkClientLease(client as unknown as McpSdkClient);
+      const tools = await withMcpServerLoadTimeout(loadMcpSdkTools(server.name, {
+        ...lease,
+        listTools: (params, options) => (client as unknown as McpSdkClient).listTools(params, options),
+        close: () => lease.dispose(),
+      }), `${server.name} MCP tools load`);
+      leases.push(lease);
       const currentHeaders = buildMcpHeaders(server, bot, headerOverrides);
       const activeProfileHeaders = resolveActiveMcpProfileHeaders(server, bot, headerOverrides);
       const wrappedTools = tools.map(mcpTool => wrapMcpToolWithConfiguredArgs(
@@ -349,7 +457,12 @@ async function loadFreshMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOver
     console.log(`Tool filtering applied: ${filteredTools.length} tools available out of ${originalCount} total.`);
   }
 
-  return filteredTools;
+  return {
+    tools: filteredTools,
+    dispose: async () => {
+      await Promise.allSettled(leases.map(lease => lease.dispose()));
+    },
+  };
 }
 
 export async function getAllMcpTools(bot?: BotConfig, headerOverrides: McpHeaderOverrides = {}) {

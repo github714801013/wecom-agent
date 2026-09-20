@@ -4,6 +4,7 @@ import type { BotConfig } from "../config.js";
 import {
   buildPrimaryPiAgentTools,
   extractPiAgentEndContent,
+  extractPiAgentEndFailure,
   startBot,
 } from "../wecom-adapter.js";
 
@@ -60,12 +61,27 @@ for (const stopReason of ["error", "aborted"]) {
     `${stopReason} 生命周期不得作为正常最终内容`,
   );
 }
+const modelFailure = extractPiAgentEndFailure({
+  type: "agent_end",
+  messages: [{
+    role: "assistant",
+    stopReason: "error",
+    rawStopReason: "provider_error",
+    errorMessage: "Authorization: Bearer live-token upstream 503",
+    content: [],
+  }],
+} as any);
+assert.deepEqual(modelFailure, {
+  reason: "error",
+  rawStopReason: "provider_error",
+  errorMessage: "Authorization: [已脱敏]",
+}, "模型终态必须保留脱敏后的真实错误详情");
 
 type Listener = (...args: any[]) => void | Promise<void>;
 
 class FakeWsClient {
   readonly listeners = new Map<string, Listener>();
-  readonly replies: Array<{ content: string; final: boolean }> = [];
+  readonly replies: Array<{ streamId: string; content: string; final: boolean }> = [];
 
   on(event: string, listener: Listener) {
     this.listeners.set(event, listener);
@@ -76,18 +92,18 @@ class FakeWsClient {
     return this;
   }
 
-  async replyStreamWithCard(_frame: unknown, _streamId: string, content: string, final = false) {
-    this.replies.push({ content, final });
+  async replyStreamWithCard(_frame: unknown, streamId: string, content: string, final = false) {
+    this.replies.push({ streamId, content, final });
     return { errcode: 0 };
   }
 
-  async replyStream(_frame: unknown, _streamId: string, content: string, final = false) {
-    this.replies.push({ content, final });
+  async replyStream(_frame: unknown, streamId: string, content: string, final = false) {
+    this.replies.push({ streamId, content, final });
     return { errcode: 0 };
   }
 
-  async replyStreamNonBlocking(_frame: unknown, _streamId: string, content: string, final = false) {
-    this.replies.push({ content, final });
+  async replyStreamNonBlocking(_frame: unknown, streamId: string, content: string, final = false) {
+    this.replies.push({ streamId, content, final });
     return { errcode: 0 };
   }
 

@@ -11,6 +11,7 @@ const MAX_PROJECT_SUMMARY_ITEMS = 32;
 const MAX_STRUCTURED_PARSE_LENGTH = 256_000;
 const MAX_EVIDENCE_SCAN_LENGTH = MAX_STORED_TOOL_RESULT_LENGTH;
 const MAX_EVIDENCE_NODES = 2_000;
+const MAX_EVIDENCE_CANDIDATES = MAX_EVIDENCE_MATCHES * 8;
 const MAX_SERIALIZED_RESULT_DEPTH = 24;
 const MAX_SERIALIZED_RESULT_NODES = 4_000;
 const MAX_SERIALIZED_STRING_LENGTH = 100_000;
@@ -23,6 +24,11 @@ interface EvidenceMatch {
   line?: number;
   endLine?: number;
   evidence?: string;
+}
+
+interface CollectedEvidenceMatch extends EvidenceMatch {
+  priority: number;
+  order: number;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -281,16 +287,17 @@ type EvidenceTraversalState = { nodes: number };
 function collectEvidenceMatches(
   value: unknown,
   inheritedRepo = "",
-  output: EvidenceMatch[] = [],
+  output: CollectedEvidenceMatch[] = [],
   state: EvidenceTraversalState = { nodes: 0 },
   depth = 0,
-): EvidenceMatch[] {
-  if (depth > 7 || state.nodes >= MAX_EVIDENCE_NODES || output.length >= MAX_EVIDENCE_MATCHES) return output;
+  priority = 0,
+): CollectedEvidenceMatch[] {
+  if (depth > 7 || state.nodes >= MAX_EVIDENCE_NODES) return output;
   state.nodes += 1;
   if (Array.isArray(value)) {
     for (const item of value) {
-      collectEvidenceMatches(item, inheritedRepo, output, state, depth + 1);
-      if (state.nodes >= MAX_EVIDENCE_NODES || output.length >= MAX_EVIDENCE_MATCHES) break;
+      collectEvidenceMatches(item, inheritedRepo, output, state, depth + 1, priority);
+      if (state.nodes >= MAX_EVIDENCE_NODES) break;
     }
     return output;
   }
@@ -302,35 +309,62 @@ function collectEvidenceMatches(
   const endLine = firstNumber(value, ["endLine", "line_end", "lineEnd"]);
   const evidenceValue = firstString(value, ["evidence", "snippet", "code", "content", "text", "source"]);
   if (file || line !== undefined) {
-    output.push({
+    if (output.length < MAX_EVIDENCE_CANDIDATES) output.push({
       ...(repo ? { repo } : {}),
       ...(file ? { file } : {}),
       ...(line !== undefined ? { line } : {}),
       ...(endLine !== undefined ? { endLine } : {}),
       ...(evidenceValue ? { evidence: truncateEvidence(evidenceValue) } : {}),
+      priority,
+      order: output.length,
     });
   }
 
-  for (const [key, child] of Object.entries(value)) {
+  const entries = Object.entries(value).sort(([left], [right]) => {
+    const rank = (key: string) => key === "matches" || key === "results" ? 0 : key === "definitions" ? 2 : 1;
+    return rank(left) - rank(right);
+  });
+  for (const [key, child] of entries) {
     if (key === "stats" || key === "embeddings") continue;
+    const childPriority = key === "matches" || key === "results" ? 2 : key === "definitions" ? 0 : priority;
     if (typeof child === "string") {
       const nested = parseJson(child);
       if (nested !== undefined) {
-        collectEvidenceMatches(nested, repo, output, state, depth + 1);
-      } else if (output.length < MAX_EVIDENCE_MATCHES) {
-        output.push(...collectTextEvidenceMatches(child, repo ? { repo } : {}));
+        collectEvidenceMatches(nested, repo, output, state, depth + 1, childPriority);
+      } else {
+        output.push(...collectTextEvidenceMatches(child, repo ? { repo } : {}).map(match => ({
+          ...match,
+          priority: childPriority,
+          order: output.length,
+        })).slice(0, Math.max(0, MAX_EVIDENCE_CANDIDATES - output.length)));
       }
-      if (output.length >= MAX_EVIDENCE_MATCHES) break;
+      if (state.nodes >= MAX_EVIDENCE_NODES) break;
       continue;
     }
-    collectEvidenceMatches(child, repo, output, state, depth + 1);
-    if (output.length >= MAX_EVIDENCE_MATCHES) break;
+    collectEvidenceMatches(child, repo, output, state, depth + 1, childPriority);
+    if (state.nodes >= MAX_EVIDENCE_NODES) break;
   }
   return output;
 }
 
-function collectTextEvidenceMatches(rawText: string, params: unknown): EvidenceMatch[] {
-  const output: EvidenceMatch[] = [];
+function evidenceCompletenessScore(match: EvidenceMatch) {
+  return Number(Boolean(match.repo)) * 4
+    + Number(Boolean(match.file)) * 2
+    + Number(match.line !== undefined)
+    + Number(Boolean(match.evidence));
+}
+
+function prioritizeEvidenceMatches(matches: readonly CollectedEvidenceMatch[]) {
+  return [...matches]
+    .sort((left, right) => right.priority - left.priority
+      || evidenceCompletenessScore(right) - evidenceCompletenessScore(left)
+      || left.order - right.order)
+    .slice(0, MAX_EVIDENCE_MATCHES)
+    .map(({ priority: _priority, order: _order, ...match }) => match);
+}
+
+function collectTextEvidenceMatches(rawText: string, params: unknown): CollectedEvidenceMatch[] {
+  const output: CollectedEvidenceMatch[] = [];
   const paramsRecord = isRecord(params) ? params : {};
   const defaultRepo = firstString(paramsRecord, ["repo", "repository", "project"]);
   const defaultFile = firstString(paramsRecord, ["file", "filePath", "file_path", "path"]);
@@ -351,6 +385,8 @@ function collectTextEvidenceMatches(rawText: string, params: unknown): EvidenceM
         line: Number(lineNumber),
         ...(match[3] ? { endLine: Number(match[3]) } : {}),
         ...(match[4]?.trim() ? { evidence: truncateEvidence(match[4]) } : {}),
+        priority: 1,
+        order: output.length,
       });
       continue;
     }
@@ -361,12 +397,16 @@ function collectTextEvidenceMatches(rawText: string, params: unknown): EvidenceM
         file: defaultFile,
         line: defaultLine + index,
         evidence: truncateEvidence(line),
+        priority: 1,
+        order: output.length,
       });
     }
   }
   return output;
 }
 
+const STRUCTURED_REPO_FIELD_PATTERN = /"(?:repo|repository|project)"\s*:\s*"((?:\\.|[^"\\])*)"/iu;
+const STRUCTURED_MATCHES_FIELD_PATTERN = /"(?:matches|results)"\s*:\s*\[/iu;
 const STRUCTURED_FILE_FIELD_PATTERN = /"(?:file|filePath|file_path|path)"\s*:\s*"((?:\\.|[^"\\])*)"/giu;
 const STRUCTURED_LINE_FIELD_PATTERN = /"(?:line|lineNumber|startLine|line_start|lineStart)"\s*:\s*(?:"(\d+)"|(\d+))/iu;
 const STRUCTURED_END_LINE_FIELD_PATTERN = /"(?:endLine|line_end|lineEnd)"\s*:\s*(?:"(\d+)"|(\d+))/iu;
@@ -386,29 +426,45 @@ function firstStructuredNumber(pattern: RegExp, text: string) {
   return match ? Number(match[1] || match[2]) : undefined;
 }
 
-function collectStructuredTextEvidenceMatches(rawText: string, params: unknown): EvidenceMatch[] {
+function firstStructuredString(pattern: RegExp, text: string) {
+  const match = pattern.exec(text);
+  return match?.[1] ? decodeJsonString(match[1]).trim() : undefined;
+}
+
+function collectStructuredTextEvidenceMatches(rawText: string, params: unknown): CollectedEvidenceMatch[] {
   const boundedText = rawText.slice(0, MAX_EVIDENCE_SCAN_LENGTH);
-  const output: EvidenceMatch[] = [];
+  const output: CollectedEvidenceMatch[] = [];
   let fileMatch: RegExpExecArray | null;
-  while (output.length < MAX_EVIDENCE_MATCHES && (fileMatch = STRUCTURED_FILE_FIELD_PATTERN.exec(boundedText))) {
+  while (fileMatch = STRUCTURED_FILE_FIELD_PATTERN.exec(boundedText)) {
+    if (output.length >= MAX_EVIDENCE_CANDIDATES) break;
     const rawFile = fileMatch[1];
     if (!rawFile) continue;
     const file = decodeJsonString(rawFile).trim();
     if (!file) continue;
     const start = fileMatch.index;
-    const window = boundedText.slice(start, Math.min(boundedText.length, start + 4_096));
-    const line = firstStructuredNumber(STRUCTURED_LINE_FIELD_PATTERN, window);
-    const endLine = firstStructuredNumber(STRUCTURED_END_LINE_FIELD_PATTERN, window);
-    const evidenceMatch = STRUCTURED_EVIDENCE_FIELD_PATTERN.exec(window);
+    const inMatches = STRUCTURED_MATCHES_FIELD_PATTERN.lastIndex = 0;
+    const matchField = STRUCTURED_MATCHES_FIELD_PATTERN.exec(boundedText);
+    const priority = matchField && matchField.index < start ? 2 : 1;
+    const previousObjectStart = boundedText.lastIndexOf("{", start);
+    const previousObjectEnd = boundedText.lastIndexOf("}", start);
+    const objectText = previousObjectStart > previousObjectEnd
+      ? boundedText.slice(previousObjectStart, Math.min(boundedText.length, start + 16_384))
+      : boundedText.slice(Math.max(0, start - 4_096), Math.min(boundedText.length, start + 16_384));
+    const line = firstStructuredNumber(STRUCTURED_LINE_FIELD_PATTERN, objectText);
+    const endLine = firstStructuredNumber(STRUCTURED_END_LINE_FIELD_PATTERN, objectText);
+    const evidenceMatch = STRUCTURED_EVIDENCE_FIELD_PATTERN.exec(objectText);
     const evidence = evidenceMatch?.[1] ? truncateEvidence(decodeJsonString(evidenceMatch[1])) : undefined;
     const paramsRecord = isRecord(params) ? params : {};
-    const repo = firstString(paramsRecord, ["repo", "repository", "project"]);
+    const repo = firstString(paramsRecord, ["repo", "repository", "project"])
+      || firstStructuredString(STRUCTURED_REPO_FIELD_PATTERN, boundedText.slice(0, start));
     output.push({
       ...(repo ? { repo } : {}),
       file,
       ...(line !== undefined ? { line } : {}),
       ...(endLine !== undefined ? { endLine } : {}),
       ...(evidence ? { evidence } : {}),
+      priority,
+      order: output.length,
     });
   }
   STRUCTURED_FILE_FIELD_PATTERN.lastIndex = 0;
@@ -464,14 +520,15 @@ function fitEvidenceSummary(base: Record<string, unknown>, matches: readonly Evi
 function buildEvidenceSummary(toolName: string, rawText: string, params: unknown, sourceTruncated = false) {
   const parseSkipped = rawText.length > MAX_STRUCTURED_PARSE_LENGTH;
   const parsed = parseSkipped ? undefined : parseJson(rawText);
+  const repoFromRaw = isRecord(parsed) ? firstString(parsed, ["repo", "repository", "project"]) : undefined;
   const matches = parseSkipped
-    ? [
-      ...collectStructuredTextEvidenceMatches(rawText, params),
+    ? prioritizeEvidenceMatches([
+      ...collectStructuredTextEvidenceMatches(rawText, { ...(isRecord(params) ? params : {}), ...(repoFromRaw ? { repo: repoFromRaw } : {}) }),
       ...collectTextEvidenceMatches(rawText, params),
-    ].slice(0, MAX_EVIDENCE_MATCHES)
+    ])
     : parsed === undefined
-      ? collectTextEvidenceMatches(rawText, params)
-      : collectEvidenceMatches(parsed);
+      ? prioritizeEvidenceMatches(collectTextEvidenceMatches(rawText, params))
+      : prioritizeEvidenceMatches(collectEvidenceMatches(parsed));
   if (matches.length === 0 && !sourceTruncated && !parseSkipped && isLikelyIrrelevantToolResult(rawText)) {
     return `本次检索未获得相关结果：${buildSearchCondition(toolName, params)}。后续避免重复使用相同条件。`;
   }

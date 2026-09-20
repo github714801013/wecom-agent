@@ -86,6 +86,32 @@ export function detectActiveMessageIntent(text: string): ActiveMessageIntent {
   return "replace_with_followup";
 }
 
+export interface ActiveRequestContext {
+  previousQuestion: string;
+  partialAnswer?: string;
+  toolContextSummary?: string;
+  repoHints?: readonly string[];
+}
+
+export function buildLatestMessageContext(
+  latestMessage: string,
+  activeRequest?: ActiveRequestContext,
+) {
+  const latest = latestMessage.trim();
+  if (!activeRequest?.previousQuestion.trim()) return latest;
+  return `【最新消息处理】
+只回复“最新用户消息”。请自行判断它与“被替换的在途请求”是否属于同一问题：
+- 同一问题：继承旧问题、已确认部分和证据锚点后继续处理；
+- 独立问题：忽略旧请求的推理方向，只处理最新消息；
+- 不要因为旧请求存在就强行拼接两个独立问题。
+
+【被替换的在途请求】
+${activeRequest.previousQuestion.trim()}
+
+${activeRequest.partialAnswer?.trim() ? `【旧请求已产生的部分回答】\n${activeRequest.partialAnswer.trim()}\n\n` : ""}${activeRequest.toolContextSummary?.trim() ? `【旧请求已确认的工具证据摘要】\n${activeRequest.toolContextSummary.trim()}\n\n` : ""}${activeRequest.repoHints?.length ? `【旧请求项目锚点】\n${activeRequest.repoHints.join(", ")}\n\n` : ""}【最新用户消息】
+${latest}`;
+}
+
 export function buildFollowupQuestion(previousQuestion: string, followup: string) {
   const previous = previousQuestion.trim();
   const current = followup.trim();

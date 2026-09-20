@@ -81,4 +81,18 @@ try {
 assert.equal(loadCount, 2, "超过 TTL 后应重新加载工具");
 assert.notEqual(third!, first!, "超过 TTL 后应返回新的工具列表实例");
 
+let disposed = 0;
+let fourth: CachedTool[];
+const disposableCache = createMcpToolsCache(10, () => now);
+await disposableCache.get("disposable", async () => ({
+  tools: [mockTool("first-client")],
+  dispose: async () => { disposed += 1; },
+}));
+now += 11;
+fourth = await disposableCache.get("disposable", async () => ({
+  tools: [mockTool("second-client")],
+}));
+assert.equal(disposed, 1, "TTL 刷新时必须释放旧 MCP 客户端");
+assert.equal(fourth[0]?.name, "second-client");
+
 console.log("MCP 工具缓存验证通过");

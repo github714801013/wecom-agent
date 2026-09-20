@@ -1,0 +1,5456 @@
+selection_id: VfzaAS-vPC5VUMxDHesDOg
+purpose: init
+selection_stage: route
+task_id: pi-mcp-adapter
+state_path: D:\workplace\typescript\wecom-agent\docs\engineering\workflows\pi-mcp-adapter-orchestration.yml
+workspace:
+  status: confirmed
+  decision: current_workspace_current_branch
+  mode: null
+  confirmed_at: '2026-09-18T22:37:00+00:00'
+  path: D:\workplace\typescript\wecom-agent
+  branch: feat/pi-agent-migration
+  base_branch: null
+  base_commit: null
+  migration: null
+definition:
+  path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+  sha256: 285887af21f405e8e0c83cb1aee1afb6106964491a9aef6fa631dd01ccacce3b
+route: development
+stages:
+- id: grill-with-docs
+  skill: grill-with-docs
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - grill-with-docs
+  agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问默认走“直接回答”流程，不再要求用户选择回答方式或对回答做接受确认；提示中仍向用户展示“直接回答
+    / 子 Agent 尝试回答”两种方式供参考，用户未主动要求委派时一律直接回答。仅当用户在本轮或后续明确要求“子 Agent 尝试回答”时才委派二级查询 Agent；若本流程前序阶段已完成正式调研并产出调研报告（如
+    gitnexus-inquiry 已登记 inquiry_record），再次调研无意义，默认直接回答。本节点同时承担本阶段的展示职责：每轮提问与回答后直接在当前上下文展示已确认的需求理解、关键决策与产出摘要，覆盖提问、回答与结论三部分显示，不再单独设置
+    show-me 节点；展示只限可验证范围，不构成写入授权。子 Agent 只返回结构化 handoff。
+  orchestration_mode: nested_sub_orchestration
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: skill_defined
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: grill
+    index_path: grill/index.yml
+    path: interaction
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: to-spec
+  skill: to-spec
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - to-spec
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: specification_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: routing
+    index_path: routing/index.yml
+    path: core
+    max_level: 3
+  - topic: orchestration
+    index_path: orchestration/index.yml
+    path: contracts
+    max_level: 3
+  reference_topics_snapshot: null
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: to-tickets
+  skill: to-tickets
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - to-tickets
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: ticket_evidence
+    require_evidence: true
+    require_output_files: true
+  artifact_policy:
+    allowed_roots:
+    - workspace/.scratch
+    required_output: true
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: tickets
+    max_level: 3
+  - topic: orchestration
+    index_path: orchestration/index.yml
+    path: contracts
+    max_level: 3
+  reference_topics_snapshot: null
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: implement
+  node_type: implementation
+  skill: implement
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - ponytail
+  - tdd
+  - implement
+  - ponytail-review
+  agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+    时不执行编译。完成交接时必须用 task_files 声明本阶段实际改动的 workspace 相对文件（新增、删除、重命名都要声明），供 code-review
+    的审查范围交集使用。
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: implementation_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: engineering
+    index_path: engineering/index.yml
+    path: .
+    max_level: 3
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail
+  - ponytail-review
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: code-review
+  skill: code-review
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - code-review
+  - ponytail-review
+  agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+    HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中 files
+    为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+    是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+    HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+    时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification:
+  - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+  - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+  - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+  completion_gate:
+    id: review_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: git
+    max_level: 3
+  - topic: shared
+    index_path: shared/index.yml
+    path: .
+    max_level: 2
+  reference_topics_snapshot: null
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills:
+  - ponytail-review
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: verify
+  skill: verify
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - verify
+  agent_prompt: null
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification:
+  - 执行与本次改动相关的既有自动化测试，记录命令、通过/失败计数与失败输出摘要。
+  - 对改动路径做边界与错误分支检查（空输入、异常路径、越界取值），逐条记录结论。
+  - 核对实现是否满足规格与任务单的验收条件，逐条给出可验证证据。
+  completion_gate:
+    id: verification_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics:
+  - topic: quality
+    index_path: quality/index.yml
+    path: .
+    max_level: 3
+  - topic: delivery
+    index_path: delivery/index.yml
+    path: .
+    max_level: 3
+  reference_topics_snapshot: null
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+- id: show-me-end
+  skill: show-me
+  mcp: null
+  execution_mode: main_agent
+  kind: skill
+  host_action: null
+  reference_mutation: false
+  skills:
+  - show-me
+  agent_prompt: 作为流程收尾节点展示本次 task 的最终有效产出：读取当前 canonical state 的阶段证据与正式产物，并在当前 workspace
+    使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件。按已核实的各业务仓库分别调用只读 `orchestrator.py project-code-changes
+    --workspace <业务仓库>`，逐项打印业务实现代码文件状态与绝对路径 absolute_path，不能只打印相对路径或目录；重命名打印 old_absolute_path
+    → absolute_path，删除文件保留原绝对路径；已提交文件从本次提交证据的相对路径与其所属仓库根目录拼出绝对路径，不把干净工作区当作没有改动。代码文件清单排除测试文件、流程文档、技能自身文件与生成元数据，无业务代码变更时明确说明。必须逐条列出本次任务的全部核心调整点（含流程定义、校验逻辑、命令契约、提示词、测试与文档等每一类改动），逐项与阶段证据及正式产物交叉核对。若本任务存在原始需求（如
+    docs/engineering/specs 下对应 task_id 的需求文档或已登记的原始需求产物），必须把本次实现逐项与原始需求核对，明确列出已覆盖项、遗漏项与偏离项；存在遗漏或偏离时不得判定收尾通过，须先补齐或显式说明。确认没有遗漏后才能收尾；只展示可验证范围，不执行任何写入，不替代
+    commit、push 或其他外部操作授权。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+    --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+    SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有 commit_url
+    时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status --short`、`git
+    diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+    commit/push 授权。
+  orchestration_mode: null
+  evidence_policy: null
+  fallback_verification: []
+  completion_gate:
+    id: show_me_end_evidence
+    require_evidence: true
+    require_output_files: false
+  artifact_policy:
+    allowed_roots:
+    - workspace/docs/engineering
+    required_output: false
+  confirmation_policy:
+    mode: none
+  status_transitions:
+    pending:
+    - in_progress
+    - blocked
+    - awaiting
+    - skipped
+    in_progress:
+    - complete
+    - blocked
+    - awaiting
+    - skipped
+    blocked:
+    - in_progress
+    - awaiting
+    awaiting:
+    - in_progress
+    - blocked
+    - skipped
+    complete: []
+    skipped: []
+  decision_record_path: null
+  inquiry_record_path: null
+  status: pending
+  required_files: []
+  reference_topics: []
+  reference_topics_snapshot: null
+  output_files: []
+  jira_input_snapshot: null
+  handoff_summary: ''
+  evidence: []
+  blocked_reason: null
+  failure_evidence: []
+  skip_reason: null
+  skip_basis: null
+  initially_unavailable_skills: []
+  required_action: null
+  confirmed_at: null
+  confirmation_request: null
+  answer_confirmation_request: null
+  question_choice_request: null
+  question_choices: []
+  authorizations: []
+  answer_confirmations: []
+  host_action_baseline: null
+  review_manifest: null
+  artifact_amendments: []
+stages_sha256: 79dd1e200a82c59861639b432d572688eb57d7b8fc152eab2b5e78b58105ac6b
+expected_revision: null
+selection_epoch: null
+status: superseded
+created_at: '2026-09-18T22:37:00+00:00'
+route_input:
+  task_type: development
+  task_name: 项目需求开发
+  task_purpose: 完成需求澄清、规格拆解、任务分解、测试、实现、评审和验证。
+  route: development
+  selection_mode: selectable
+  selection_groups:
+  - id: normal_development
+    name: 普通开发
+    purpose: 不依赖 Jira 输入的本地需求开发。
+    option_ids:
+    - development_standard
+    - development_lightweight
+  - id: jira_development
+    name: Jira 开发
+    purpose: 以 Jira 需求或既有 Jira 方案驱动的开发。
+    option_ids:
+    - development_proposal
+    - development_jira_spec
+    - development_proposal_delivery
+  stage_registry:
+    code-review:
+      id: code-review
+      skill: code-review
+      skills:
+      - code-review
+      - ponytail-review
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中
+        files 为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+        是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+        HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+        时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+      fallback_verification:
+      - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+      - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+      - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      required_files: []
+    gitnexus-inquiry:
+      id: gitnexus-inquiry
+      skill: null
+      skills: []
+      execution_mode: sub_agent
+      kind: mcp
+      orchestration_mode: mcp_prompt
+      agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+        source=local_search、authority=non_gitnexus。 调研前先检查 docs/engineering/specs/
+        下是否存在文件名前缀完全等于当前 task_id 的 spec 文档；存在则优先完整读取作为本次调研上下文，不存在则记录并继续，不得阻塞；禁止读取与当前
+        task_id 无关的 spec。
+      evidence_policy:
+        gitnexus_first: true
+        require_query_record: true
+        allow_local_fallback: true
+        local_fallback_only_when:
+        - repository_unindexed
+        - service_unavailable
+        - authorization_unavailable
+        - timeout
+        - index_stale
+        - aggregate_unsupported
+        - capability_unavailable
+        local_search_root: workspace.path
+        local_evidence_source: local_search
+        local_evidence_authority: non_gitnexus
+        local_search_cannot_prove:
+        - call_graph
+        - impact
+        - cross_project_trace
+        - complete_consumers
+      mcp:
+        server: remote_gitnexus
+        tools:
+        - query
+        - context
+        - code_snippet
+        - impact
+        - trace
+        fallback: local_workspace_search
+        scope: dynamic
+      confirmation_policy:
+        mode: user_confirmation
+        action: execute_gitnexus_inquiry
+        prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；用户明确选择跳过时记录未执行和跳过依据，服务故障仍走
+          fallback/blocked。
+        allow_skip: research_not_needed
+        reuse: same_task_readonly_exact
+      completion_gate:
+        id: inquiry_record
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      required_files: []
+      reference_topics:
+      - topic: research
+        index_path: research/index.yml
+        path: gitnexus
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      inquiry_record_path: plans/pi-mcp-adapter-gitnexus-inquiry.md
+    grill-with-docs:
+      id: grill-with-docs
+      skill: grill-with-docs
+      skills:
+      - grill-with-docs
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: skill_defined
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问默认走“直接回答”流程，不再要求用户选择回答方式或对回答做接受确认；提示中仍向用户展示“直接回答
+        / 子 Agent 尝试回答”两种方式供参考，用户未主动要求委派时一律直接回答。仅当用户在本轮或后续明确要求“子 Agent 尝试回答”时才委派二级查询
+        Agent；若本流程前序阶段已完成正式调研并产出调研报告（如 gitnexus-inquiry 已登记 inquiry_record），再次调研无意义，默认直接回答。本节点同时承担本阶段的展示职责：每轮提问与回答后直接在当前上下文展示已确认的需求理解、关键决策与产出摘要，覆盖提问、回答与结论三部分显示，不再单独设置
+        show-me 节点；展示只限可验证范围，不构成写入授权。子 Agent 只返回结构化 handoff。
+      orchestration_mode: nested_sub_orchestration
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      required_files: []
+    implement:
+      id: implement
+      node_type: implementation
+      skill: implement
+      skills:
+      - ponytail
+      - tdd
+      - implement
+      - ponytail-review
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+        时不执行编译。完成交接时必须用 task_files 声明本阶段实际改动的 workspace 相对文件（新增、删除、重命名都要声明），供 code-review
+        的审查范围交集使用。
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      required_files: []
+    implement-no-tdd:
+      id: implement-no-tdd
+      node_type: implementation
+      skill: implement
+      skills:
+      - ponytail
+      - implement
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      required_files: []
+    jira-input:
+      id: jira-input
+      skill: vision-analyzer
+      skills:
+      - vision-analyzer
+      execution_mode: sub_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      agent_prompt: 先判断当前 flow_definition.option_id，再按对应分支读取，不能先抓取 Jira 全字段。字段名只能从
+        dev-spec-gen 配置（仓库托管的 `config.default.yml` 提供默认值，本地 `config.yml` 同名键覆盖）的 `jira.ai_requirement_field`、`jira.reference_solution_field`
+        与 `jira.ai_proposal_field` 取得，不得在 jira-input、命令或提示词中写死 customfield 编号，也不得扫描技能目录推断工具。
+        - development_jira_spec（Jira 参考方案驱动开发）：必须提供 Jira 地址或 Issue Key；无 Jira 输入时
+        blocked，不得 skipped。仅调用 `jira-issue.py get <ISSUE_KEY> -f <ai_proposal_field>,<ai_requirement_field>,<reference_solution_field>
+        --json` 或等价工具读取这三个字段；不读取 summary、description、parent、attachment、status 或其他业务字段，不抓取附件、链接正文。ai_proposal_field
+        与 ai_requirement_field 必须各形成独立正式文件，reference_solution_field 非空时同样形成独立正式文件，并通过
+        jira_input_snapshot 登记 field_identity、配置中的 source_field、output_file 与 snapshot_status=complete；ai_proposal_field
+        或 ai_requirement_field 缺失、为空、读取失败、解析失败或归档失败时必须 blocked，不得回退原文或以 skipped/complete
+        继续；reference_solution_field 为空时按权威链回退到 AI 开发方案并记录「权威来源缺失」。 - development_proposal（开发方案出具）：任务输入包含
+        Jira 地址或 Issue Key 时自动触发；无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供 Jira
+        地址或 Issue Key，当前 Jira 输入节点不适用”。必须读取 `jira.reference_solution_field`（人工提供的参考方案，权威最高）、`jira.ai_proposal_field`
+        与 `jira.ai_requirement_field` 三个配置字段并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；并读取当前任务 `assignee` 识别经办人，按已挂载 delivery/jira 正文的经办人与父级范围规则确定该任务的责任范围（父级参考方案只取该经办人的明确分工，冲突以当前任务为准），把经办人、来源与采纳范围一并登记；整理原始需求文本并登记为正式产物，不反写
+        Jira 字段。 - development_proposal_delivery（开发方案交付闭环）：必须提供 Jira 地址或 Issue Key；必须读取
+        `jira.reference_solution_field`（人工提供的参考方案，最高权威）、`jira.ai_proposal_field` 与
+        `jira.ai_requirement_field` 并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；先完成方案、规格、任务拆分、实现、评审和验证，最后仅由 show-me-jira 一次反写 `jira.ai_requirement_field`、`jira.ai_proposal_field`
+        与 `jira.release_plan_field`；除 implement 与末节点已声明的状态流转外，中间阶段不得反写 Jira，输入缺失或读取失败时
+        blocked，不得 skipped。 - 其他 development 流程（需求开发）：无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供
+        Jira 地址或 Issue Key，当前 Jira 输入节点不适用”；有 Jira 输入时按既有需求读取规则获取 summary、description、parent、attachment、status
+        及三个配置字段并登记为正式产物，字段顺序与冲突裁决按本节点已挂载的 delivery/jira 正文执行；只有字段缺失或内容不清晰且必要时才使用原文和附件。
+        读取失败、配置字段无效或附件图片无法分析时如实记录并阻塞，不得静默回退或猜测。
+      completion_gate:
+        id: jira_input_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering/specs
+        required_output: true
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: jira
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      required_files: []
+    show-me:
+      id: show-me
+      skill: show-me
+      skills:
+      - show-me
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      agent_prompt: 展示本次 task 的有效代码修改：读取当前 canonical state 的阶段证据与正式产物，并在当前 workspace
+        使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；只展示可验证范围，不执行任何写入，不替代 commit、push 或其他外部操作授权。
+        收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      completion_gate:
+        id: show_me_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      reference_topics: []
+      required_files: []
+    show-me-end:
+      id: show-me-end
+      skill: show-me
+      skills:
+      - show-me
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      agent_prompt: 作为流程收尾节点展示本次 task 的最终有效产出：读取当前 canonical state 的阶段证据与正式产物，并在当前
+        workspace 使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件。按已核实的各业务仓库分别调用只读 `orchestrator.py
+        project-code-changes --workspace <业务仓库>`，逐项打印业务实现代码文件状态与绝对路径 absolute_path，不能只打印相对路径或目录；重命名打印
+        old_absolute_path → absolute_path，删除文件保留原绝对路径；已提交文件从本次提交证据的相对路径与其所属仓库根目录拼出绝对路径，不把干净工作区当作没有改动。代码文件清单排除测试文件、流程文档、技能自身文件与生成元数据，无业务代码变更时明确说明。必须逐条列出本次任务的全部核心调整点（含流程定义、校验逻辑、命令契约、提示词、测试与文档等每一类改动），逐项与阶段证据及正式产物交叉核对。若本任务存在原始需求（如
+        docs/engineering/specs 下对应 task_id 的需求文档或已登记的原始需求产物），必须把本次实现逐项与原始需求核对，明确列出已覆盖项、遗漏项与偏离项；存在遗漏或偏离时不得判定收尾通过，须先补齐或显式说明。确认没有遗漏后才能收尾；只展示可验证范围，不执行任何写入，不替代
+        commit、push 或其他外部操作授权。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      completion_gate:
+        id: show_me_end_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      reference_topics: []
+      required_files: []
+    show-me-jira:
+      id: show-me-jira
+      skill: show-me
+      skills:
+      - show-me
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      agent_prompt: 展示或整理本次 task 的有效产出：代码修改流程读取当前 canonical state 的阶段证据与正式产物，并在当前
+        workspace 使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；开发方案出具流程基于 jira-input 的原始需求转文本与
+        grill-with-docs 的正式产出整理为结构化方案，并同时产出接口文档（接口路径、方法、入参/出参、字段说明与错误码）。`development_proposal_delivery`
+        仅在方案、规格、任务拆分、实现、评审和 verify 全部完成后的最终 `show-me-jira` 节点执行一次反写；方案内容、接口文档、实现范围与验证结论必须统一展示后再写入。只展示可验证范围，不替代
+        commit、push 或其他外部操作授权。整理完成后，若本任务输入来自 Jira 且原始需求快照记录有 Issue Key，直接调用jira 工具把整理结果反写：
+        - jira.ai_proposal_field（AI 开发方案字段）：写入本轮结构化方案与接口文档； - jira.ai_requirement_field（AI
+        需求分析字段）：写入 jira-input 阶段产出的原始需求转文本内容（含附件图片视觉分析结果）； - jira.reference_solution_field（参考方案字段）：人工提供的只读输入，任何阶段都不得写入；
+        仅反写 ai_requirement_field、ai_proposal_field 以及当前流程 stage_prompts 中额外声明的字段（如发版流程字段），且均为：字段为空时直接写入；非空时把现有内容与本轮整理结果整合为一份完整内容后重新写入；这是
+        Jira 任务的已声明动作，无需用户确认；写入失败时把失败信息写入本阶段 evidence，不阻塞本阶段完成与任务 done；无 Issue Key
+        时跳过。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      completion_gate:
+        id: show_me_jira_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      reference_topics: []
+      required_files: []
+    to-spec:
+      id: to-spec
+      skill: to-spec
+      skills:
+      - to-spec
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      completion_gate:
+        id: specification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      reference_topics:
+      - topic: routing
+        index_path: routing/index.yml
+        path: core
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      required_files: []
+    to-tickets:
+      id: to-tickets
+      skill: to-tickets
+      skills:
+      - to-tickets
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      completion_gate:
+        id: ticket_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/.scratch
+        required_output: true
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: tickets
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      required_files: []
+    verify:
+      id: verify
+      skill: verify
+      skills:
+      - verify
+      execution_mode: main_agent
+      kind: skill
+      confirmation_policy:
+        mode: none
+      completion_gate:
+        id: verification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: .
+        max_level: 3
+      required_files: []
+      fallback_verification:
+      - 执行与本次改动相关的既有自动化测试，记录命令、通过/失败计数与失败输出摘要。
+      - 对改动路径做边界与错误分支检查（空输入、异常路径、越界取值），逐条记录结论。
+      - 核对实现是否满足规格与任务单的验收条件，逐条给出可验证证据。
+  options:
+  - option_id: development_standard
+    name: 标准普通开发
+    purpose: 适用于需要完整规格、任务拆分、TDD、实现、评审和验证且不依赖 Jira 输入的项目需求。
+    selection_group_id: normal_development
+    selection_group_name: 普通开发
+    stage_ids:
+    - grill-with-docs
+    - to-spec
+    - to-tickets
+    - implement
+    - code-review
+    - verify
+    - show-me-end
+    research_stage_id: gitnexus-inquiry
+    research_modes:
+      current_workspace_research: current_workspace
+      remote_gitnexus_research: cross_project
+      clarify_directly: null
+    research_auto_confirm: false
+    transitions:
+      complete:
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me-end
+        show-me-end: null
+      skipped:
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me-end
+        show-me-end: null
+    non_skippable_stages: []
+  - option_id: development_lightweight
+    name: 轻量普通开发
+    purpose: 适用于范围明确、无需完整规格拆解且不依赖 Jira 输入，但仍需要实现、评审和验证的需求。
+    selection_group_id: normal_development
+    selection_group_name: 普通开发
+    stage_ids:
+    - grill-with-docs
+    - implement-no-tdd
+    - code-review
+    - show-me-end
+    research_stage_id: gitnexus-inquiry
+    research_modes:
+      current_workspace_research: current_workspace
+      remote_gitnexus_research: cross_project
+      clarify_directly: null
+    research_auto_confirm: false
+    transitions:
+      complete:
+        grill-with-docs: implement-no-tdd
+        implement-no-tdd: code-review
+        code-review: show-me-end
+        show-me-end: null
+      skipped:
+        grill-with-docs: implement-no-tdd
+        implement-no-tdd: code-review
+        code-review: show-me-end
+        show-me-end: null
+    non_skippable_stages: []
+  - option_id: development_proposal
+    name: 开发方案出具
+    purpose: 适用于读取 Jira 需求、GitNexus 调研与需求澄清后产出正式开发方案与接口文档，并在 show-me 阶段统一反写 Jira AI
+      需求分析与 AI 开发方案字段的任务。
+    selection_group_id: jira_development
+    selection_group_name: Jira 开发
+    stage_ids:
+    - jira-input
+    - gitnexus-inquiry
+    - grill-with-docs
+    - show-me-jira
+    research_stage_id: gitnexus-inquiry
+    research_modes:
+      current_workspace_research: null
+      remote_gitnexus_research: null
+      clarify_directly: null
+    research_auto_confirm: true
+    transitions:
+      complete:
+        jira-input: gitnexus-inquiry
+        gitnexus-inquiry: grill-with-docs
+        grill-with-docs: show-me-jira
+        show-me-jira: null
+      skipped:
+        jira-input: gitnexus-inquiry
+        gitnexus-inquiry: grill-with-docs
+        grill-with-docs: show-me-jira
+        show-me-jira: null
+    non_skippable_stages: []
+  - option_id: development_jira_spec
+    name: Jira 参考方案驱动开发
+    purpose: 适用于已具备 Jira 参考方案和 AI 需求分析原始文本，直接按参考方案拆解规格并完成开发，并在收尾统一反写 Jira AI 需求分析、AI
+      开发方案与发版流程字段的任务。
+    selection_group_id: jira_development
+    selection_group_name: Jira 开发
+    stage_ids:
+    - jira-input
+    - to-spec
+    - to-tickets
+    - implement
+    - code-review
+    - verify
+    - show-me
+    research_stage_id: null
+    research_modes: {}
+    research_auto_confirm: false
+    transitions:
+      complete:
+        jira-input: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me
+        show-me: null
+      skipped:
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me
+        show-me: null
+    non_skippable_stages:
+    - jira-input
+  - option_id: development_proposal_delivery
+    name: 开发方案交付闭环
+    purpose: 适用于从 Jira 需求出具开发方案、完成完整开发与验证，并在最终阶段一次反写 Jira AI 需求分析、AI 开发方案与发版流程字段的任务。
+    selection_group_id: jira_development
+    selection_group_name: Jira 开发
+    stage_ids:
+    - jira-input
+    - gitnexus-inquiry
+    - grill-with-docs
+    - to-spec
+    - to-tickets
+    - implement
+    - code-review
+    - verify
+    - show-me-jira
+    research_stage_id: gitnexus-inquiry
+    research_modes: {}
+    research_auto_confirm: false
+    transitions:
+      complete:
+        jira-input: gitnexus-inquiry
+        gitnexus-inquiry: grill-with-docs
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me-jira
+        show-me-jira: null
+      skipped:
+        gitnexus-inquiry: grill-with-docs
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me-jira
+        show-me-jira: null
+    non_skippable_stages:
+    - jira-input
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 285887af21f405e8e0c83cb1aee1afb6106964491a9aef6fa631dd01ccacce3b
+selected_option:
+  option_id: development_standard
+  source: user
+  bound_at: '2026-09-18T22:38:08+00:00'
+flow_catalog:
+  version: 1
+  path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+  sha256: 285887af21f405e8e0c83cb1aee1afb6106964491a9aef6fa631dd01ccacce3b
+task_type: development
+route_options:
+  task_type: development
+  task_name: 项目需求开发
+  task_purpose: 完成需求澄清、规格拆解、任务分解、测试、实现、评审和验证。
+  route: development
+  selection_mode: selectable
+  selection_groups:
+  - id: normal_development
+    name: 普通开发
+    purpose: 不依赖 Jira 输入的本地需求开发。
+    option_ids:
+    - development_standard
+    - development_lightweight
+  - id: jira_development
+    name: Jira 开发
+    purpose: 以 Jira 需求或既有 Jira 方案驱动的开发。
+    option_ids:
+    - development_proposal
+    - development_jira_spec
+    - development_proposal_delivery
+  stage_registry:
+    code-review:
+      id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      - ponytail-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中
+        files 为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+        是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+        HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+        时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+      - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+      - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    gitnexus-inquiry:
+      id: gitnexus-inquiry
+      skill: null
+      mcp:
+        server: remote_gitnexus
+        tools:
+        - query
+        - context
+        - code_snippet
+        - impact
+        - trace
+        fallback: local_workspace_search
+        scope: dynamic
+      execution_mode: sub_agent
+      kind: mcp
+      host_action: null
+      reference_mutation: false
+      skills: []
+      agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+        source=local_search、authority=non_gitnexus。 调研前先检查 docs/engineering/specs/
+        下是否存在文件名前缀完全等于当前 task_id 的 spec 文档；存在则优先完整读取作为本次调研上下文，不存在则记录并继续，不得阻塞；禁止读取与当前
+        task_id 无关的 spec。
+      orchestration_mode: mcp_prompt
+      evidence_policy:
+        gitnexus_first: true
+        require_query_record: true
+        allow_local_fallback: true
+        local_fallback_only_when:
+        - repository_unindexed
+        - service_unavailable
+        - authorization_unavailable
+        - timeout
+        - index_stale
+        - aggregate_unsupported
+        - capability_unavailable
+        local_search_root: workspace.path
+        local_evidence_source: local_search
+        local_evidence_authority: non_gitnexus
+        local_search_cannot_prove:
+        - call_graph
+        - impact
+        - cross_project_trace
+        - complete_consumers
+      fallback_verification: []
+      completion_gate:
+        id: inquiry_record
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: user_confirmation
+        action: execute_gitnexus_inquiry
+        prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；用户明确选择跳过时记录未执行和跳过依据，服务故障仍走
+          fallback/blocked。
+        allow_skip: research_not_needed
+        reuse: same_task_readonly_exact
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: plans/pi-mcp-adapter-gitnexus-inquiry.md
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: research
+        index_path: research/index.yml
+        path: gitnexus
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    grill-with-docs:
+      id: grill-with-docs
+      skill: grill-with-docs
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - grill-with-docs
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问默认走“直接回答”流程，不再要求用户选择回答方式或对回答做接受确认；提示中仍向用户展示“直接回答
+        / 子 Agent 尝试回答”两种方式供参考，用户未主动要求委派时一律直接回答。仅当用户在本轮或后续明确要求“子 Agent 尝试回答”时才委派二级查询
+        Agent；若本流程前序阶段已完成正式调研并产出调研报告（如 gitnexus-inquiry 已登记 inquiry_record），再次调研无意义，默认直接回答。本节点同时承担本阶段的展示职责：每轮提问与回答后直接在当前上下文展示已确认的需求理解、关键决策与产出摘要，覆盖提问、回答与结论三部分显示，不再单独设置
+        show-me 节点；展示只限可验证范围，不构成写入授权。子 Agent 只返回结构化 handoff。
+      orchestration_mode: nested_sub_orchestration
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: skill_defined
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    implement:
+      id: implement
+      node_type: implementation
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - tdd
+      - implement
+      - ponytail-review
+      agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+        时不执行编译。完成交接时必须用 task_files 声明本阶段实际改动的 workspace 相对文件（新增、删除、重命名都要声明），供 code-review
+        的审查范围交集使用。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    implement-no-tdd:
+      id: implement-no-tdd
+      node_type: implementation
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - implement
+      agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    jira-input:
+      id: jira-input
+      skill: vision-analyzer
+      mcp: null
+      execution_mode: sub_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - vision-analyzer
+      agent_prompt: 先判断当前 flow_definition.option_id，再按对应分支读取，不能先抓取 Jira 全字段。字段名只能从
+        dev-spec-gen 配置（仓库托管的 `config.default.yml` 提供默认值，本地 `config.yml` 同名键覆盖）的 `jira.ai_requirement_field`、`jira.reference_solution_field`
+        与 `jira.ai_proposal_field` 取得，不得在 jira-input、命令或提示词中写死 customfield 编号，也不得扫描技能目录推断工具。
+        - development_jira_spec（Jira 参考方案驱动开发）：必须提供 Jira 地址或 Issue Key；无 Jira 输入时
+        blocked，不得 skipped。仅调用 `jira-issue.py get <ISSUE_KEY> -f <ai_proposal_field>,<ai_requirement_field>,<reference_solution_field>
+        --json` 或等价工具读取这三个字段；不读取 summary、description、parent、attachment、status 或其他业务字段，不抓取附件、链接正文。ai_proposal_field
+        与 ai_requirement_field 必须各形成独立正式文件，reference_solution_field 非空时同样形成独立正式文件，并通过
+        jira_input_snapshot 登记 field_identity、配置中的 source_field、output_file 与 snapshot_status=complete；ai_proposal_field
+        或 ai_requirement_field 缺失、为空、读取失败、解析失败或归档失败时必须 blocked，不得回退原文或以 skipped/complete
+        继续；reference_solution_field 为空时按权威链回退到 AI 开发方案并记录「权威来源缺失」。 - development_proposal（开发方案出具）：任务输入包含
+        Jira 地址或 Issue Key 时自动触发；无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供 Jira
+        地址或 Issue Key，当前 Jira 输入节点不适用”。必须读取 `jira.reference_solution_field`（人工提供的参考方案，权威最高）、`jira.ai_proposal_field`
+        与 `jira.ai_requirement_field` 三个配置字段并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；并读取当前任务 `assignee` 识别经办人，按已挂载 delivery/jira 正文的经办人与父级范围规则确定该任务的责任范围（父级参考方案只取该经办人的明确分工，冲突以当前任务为准），把经办人、来源与采纳范围一并登记；整理原始需求文本并登记为正式产物，不反写
+        Jira 字段。 - development_proposal_delivery（开发方案交付闭环）：必须提供 Jira 地址或 Issue Key；必须读取
+        `jira.reference_solution_field`（人工提供的参考方案，最高权威）、`jira.ai_proposal_field` 与
+        `jira.ai_requirement_field` 并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；先完成方案、规格、任务拆分、实现、评审和验证，最后仅由 show-me-jira 一次反写 `jira.ai_requirement_field`、`jira.ai_proposal_field`
+        与 `jira.release_plan_field`；除 implement 与末节点已声明的状态流转外，中间阶段不得反写 Jira，输入缺失或读取失败时
+        blocked，不得 skipped。 - 其他 development 流程（需求开发）：无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供
+        Jira 地址或 Issue Key，当前 Jira 输入节点不适用”；有 Jira 输入时按既有需求读取规则获取 summary、description、parent、attachment、status
+        及三个配置字段并登记为正式产物，字段顺序与冲突裁决按本节点已挂载的 delivery/jira 正文执行；只有字段缺失或内容不清晰且必要时才使用原文和附件。
+        读取失败、配置字段无效或附件图片无法分析时如实记录并阻塞，不得静默回退或猜测。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: jira_input_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering/specs
+        required_output: true
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: jira
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    show-me:
+      id: show-me
+      skill: show-me
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - show-me
+      agent_prompt: 展示本次 task 的有效代码修改：读取当前 canonical state 的阶段证据与正式产物，并在当前 workspace
+        使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；只展示可验证范围，不执行任何写入，不替代 commit、push 或其他外部操作授权。
+        收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: show_me_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    show-me-end:
+      id: show-me-end
+      skill: show-me
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - show-me
+      agent_prompt: 作为流程收尾节点展示本次 task 的最终有效产出：读取当前 canonical state 的阶段证据与正式产物，并在当前
+        workspace 使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件。按已核实的各业务仓库分别调用只读 `orchestrator.py
+        project-code-changes --workspace <业务仓库>`，逐项打印业务实现代码文件状态与绝对路径 absolute_path，不能只打印相对路径或目录；重命名打印
+        old_absolute_path → absolute_path，删除文件保留原绝对路径；已提交文件从本次提交证据的相对路径与其所属仓库根目录拼出绝对路径，不把干净工作区当作没有改动。代码文件清单排除测试文件、流程文档、技能自身文件与生成元数据，无业务代码变更时明确说明。必须逐条列出本次任务的全部核心调整点（含流程定义、校验逻辑、命令契约、提示词、测试与文档等每一类改动），逐项与阶段证据及正式产物交叉核对。若本任务存在原始需求（如
+        docs/engineering/specs 下对应 task_id 的需求文档或已登记的原始需求产物），必须把本次实现逐项与原始需求核对，明确列出已覆盖项、遗漏项与偏离项；存在遗漏或偏离时不得判定收尾通过，须先补齐或显式说明。确认没有遗漏后才能收尾；只展示可验证范围，不执行任何写入，不替代
+        commit、push 或其他外部操作授权。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: show_me_end_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    show-me-jira:
+      id: show-me-jira
+      skill: show-me
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - show-me
+      agent_prompt: 展示或整理本次 task 的有效产出：代码修改流程读取当前 canonical state 的阶段证据与正式产物，并在当前
+        workspace 使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；开发方案出具流程基于 jira-input 的原始需求转文本与
+        grill-with-docs 的正式产出整理为结构化方案，并同时产出接口文档（接口路径、方法、入参/出参、字段说明与错误码）。`development_proposal_delivery`
+        仅在方案、规格、任务拆分、实现、评审和 verify 全部完成后的最终 `show-me-jira` 节点执行一次反写；方案内容、接口文档、实现范围与验证结论必须统一展示后再写入。只展示可验证范围，不替代
+        commit、push 或其他外部操作授权。整理完成后，若本任务输入来自 Jira 且原始需求快照记录有 Issue Key，直接调用jira 工具把整理结果反写：
+        - jira.ai_proposal_field（AI 开发方案字段）：写入本轮结构化方案与接口文档； - jira.ai_requirement_field（AI
+        需求分析字段）：写入 jira-input 阶段产出的原始需求转文本内容（含附件图片视觉分析结果）； - jira.reference_solution_field（参考方案字段）：人工提供的只读输入，任何阶段都不得写入；
+        仅反写 ai_requirement_field、ai_proposal_field 以及当前流程 stage_prompts 中额外声明的字段（如发版流程字段），且均为：字段为空时直接写入；非空时把现有内容与本轮整理结果整合为一份完整内容后重新写入；这是
+        Jira 任务的已声明动作，无需用户确认；写入失败时把失败信息写入本阶段 evidence，不阻塞本阶段完成与任务 done；无 Issue Key
+        时跳过。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: show_me_jira_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    to-spec:
+      id: to-spec
+      skill: to-spec
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-spec
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: specification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: routing
+        index_path: routing/index.yml
+        path: core
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    to-tickets:
+      id: to-tickets
+      skill: to-tickets
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-tickets
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: ticket_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/.scratch
+        required_output: true
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: tickets
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    verify:
+      id: verify
+      skill: verify
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - verify
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 执行与本次改动相关的既有自动化测试，记录命令、通过/失败计数与失败输出摘要。
+      - 对改动路径做边界与错误分支检查（空输入、异常路径、越界取值），逐条记录结论。
+      - 核对实现是否满足规格与任务单的验收条件，逐条给出可验证证据。
+      completion_gate:
+        id: verification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: .
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+  options:
+  - option_id: development_standard
+    name: 标准普通开发
+    purpose: 适用于需要完整规格、任务拆分、TDD、实现、评审和验证且不依赖 Jira 输入的项目需求。
+    selection_group_id: normal_development
+    selection_group_name: 普通开发
+    research_stage_id: gitnexus-inquiry
+    research_modes:
+      current_workspace_research: current_workspace
+      remote_gitnexus_research: cross_project
+      clarify_directly: null
+    research_auto_confirm: false
+    non_skippable_stages: []
+    transitions:
+      complete:
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me-end
+        show-me-end: null
+      skipped:
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me-end
+        show-me-end: null
+    label: grill-with-docs → to-spec → to-tickets → implement → code-review → verify
+      → show-me-end
+    stage_ids:
+    - grill-with-docs
+    - to-spec
+    - to-tickets
+    - implement
+    - code-review
+    - verify
+    - show-me-end
+    stages:
+    - id: grill-with-docs
+      skill: grill-with-docs
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - grill-with-docs
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问默认走“直接回答”流程，不再要求用户选择回答方式或对回答做接受确认；提示中仍向用户展示“直接回答
+        / 子 Agent 尝试回答”两种方式供参考，用户未主动要求委派时一律直接回答。仅当用户在本轮或后续明确要求“子 Agent 尝试回答”时才委派二级查询
+        Agent；若本流程前序阶段已完成正式调研并产出调研报告（如 gitnexus-inquiry 已登记 inquiry_record），再次调研无意义，默认直接回答。本节点同时承担本阶段的展示职责：每轮提问与回答后直接在当前上下文展示已确认的需求理解、关键决策与产出摘要，覆盖提问、回答与结论三部分显示，不再单独设置
+        show-me 节点；展示只限可验证范围，不构成写入授权。子 Agent 只返回结构化 handoff。
+      orchestration_mode: nested_sub_orchestration
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: skill_defined
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: to-spec
+      skill: to-spec
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-spec
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: specification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: routing
+        index_path: routing/index.yml
+        path: core
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: to-tickets
+      skill: to-tickets
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-tickets
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: ticket_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/.scratch
+        required_output: true
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: tickets
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: implement
+      node_type: implementation
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - tdd
+      - implement
+      - ponytail-review
+      agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+        时不执行编译。完成交接时必须用 task_files 声明本阶段实际改动的 workspace 相对文件（新增、删除、重命名都要声明），供 code-review
+        的审查范围交集使用。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      - ponytail-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中
+        files 为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+        是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+        HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+        时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+      - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+      - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: verify
+      skill: verify
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - verify
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 执行与本次改动相关的既有自动化测试，记录命令、通过/失败计数与失败输出摘要。
+      - 对改动路径做边界与错误分支检查（空输入、异常路径、越界取值），逐条记录结论。
+      - 核对实现是否满足规格与任务单的验收条件，逐条给出可验证证据。
+      completion_gate:
+        id: verification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: .
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: show-me-end
+      skill: show-me
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - show-me
+      agent_prompt: 作为流程收尾节点展示本次 task 的最终有效产出：读取当前 canonical state 的阶段证据与正式产物，并在当前
+        workspace 使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件。按已核实的各业务仓库分别调用只读 `orchestrator.py
+        project-code-changes --workspace <业务仓库>`，逐项打印业务实现代码文件状态与绝对路径 absolute_path，不能只打印相对路径或目录；重命名打印
+        old_absolute_path → absolute_path，删除文件保留原绝对路径；已提交文件从本次提交证据的相对路径与其所属仓库根目录拼出绝对路径，不把干净工作区当作没有改动。代码文件清单排除测试文件、流程文档、技能自身文件与生成元数据，无业务代码变更时明确说明。必须逐条列出本次任务的全部核心调整点（含流程定义、校验逻辑、命令契约、提示词、测试与文档等每一类改动），逐项与阶段证据及正式产物交叉核对。若本任务存在原始需求（如
+        docs/engineering/specs 下对应 task_id 的需求文档或已登记的原始需求产物），必须把本次实现逐项与原始需求核对，明确列出已覆盖项、遗漏项与偏离项；存在遗漏或偏离时不得判定收尾通过，须先补齐或显式说明。确认没有遗漏后才能收尾；只展示可验证范围，不执行任何写入，不替代
+        commit、push 或其他外部操作授权。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: show_me_end_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    omitted_stages: []
+  - option_id: development_lightweight
+    name: 轻量普通开发
+    purpose: 适用于范围明确、无需完整规格拆解且不依赖 Jira 输入，但仍需要实现、评审和验证的需求。
+    selection_group_id: normal_development
+    selection_group_name: 普通开发
+    research_stage_id: gitnexus-inquiry
+    research_modes:
+      current_workspace_research: current_workspace
+      remote_gitnexus_research: cross_project
+      clarify_directly: null
+    research_auto_confirm: false
+    non_skippable_stages: []
+    transitions:
+      complete:
+        grill-with-docs: implement-no-tdd
+        implement-no-tdd: code-review
+        code-review: show-me-end
+        show-me-end: null
+      skipped:
+        grill-with-docs: implement-no-tdd
+        implement-no-tdd: code-review
+        code-review: show-me-end
+        show-me-end: null
+    label: grill-with-docs → implement-no-tdd → code-review → show-me-end
+    stage_ids:
+    - grill-with-docs
+    - implement-no-tdd
+    - code-review
+    - show-me-end
+    stages:
+    - id: grill-with-docs
+      skill: grill-with-docs
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - grill-with-docs
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问默认走“直接回答”流程，不再要求用户选择回答方式或对回答做接受确认；提示中仍向用户展示“直接回答
+        / 子 Agent 尝试回答”两种方式供参考，用户未主动要求委派时一律直接回答。仅当用户在本轮或后续明确要求“子 Agent 尝试回答”时才委派二级查询
+        Agent；若本流程前序阶段已完成正式调研并产出调研报告（如 gitnexus-inquiry 已登记 inquiry_record），再次调研无意义，默认直接回答。本节点同时承担本阶段的展示职责：每轮提问与回答后直接在当前上下文展示已确认的需求理解、关键决策与产出摘要，覆盖提问、回答与结论三部分显示，不再单独设置
+        show-me 节点；展示只限可验证范围，不构成写入授权。子 Agent 只返回结构化 handoff。
+      orchestration_mode: nested_sub_orchestration
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: skill_defined
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: implement-no-tdd
+      node_type: implementation
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - implement
+      agent_prompt: 当前执行 Agent 必须在同一上下文按 skills 列表顺序执行全部 Skill；任一 Skill 未完成、待确认或阻塞时不得交接当前节点。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      - ponytail-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中
+        files 为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+        是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+        HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+        时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+      - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+      - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: show-me-end
+      skill: show-me
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - show-me
+      agent_prompt: 作为流程收尾节点展示本次 task 的最终有效产出：读取当前 canonical state 的阶段证据与正式产物，并在当前
+        workspace 使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件。按已核实的各业务仓库分别调用只读 `orchestrator.py
+        project-code-changes --workspace <业务仓库>`，逐项打印业务实现代码文件状态与绝对路径 absolute_path，不能只打印相对路径或目录；重命名打印
+        old_absolute_path → absolute_path，删除文件保留原绝对路径；已提交文件从本次提交证据的相对路径与其所属仓库根目录拼出绝对路径，不把干净工作区当作没有改动。代码文件清单排除测试文件、流程文档、技能自身文件与生成元数据，无业务代码变更时明确说明。必须逐条列出本次任务的全部核心调整点（含流程定义、校验逻辑、命令契约、提示词、测试与文档等每一类改动），逐项与阶段证据及正式产物交叉核对。若本任务存在原始需求（如
+        docs/engineering/specs 下对应 task_id 的需求文档或已登记的原始需求产物），必须把本次实现逐项与原始需求核对，明确列出已覆盖项、遗漏项与偏离项；存在遗漏或偏离时不得判定收尾通过，须先补齐或显式说明。确认没有遗漏后才能收尾；只展示可验证范围，不执行任何写入，不替代
+        commit、push 或其他外部操作授权。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: show_me_end_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    omitted_stages:
+    - to-spec
+    - to-tickets
+    - implement
+    - verify
+  - option_id: development_proposal
+    name: 开发方案出具
+    purpose: 适用于读取 Jira 需求、GitNexus 调研与需求澄清后产出正式开发方案与接口文档，并在 show-me 阶段统一反写 Jira AI
+      需求分析与 AI 开发方案字段的任务。
+    selection_group_id: jira_development
+    selection_group_name: Jira 开发
+    research_stage_id: gitnexus-inquiry
+    research_modes:
+      current_workspace_research: null
+      remote_gitnexus_research: null
+      clarify_directly: null
+    research_auto_confirm: true
+    non_skippable_stages: []
+    transitions:
+      complete:
+        jira-input: gitnexus-inquiry
+        gitnexus-inquiry: grill-with-docs
+        grill-with-docs: show-me-jira
+        show-me-jira: null
+      skipped:
+        jira-input: gitnexus-inquiry
+        gitnexus-inquiry: grill-with-docs
+        grill-with-docs: show-me-jira
+        show-me-jira: null
+    label: jira-input → gitnexus-inquiry → grill-with-docs → show-me-jira
+    stage_ids:
+    - jira-input
+    - gitnexus-inquiry
+    - grill-with-docs
+    - show-me-jira
+    stages:
+    - id: jira-input
+      skill: vision-analyzer
+      mcp: null
+      execution_mode: sub_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - vision-analyzer
+      agent_prompt: 先判断当前 flow_definition.option_id，再按对应分支读取，不能先抓取 Jira 全字段。字段名只能从
+        dev-spec-gen 配置（仓库托管的 `config.default.yml` 提供默认值，本地 `config.yml` 同名键覆盖）的 `jira.ai_requirement_field`、`jira.reference_solution_field`
+        与 `jira.ai_proposal_field` 取得，不得在 jira-input、命令或提示词中写死 customfield 编号，也不得扫描技能目录推断工具。
+        - development_jira_spec（Jira 参考方案驱动开发）：必须提供 Jira 地址或 Issue Key；无 Jira 输入时
+        blocked，不得 skipped。仅调用 `jira-issue.py get <ISSUE_KEY> -f <ai_proposal_field>,<ai_requirement_field>,<reference_solution_field>
+        --json` 或等价工具读取这三个字段；不读取 summary、description、parent、attachment、status 或其他业务字段，不抓取附件、链接正文。ai_proposal_field
+        与 ai_requirement_field 必须各形成独立正式文件，reference_solution_field 非空时同样形成独立正式文件，并通过
+        jira_input_snapshot 登记 field_identity、配置中的 source_field、output_file 与 snapshot_status=complete；ai_proposal_field
+        或 ai_requirement_field 缺失、为空、读取失败、解析失败或归档失败时必须 blocked，不得回退原文或以 skipped/complete
+        继续；reference_solution_field 为空时按权威链回退到 AI 开发方案并记录「权威来源缺失」。 - development_proposal（开发方案出具）：任务输入包含
+        Jira 地址或 Issue Key 时自动触发；无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供 Jira
+        地址或 Issue Key，当前 Jira 输入节点不适用”。必须读取 `jira.reference_solution_field`（人工提供的参考方案，权威最高）、`jira.ai_proposal_field`
+        与 `jira.ai_requirement_field` 三个配置字段并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；并读取当前任务 `assignee` 识别经办人，按已挂载 delivery/jira 正文的经办人与父级范围规则确定该任务的责任范围（父级参考方案只取该经办人的明确分工，冲突以当前任务为准），把经办人、来源与采纳范围一并登记；整理原始需求文本并登记为正式产物，不反写
+        Jira 字段。 - development_proposal_delivery（开发方案交付闭环）：必须提供 Jira 地址或 Issue Key；必须读取
+        `jira.reference_solution_field`（人工提供的参考方案，最高权威）、`jira.ai_proposal_field` 与
+        `jira.ai_requirement_field` 并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；先完成方案、规格、任务拆分、实现、评审和验证，最后仅由 show-me-jira 一次反写 `jira.ai_requirement_field`、`jira.ai_proposal_field`
+        与 `jira.release_plan_field`；除 implement 与末节点已声明的状态流转外，中间阶段不得反写 Jira，输入缺失或读取失败时
+        blocked，不得 skipped。 - 其他 development 流程（需求开发）：无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供
+        Jira 地址或 Issue Key，当前 Jira 输入节点不适用”；有 Jira 输入时按既有需求读取规则获取 summary、description、parent、attachment、status
+        及三个配置字段并登记为正式产物，字段顺序与冲突裁决按本节点已挂载的 delivery/jira 正文执行；只有字段缺失或内容不清晰且必要时才使用原文和附件。
+        读取失败、配置字段无效或附件图片无法分析时如实记录并阻塞，不得静默回退或猜测。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: jira_input_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering/specs
+        required_output: true
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: jira
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: gitnexus-inquiry
+      skill: null
+      mcp:
+        server: remote_gitnexus
+        tools:
+        - query
+        - context
+        - code_snippet
+        - impact
+        - trace
+        fallback: local_workspace_search
+        scope: dynamic
+      execution_mode: sub_agent
+      kind: mcp
+      host_action: null
+      reference_mutation: false
+      skills: []
+      agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+        source=local_search、authority=non_gitnexus。 调研前先检查 docs/engineering/specs/
+        下是否存在文件名前缀完全等于当前 task_id 的 spec 文档；存在则优先完整读取作为本次调研上下文，不存在则记录并继续，不得阻塞；禁止读取与当前
+        task_id 无关的 spec。
+      orchestration_mode: mcp_prompt
+      evidence_policy:
+        gitnexus_first: true
+        require_query_record: true
+        allow_local_fallback: true
+        local_fallback_only_when:
+        - repository_unindexed
+        - service_unavailable
+        - authorization_unavailable
+        - timeout
+        - index_stale
+        - aggregate_unsupported
+        - capability_unavailable
+        local_search_root: workspace.path
+        local_evidence_source: local_search
+        local_evidence_authority: non_gitnexus
+        local_search_cannot_prove:
+        - call_graph
+        - impact
+        - cross_project_trace
+        - complete_consumers
+      fallback_verification: []
+      completion_gate:
+        id: inquiry_record
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: user_confirmation
+        action: execute_gitnexus_inquiry
+        prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；用户明确选择跳过时记录未执行和跳过依据，服务故障仍走
+          fallback/blocked。
+        allow_skip: research_not_needed
+        reuse: same_task_readonly_exact
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: plans/pi-mcp-adapter-gitnexus-inquiry.md
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: research
+        index_path: research/index.yml
+        path: gitnexus
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: grill-with-docs
+      skill: grill-with-docs
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - grill-with-docs
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问默认走“直接回答”流程，不再要求用户选择回答方式或对回答做接受确认；提示中仍向用户展示“直接回答
+        / 子 Agent 尝试回答”两种方式供参考，用户未主动要求委派时一律直接回答。仅当用户在本轮或后续明确要求“子 Agent 尝试回答”时才委派二级查询
+        Agent；若本流程前序阶段已完成正式调研并产出调研报告（如 gitnexus-inquiry 已登记 inquiry_record），再次调研无意义，默认直接回答。本节点同时承担本阶段的展示职责：每轮提问与回答后直接在当前上下文展示已确认的需求理解、关键决策与产出摘要，覆盖提问、回答与结论三部分显示，不再单独设置
+        show-me 节点；展示只限可验证范围，不构成写入授权。子 Agent 只返回结构化 handoff。
+      orchestration_mode: nested_sub_orchestration
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: skill_defined
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: show-me-jira
+      skill: show-me
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - show-me
+      agent_prompt: 展示或整理本次 task 的有效产出：代码修改流程读取当前 canonical state 的阶段证据与正式产物，并在当前
+        workspace 使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；开发方案出具流程基于 jira-input 的原始需求转文本与
+        grill-with-docs 的正式产出整理为结构化方案，并同时产出接口文档（接口路径、方法、入参/出参、字段说明与错误码）。`development_proposal_delivery`
+        仅在方案、规格、任务拆分、实现、评审和 verify 全部完成后的最终 `show-me-jira` 节点执行一次反写；方案内容、接口文档、实现范围与验证结论必须统一展示后再写入。只展示可验证范围，不替代
+        commit、push 或其他外部操作授权。整理完成后，若本任务输入来自 Jira 且原始需求快照记录有 Issue Key，直接调用jira 工具把整理结果反写：
+        - jira.ai_proposal_field（AI 开发方案字段）：写入本轮结构化方案与接口文档； - jira.ai_requirement_field（AI
+        需求分析字段）：写入 jira-input 阶段产出的原始需求转文本内容（含附件图片视觉分析结果）； - jira.reference_solution_field（参考方案字段）：人工提供的只读输入，任何阶段都不得写入；
+        仅反写 ai_requirement_field、ai_proposal_field 以及当前流程 stage_prompts 中额外声明的字段（如发版流程字段），且均为：字段为空时直接写入；非空时把现有内容与本轮整理结果整合为一份完整内容后重新写入；这是
+        Jira 任务的已声明动作，无需用户确认；写入失败时把失败信息写入本阶段 evidence，不阻塞本阶段完成与任务 done；无 Issue Key
+        时跳过。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: show_me_jira_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    omitted_stages:
+    - to-spec
+    - to-tickets
+    - implement
+    - code-review
+    - verify
+    - show-me-end
+  - option_id: development_jira_spec
+    name: Jira 参考方案驱动开发
+    purpose: 适用于已具备 Jira 参考方案和 AI 需求分析原始文本，直接按参考方案拆解规格并完成开发，并在收尾统一反写 Jira AI 需求分析、AI
+      开发方案与发版流程字段的任务。
+    selection_group_id: jira_development
+    selection_group_name: Jira 开发
+    research_stage_id: null
+    research_modes: {}
+    research_auto_confirm: false
+    non_skippable_stages:
+    - jira-input
+    transitions:
+      complete:
+        jira-input: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me
+        show-me: null
+      skipped:
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me
+        show-me: null
+    label: jira-input → to-spec → to-tickets → implement → code-review → verify →
+      show-me
+    stage_ids:
+    - jira-input
+    - to-spec
+    - to-tickets
+    - implement
+    - code-review
+    - verify
+    - show-me
+    stages:
+    - id: jira-input
+      skill: vision-analyzer
+      mcp: null
+      execution_mode: sub_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - vision-analyzer
+      agent_prompt: 先判断当前 flow_definition.option_id，再按对应分支读取，不能先抓取 Jira 全字段。字段名只能从
+        dev-spec-gen 配置（仓库托管的 `config.default.yml` 提供默认值，本地 `config.yml` 同名键覆盖）的 `jira.ai_requirement_field`、`jira.reference_solution_field`
+        与 `jira.ai_proposal_field` 取得，不得在 jira-input、命令或提示词中写死 customfield 编号，也不得扫描技能目录推断工具。
+        - development_jira_spec（Jira 参考方案驱动开发）：必须提供 Jira 地址或 Issue Key；无 Jira 输入时
+        blocked，不得 skipped。仅调用 `jira-issue.py get <ISSUE_KEY> -f <ai_proposal_field>,<ai_requirement_field>,<reference_solution_field>
+        --json` 或等价工具读取这三个字段；不读取 summary、description、parent、attachment、status 或其他业务字段，不抓取附件、链接正文。ai_proposal_field
+        与 ai_requirement_field 必须各形成独立正式文件，reference_solution_field 非空时同样形成独立正式文件，并通过
+        jira_input_snapshot 登记 field_identity、配置中的 source_field、output_file 与 snapshot_status=complete；ai_proposal_field
+        或 ai_requirement_field 缺失、为空、读取失败、解析失败或归档失败时必须 blocked，不得回退原文或以 skipped/complete
+        继续；reference_solution_field 为空时按权威链回退到 AI 开发方案并记录「权威来源缺失」。 - development_proposal（开发方案出具）：任务输入包含
+        Jira 地址或 Issue Key 时自动触发；无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供 Jira
+        地址或 Issue Key，当前 Jira 输入节点不适用”。必须读取 `jira.reference_solution_field`（人工提供的参考方案，权威最高）、`jira.ai_proposal_field`
+        与 `jira.ai_requirement_field` 三个配置字段并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；并读取当前任务 `assignee` 识别经办人，按已挂载 delivery/jira 正文的经办人与父级范围规则确定该任务的责任范围（父级参考方案只取该经办人的明确分工，冲突以当前任务为准），把经办人、来源与采纳范围一并登记；整理原始需求文本并登记为正式产物，不反写
+        Jira 字段。 - development_proposal_delivery（开发方案交付闭环）：必须提供 Jira 地址或 Issue Key；必须读取
+        `jira.reference_solution_field`（人工提供的参考方案，最高权威）、`jira.ai_proposal_field` 与
+        `jira.ai_requirement_field` 并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；先完成方案、规格、任务拆分、实现、评审和验证，最后仅由 show-me-jira 一次反写 `jira.ai_requirement_field`、`jira.ai_proposal_field`
+        与 `jira.release_plan_field`；除 implement 与末节点已声明的状态流转外，中间阶段不得反写 Jira，输入缺失或读取失败时
+        blocked，不得 skipped。 - 其他 development 流程（需求开发）：无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供
+        Jira 地址或 Issue Key，当前 Jira 输入节点不适用”；有 Jira 输入时按既有需求读取规则获取 summary、description、parent、attachment、status
+        及三个配置字段并登记为正式产物，字段顺序与冲突裁决按本节点已挂载的 delivery/jira 正文执行；只有字段缺失或内容不清晰且必要时才使用原文和附件。
+        读取失败、配置字段无效或附件图片无法分析时如实记录并阻塞，不得静默回退或猜测。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: jira_input_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering/specs
+        required_output: true
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: jira
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: to-spec
+      skill: to-spec
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-spec
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: specification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: routing
+        index_path: routing/index.yml
+        path: core
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: to-tickets
+      skill: to-tickets
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-tickets
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: ticket_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/.scratch
+        required_output: true
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: tickets
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: implement
+      node_type: implementation
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - tdd
+      - implement
+      - ponytail-review
+      agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+        时不执行编译。完成交接时必须用 task_files 声明本阶段实际改动的 workspace 相对文件（新增、删除、重命名都要声明），供 code-review
+        的审查范围交集使用。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      - ponytail-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中
+        files 为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+        是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+        HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+        时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+      - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+      - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: verify
+      skill: verify
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - verify
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 执行与本次改动相关的既有自动化测试，记录命令、通过/失败计数与失败输出摘要。
+      - 对改动路径做边界与错误分支检查（空输入、异常路径、越界取值），逐条记录结论。
+      - 核对实现是否满足规格与任务单的验收条件，逐条给出可验证证据。
+      completion_gate:
+        id: verification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: .
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: show-me
+      skill: show-me
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - show-me
+      agent_prompt: 展示本次 task 的有效代码修改：读取当前 canonical state 的阶段证据与正式产物，并在当前 workspace
+        使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；只展示可验证范围，不执行任何写入，不替代 commit、push 或其他外部操作授权。
+        收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: show_me_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    omitted_stages:
+    - grill-with-docs
+    - show-me-end
+  - option_id: development_proposal_delivery
+    name: 开发方案交付闭环
+    purpose: 适用于从 Jira 需求出具开发方案、完成完整开发与验证，并在最终阶段一次反写 Jira AI 需求分析、AI 开发方案与发版流程字段的任务。
+    selection_group_id: jira_development
+    selection_group_name: Jira 开发
+    research_stage_id: gitnexus-inquiry
+    research_modes: {}
+    research_auto_confirm: false
+    non_skippable_stages:
+    - jira-input
+    transitions:
+      complete:
+        jira-input: gitnexus-inquiry
+        gitnexus-inquiry: grill-with-docs
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me-jira
+        show-me-jira: null
+      skipped:
+        gitnexus-inquiry: grill-with-docs
+        grill-with-docs: to-spec
+        to-spec: to-tickets
+        to-tickets: implement
+        implement: code-review
+        code-review: verify
+        verify: show-me-jira
+        show-me-jira: null
+    label: jira-input → gitnexus-inquiry → grill-with-docs → to-spec → to-tickets
+      → implement → code-review → verify → show-me-jira
+    stage_ids:
+    - jira-input
+    - gitnexus-inquiry
+    - grill-with-docs
+    - to-spec
+    - to-tickets
+    - implement
+    - code-review
+    - verify
+    - show-me-jira
+    stages:
+    - id: jira-input
+      skill: vision-analyzer
+      mcp: null
+      execution_mode: sub_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - vision-analyzer
+      agent_prompt: 先判断当前 flow_definition.option_id，再按对应分支读取，不能先抓取 Jira 全字段。字段名只能从
+        dev-spec-gen 配置（仓库托管的 `config.default.yml` 提供默认值，本地 `config.yml` 同名键覆盖）的 `jira.ai_requirement_field`、`jira.reference_solution_field`
+        与 `jira.ai_proposal_field` 取得，不得在 jira-input、命令或提示词中写死 customfield 编号，也不得扫描技能目录推断工具。
+        - development_jira_spec（Jira 参考方案驱动开发）：必须提供 Jira 地址或 Issue Key；无 Jira 输入时
+        blocked，不得 skipped。仅调用 `jira-issue.py get <ISSUE_KEY> -f <ai_proposal_field>,<ai_requirement_field>,<reference_solution_field>
+        --json` 或等价工具读取这三个字段；不读取 summary、description、parent、attachment、status 或其他业务字段，不抓取附件、链接正文。ai_proposal_field
+        与 ai_requirement_field 必须各形成独立正式文件，reference_solution_field 非空时同样形成独立正式文件，并通过
+        jira_input_snapshot 登记 field_identity、配置中的 source_field、output_file 与 snapshot_status=complete；ai_proposal_field
+        或 ai_requirement_field 缺失、为空、读取失败、解析失败或归档失败时必须 blocked，不得回退原文或以 skipped/complete
+        继续；reference_solution_field 为空时按权威链回退到 AI 开发方案并记录「权威来源缺失」。 - development_proposal（开发方案出具）：任务输入包含
+        Jira 地址或 Issue Key 时自动触发；无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供 Jira
+        地址或 Issue Key，当前 Jira 输入节点不适用”。必须读取 `jira.reference_solution_field`（人工提供的参考方案，权威最高）、`jira.ai_proposal_field`
+        与 `jira.ai_requirement_field` 三个配置字段并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；并读取当前任务 `assignee` 识别经办人，按已挂载 delivery/jira 正文的经办人与父级范围规则确定该任务的责任范围（父级参考方案只取该经办人的明确分工，冲突以当前任务为准），把经办人、来源与采纳范围一并登记；整理原始需求文本并登记为正式产物，不反写
+        Jira 字段。 - development_proposal_delivery（开发方案交付闭环）：必须提供 Jira 地址或 Issue Key；必须读取
+        `jira.reference_solution_field`（人工提供的参考方案，最高权威）、`jira.ai_proposal_field` 与
+        `jira.ai_requirement_field` 并各自登记为正式产物，同时读取原始需求正文及附件，附件图片优先激活 vision-analyzer
+        技能做视觉分析转文本；先完成方案、规格、任务拆分、实现、评审和验证，最后仅由 show-me-jira 一次反写 `jira.ai_requirement_field`、`jira.ai_proposal_field`
+        与 `jira.release_plan_field`；除 implement 与末节点已声明的状态流转外，中间阶段不得反写 Jira，输入缺失或读取失败时
+        blocked，不得 skipped。 - 其他 development 流程（需求开发）：无 Jira 输入时使用 skip_basis=not_applicable，记录“未提供
+        Jira 地址或 Issue Key，当前 Jira 输入节点不适用”；有 Jira 输入时按既有需求读取规则获取 summary、description、parent、attachment、status
+        及三个配置字段并登记为正式产物，字段顺序与冲突裁决按本节点已挂载的 delivery/jira 正文执行；只有字段缺失或内容不清晰且必要时才使用原文和附件。
+        读取失败、配置字段无效或附件图片无法分析时如实记录并阻塞，不得静默回退或猜测。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: jira_input_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering/specs
+        required_output: true
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: jira
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: gitnexus-inquiry
+      skill: null
+      mcp:
+        server: remote_gitnexus
+        tools:
+        - query
+        - context
+        - code_snippet
+        - impact
+        - trace
+        fallback: local_workspace_search
+        scope: dynamic
+      execution_mode: sub_agent
+      kind: mcp
+      host_action: null
+      reference_mutation: false
+      skills: []
+      agent_prompt: 按节点 mcp 配置执行一次主 query 后仅复核命中结果。scope={scope} 限定取证范围；服务或索引不可用才允许受限本地检索，本地证据标记
+        source=local_search、authority=non_gitnexus。 调研前先检查 docs/engineering/specs/
+        下是否存在文件名前缀完全等于当前 task_id 的 spec 文档；存在则优先完整读取作为本次调研上下文，不存在则记录并继续，不得阻塞；禁止读取与当前
+        task_id 无关的 spec。
+      orchestration_mode: mcp_prompt
+      evidence_policy:
+        gitnexus_first: true
+        require_query_record: true
+        allow_local_fallback: true
+        local_fallback_only_when:
+        - repository_unindexed
+        - service_unavailable
+        - authorization_unavailable
+        - timeout
+        - index_stale
+        - aggregate_unsupported
+        - capability_unavailable
+        local_search_root: workspace.path
+        local_evidence_source: local_search
+        local_evidence_authority: non_gitnexus
+        local_search_cannot_prove:
+        - call_graph
+        - impact
+        - cross_project_trace
+        - complete_consumers
+      fallback_verification: []
+      completion_gate:
+        id: inquiry_record
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: user_confirmation
+        action: execute_gitnexus_inquiry
+        prompt: 执行只读 GitNexus 调研（scope={scope}）；按节点 mcp 配置写入正式调研记录，不修改工作区或外部系统。调研是否执行必须由用户确认；用户明确选择跳过时记录未执行和跳过依据，服务故障仍走
+          fallback/blocked。
+        allow_skip: research_not_needed
+        reuse: same_task_readonly_exact
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: plans/pi-mcp-adapter-gitnexus-inquiry.md
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: research
+        index_path: research/index.yml
+        path: gitnexus
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: grill-with-docs
+      skill: grill-with-docs
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - grill-with-docs
+      agent_prompt: 核验节点公开的 skill_md_path/skill_md_sha256 后按 SKILL.md 执行。每轮提问默认走“直接回答”流程，不再要求用户选择回答方式或对回答做接受确认；提示中仍向用户展示“直接回答
+        / 子 Agent 尝试回答”两种方式供参考，用户未主动要求委派时一律直接回答。仅当用户在本轮或后续明确要求“子 Agent 尝试回答”时才委派二级查询
+        Agent；若本流程前序阶段已完成正式调研并产出调研报告（如 gitnexus-inquiry 已登记 inquiry_record），再次调研无意义，默认直接回答。本节点同时承担本阶段的展示职责：每轮提问与回答后直接在当前上下文展示已确认的需求理解、关键决策与产出摘要，覆盖提问、回答与结论三部分显示，不再单独设置
+        show-me 节点；展示只限可验证范围，不构成写入授权。子 Agent 只返回结构化 handoff。
+      orchestration_mode: nested_sub_orchestration
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: skill_defined
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: grill
+        index_path: grill/index.yml
+        path: interaction
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: to-spec
+      skill: to-spec
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-spec
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: specification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: routing
+        index_path: routing/index.yml
+        path: core
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: to-tickets
+      skill: to-tickets
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - to-tickets
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: ticket_evidence
+        require_evidence: true
+        require_output_files: true
+      artifact_policy:
+        allowed_roots:
+        - workspace/.scratch
+        required_output: true
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: tickets
+        max_level: 3
+      - topic: orchestration
+        index_path: orchestration/index.yml
+        path: contracts
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: implement
+      node_type: implementation
+      skill: implement
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - ponytail
+      - tdd
+      - implement
+      - ponytail-review
+      agent_prompt: 按 skills 列表顺序在同一上下文执行全部 Skill，任一未完成或阻塞不得交接。只运行当前需求相关测试及最小回归，不得扩大到无关全量；完成时提供测试命令、范围、退出码与跳过项证据；tdd
+        时不执行编译。完成交接时必须用 task_files 声明本阶段实际改动的 workspace 相对文件（新增、删除、重命名都要声明），供 code-review
+        的审查范围交集使用。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: implementation_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: engineering
+        index_path: engineering/index.yml
+        path: .
+        max_level: 3
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: code-review
+      skill: code-review
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - code-review
+      - ponytail-review
+      agent_prompt: 主 Agent 必须直接审核本次修改文件相对 HEAD 的未提交改动，以 git diff HEAD 为范围；无未提交差异时如实记录范围为空，不得猜测提交范围，不审查
+        HEAD^..HEAD。完成 code-review 后继续执行 ponytail-review。 节点公开 review_manifest 时以其中
+        files 为唯一审查清单：files 是「已声明 task_files ∩ 已跟踪改动」（?? 为声明的未跟踪新增，missing 为声明的已删除），excluded
+        是范围外的其他已跟踪改动、仅审计不审查；未声明 task_files 时回退审查全部已跟踪改动并如实标注。修复后只复审 sha256 变化的文件，不得重新全文复审；当前
+        HEAD 与 review_manifest.head 不一致时退化为全量复审并如实记录原因。review_manifest.status=unavailable
+        时按 git diff HEAD 全量审查并如实记录基线不可用原因，不得当作空清单。 派发审查子 Agent 必须带硬超时、输出上限与“结论充分即停”约束；无新增证据时不重复派发同一范围的审查。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 按 ponytail 精简原则复查本次改动是否存在超出需求的功能、投机性抽象或重复实现，结论写入 evidence。
+      - 确认未新增未使用依赖、死代码或只为单次调用存在的抽象。
+      - 核对命名、注释与缩进是否符合周围代码风格，未修改部分保持原样。
+      completion_gate:
+        id: review_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: git
+        max_level: 3
+      - topic: shared
+        index_path: shared/index.yml
+        path: .
+        max_level: 2
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills:
+      - ponytail-review
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: verify
+      skill: verify
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - verify
+      agent_prompt: null
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification:
+      - 执行与本次改动相关的既有自动化测试，记录命令、通过/失败计数与失败输出摘要。
+      - 对改动路径做边界与错误分支检查（空输入、异常路径、越界取值），逐条记录结论。
+      - 核对实现是否满足规格与任务单的验收条件，逐条给出可验证证据。
+      completion_gate:
+        id: verification_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics:
+      - topic: quality
+        index_path: quality/index.yml
+        path: .
+        max_level: 3
+      - topic: delivery
+        index_path: delivery/index.yml
+        path: .
+        max_level: 3
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    - id: show-me-jira
+      skill: show-me
+      mcp: null
+      execution_mode: main_agent
+      kind: skill
+      host_action: null
+      reference_mutation: false
+      skills:
+      - show-me
+      agent_prompt: 展示或整理本次 task 的有效产出：代码修改流程读取当前 canonical state 的阶段证据与正式产物，并在当前
+        workspace 使用只读 Git 信息核对 git diff HEAD 和未跟踪代码文件；开发方案出具流程基于 jira-input 的原始需求转文本与
+        grill-with-docs 的正式产出整理为结构化方案，并同时产出接口文档（接口路径、方法、入参/出参、字段说明与错误码）。`development_proposal_delivery`
+        仅在方案、规格、任务拆分、实现、评审和 verify 全部完成后的最终 `show-me-jira` 节点执行一次反写；方案内容、接口文档、实现范围与验证结论必须统一展示后再写入。只展示可验证范围，不替代
+        commit、push 或其他外部操作授权。整理完成后，若本任务输入来自 Jira 且原始需求快照记录有 Issue Key，直接调用jira 工具把整理结果反写：
+        - jira.ai_proposal_field（AI 开发方案字段）：写入本轮结构化方案与接口文档； - jira.ai_requirement_field（AI
+        需求分析字段）：写入 jira-input 阶段产出的原始需求转文本内容（含附件图片视觉分析结果）； - jira.reference_solution_field（参考方案字段）：人工提供的只读输入，任何阶段都不得写入；
+        仅反写 ai_requirement_field、ai_proposal_field 以及当前流程 stage_prompts 中额外声明的字段（如发版流程字段），且均为：字段为空时直接写入；非空时把现有内容与本轮整理结果整合为一份完整内容后重新写入；这是
+        Jira 任务的已声明动作，无需用户确认；写入失败时把失败信息写入本阶段 evidence，不阻塞本阶段完成与任务 done；无 Issue Key
+        时跳过。 收尾展示时同时给出本次改动的 Git 页面差异对比地址：调用 `uv run --script <dev-spec-gen-root>/scripts/git_compare_url.py
+        --base <canonical workspace 的 base_branch> [--commit <本次任务正式 evidence 中明确记录的提交
+        SHA>]`；不得从当前 HEAD 猜测本次提交，不得省略 canonical base。把返回的 branch_url（分支对比页）展示给用户，有
+        commit_url 时一并给出。必须同时转述脚本返回的 note：改动尚未提交/推送时该地址要等推送后才可见，并附本地核对命令 `git status
+        --short`、`git diff HEAD`。脚本任何非零退出或错误码（包括 remote_missing、platform_unrecognized、base_unresolved、head_unresolved、commit_invalid、git_command_failed）都必须原样转述并停止，不得猜平台、不得拼可能无效的链接；展示不替代
+        commit/push 授权。
+      orchestration_mode: null
+      evidence_policy: null
+      fallback_verification: []
+      completion_gate:
+        id: show_me_jira_evidence
+        require_evidence: true
+        require_output_files: false
+      artifact_policy:
+        allowed_roots:
+        - workspace/docs/engineering
+        required_output: false
+      confirmation_policy:
+        mode: none
+      status_transitions:
+        pending:
+        - in_progress
+        - blocked
+        - awaiting
+        - skipped
+        in_progress:
+        - complete
+        - blocked
+        - awaiting
+        - skipped
+        blocked:
+        - in_progress
+        - awaiting
+        awaiting:
+        - in_progress
+        - blocked
+        - skipped
+        complete: []
+        skipped: []
+      decision_record_path: null
+      inquiry_record_path: null
+      status: pending
+      required_files: []
+      reference_topics: []
+      reference_topics_snapshot: null
+      output_files: []
+      jira_input_snapshot: null
+      handoff_summary: ''
+      evidence: []
+      blocked_reason: null
+      failure_evidence: []
+      skip_reason: null
+      skip_basis: null
+      initially_unavailable_skills: []
+      required_action: null
+      confirmed_at: null
+      confirmation_request: null
+      answer_confirmation_request: null
+      question_choice_request: null
+      question_choices: []
+      authorizations: []
+      answer_confirmations: []
+      host_action_baseline: null
+      review_manifest: null
+      artifact_amendments: []
+    omitted_stages:
+    - show-me-end
+  flow_catalog:
+    version: 1
+    path: D:\workplace\skills\my-skills\dev-spec-gen\references\flow-catalog.yml
+    sha256: 285887af21f405e8e0c83cb1aee1afb6106964491a9aef6fa631dd01ccacce3b
+  skill_audit:
+    checked:
+    - skill: code-review
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\code-review\SKILL.md
+    - skill: grill-with-docs
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\grill-with-docs\SKILL.md
+    - skill: implement
+      source: builtin
+    - skill: ponytail
+      source: not_registered
+      note: 未在 C:\Users\Administrator\.claude\skills 下找到 ponytail/SKILL.md；同名包装可能位于插件等其他位置，本检查只看
+        --agent-skills-root；该节点的规则也可能已由 reference_topics 或技能内脚本提供。不表示能力不可用，须按节点提示词执行。
+    - skill: ponytail-review
+      source: not_registered
+      note: 未在 C:\Users\Administrator\.claude\skills 下找到 ponytail-review/SKILL.md；同名包装可能位于插件等其他位置，本检查只看
+        --agent-skills-root；该节点的规则也可能已由 reference_topics 或技能内脚本提供。不表示能力不可用，须按节点提示词执行。
+    - skill: show-me
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\show-me\SKILL.md
+    - skill: tdd
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\tdd\SKILL.md
+    - skill: to-spec
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-spec\SKILL.md
+    - skill: to-tickets
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\to-tickets\SKILL.md
+    - skill: verify
+      source: builtin
+    - skill: vision-analyzer
+      source: disk
+      path: C:\Users\Administrator\.claude\skills\vision-analyzer\SKILL.md
+    skipped:
+    - stage_id: code-review
+      skill: ponytail-review
+      reason: skill_not_registered
+    - stage_id: implement
+      skill: ponytail
+      reason: skill_not_registered
+    - stage_id: implement
+      skill: ponytail-review
+      reason: skill_not_registered
+    - stage_id: implement-no-tdd
+      skill: ponytail
+      reason: skill_not_registered
+  manual_input:
+    enabled: true
+    input_format: stage_ids
+superseded_at: '2026-09-18T22:41:42+00:00'

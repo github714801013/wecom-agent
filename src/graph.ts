@@ -11,7 +11,7 @@ import { buildAnalyzedCodeRangeIndex, formatAnalyzedCodeRangeIndex } from "./ana
 import { PROGRESS_KEYWORDS } from "./progress-updates.js";
 import { createReactLoopController, wrapToolsWithReactLoopControl } from "./react-loop-control.js";
 import { stringifyModelContent } from "./model-content.js";
-import { createPiAgentFacade } from "./pi-agent-runtime.js";
+import { createPiCodingAgentFacade } from "./pi-coding-agent-runtime.js";
 import {
   runAgenticRag,
   type AgenticRagGrade,
@@ -1556,13 +1556,16 @@ export async function initializeAgent(
 export async function initializePiAgent(
   tools?: any[],
   plannerResult?: BusinessPromptPlanner | null,
+  sessionKey?: string,
 ) {
   const agentTools = tools || await getAllMcpTools();
   const systemPrompt = await getBusinessPrompt(plannerResult);
 
-  return createPiAgentFacade({
+  return createPiCodingAgentFacade({
     systemPrompt,
     tools: agentTools,
     toolTimeoutMs: config.llm.toolTimeoutMs,
+    contextWindow: getModelContextWindow(),
+    ...(sessionKey ? { sessionKey } : {}),
   });
 }

@@ -153,6 +153,126 @@ const footeredSummary = JSON.parse(textOf(await footeredQueryTool.execute("foote
 assert.equal(footeredSummary.kind, "evidence_summary", "JSON 后的 markdown 页脚不得导致证据被丢弃");
 assert.ok(footeredSummary.matches?.some(match => match.file === "oa999UI/AutoMkc.aspx.cs" && match.line === 42));
 
+// definitions 不得占满摘要名额，后续 matches 的仓库和关键证据必须保留
+const definitionsBeforeMatches = JSON.stringify({
+  definitions: Array.from({ length: 8 }, (_, index) => ({
+    name: `Definition${index}`,
+    filePath: `src/definition-${index}.ts`,
+    startLine: index + 1,
+  })),
+  matches: [{
+    repo: "fixture-repo",
+    filePath: "src/confirmed.ts",
+    startLine: 42,
+    snippet: "if (enabled) return confirmed;",
+  }],
+  padding: "x".repeat(9_000),
+});
+const [definitionsBeforeMatchesTool] = createPiMcpPluginTools([{
+  name: "query",
+  description: "定义列表先于命中的检索结果",
+  schema: { type: "object", properties: {} },
+  invoke: async () => definitionsBeforeMatches,
+}]);
+assert.ok(definitionsBeforeMatchesTool);
+const definitionsBeforeMatchesSummary = JSON.parse(
+  textOf(await definitionsBeforeMatchesTool.execute("definitions-before-matches-1", {})),
+) as {
+  kind?: string;
+  matches?: Array<{ repo?: string; file?: string; line?: number; evidence?: string }>;
+};
+assert.equal(definitionsBeforeMatchesSummary.kind, "evidence_summary");
+assert.ok(definitionsBeforeMatchesSummary.matches?.some(match =>
+  match.repo === "fixture-repo"
+    && match.file === "src/confirmed.ts"
+    && match.line === 42
+    && match.evidence?.includes("confirmed"),
+), "真实命中必须优先于 definitions，保留 repo、文件、行号和关键证据");
+
+const completeDefinitionsBeforeMatches = JSON.stringify({
+  definitions: Array.from({ length: 8 }, (_, index) => ({
+    repo: "definition-repo", filePath: `src/definition-complete-${index}.ts`, startLine: index + 1, snippet: "definition evidence",
+  })),
+  matches: [{ repo: "fixture-repo", filePath: "src/late-match.ts", startLine: 88, snippet: "late match evidence" }],
+  padding: "x".repeat(9_000),
+});
+const [completeDefinitionsTool] = createPiMcpPluginTools([{
+  name: "query",
+  description: "完整定义先于真实命中",
+  schema: { type: "object", properties: {} },
+  invoke: async () => completeDefinitionsBeforeMatches,
+}]);
+assert.ok(completeDefinitionsTool);
+const completeDefinitionsSummary = JSON.parse(
+  textOf(await completeDefinitionsTool.execute("complete-definitions-before-matches-1", {})),
+) as { matches?: Array<{ repo?: string; file?: string; line?: number; evidence?: string }> };
+assert.ok(completeDefinitionsSummary.matches?.some(match =>
+  match.repo === "fixture-repo" && match.file === "src/late-match.ts" && match.line === 88,
+), "完整 definitions 也不得挤掉真实 matches");
+
+const manyDefinitionsBeforeMatch = JSON.stringify({
+  definitions: Array.from({ length: 2_000 }, (_, index) => ({ filePath: `src/many-definition-${index}.ts`, startLine: index + 1 })),
+  matches: [{ repo: "fixture-repo", filePath: "src/after-many-definitions.ts", startLine: 99, snippet: "after many definitions" }],
+  padding: "x".repeat(9_000),
+});
+const [manyDefinitionsTool] = createPiMcpPluginTools([{
+  name: "query",
+  description: "大量定义先于命中",
+  schema: { type: "object", properties: {} },
+  invoke: async () => manyDefinitionsBeforeMatch,
+}]);
+assert.ok(manyDefinitionsTool);
+const manyDefinitionsSummary = JSON.parse(
+  textOf(await manyDefinitionsTool.execute("many-definitions-before-match-1", {})),
+) as { matches?: Array<{ repo?: string; file?: string; line?: number }> };
+assert.ok(manyDefinitionsSummary.matches?.some(match =>
+  match.repo === "fixture-repo" && match.file === "src/after-many-definitions.ts" && match.line === 99,
+), "节点预算耗尽前必须保留后置真实命中");
+
+const veryLargeDefinitionsBeforeMatches = JSON.stringify({
+  repo: "fixture-repo",
+  definitions: Array.from({ length: 8 }, (_, index) => ({ filePath: `src/large-definition-${index}.ts`, startLine: index + 1, snippet: "definition" })),
+  matches: [{ filePath: "src/large-late-match.ts", startLine: 123, content: "large late evidence" }],
+  padding: "x".repeat(256_000),
+});
+assert.ok(veryLargeDefinitionsBeforeMatches.length > 256_000);
+const [veryLargeDefinitionsTool] = createPiMcpPluginTools([{
+  name: "query",
+  description: "超大定义先于命中",
+  schema: { type: "object", properties: {} },
+  invoke: async () => veryLargeDefinitionsBeforeMatches,
+}]);
+assert.ok(veryLargeDefinitionsTool);
+const veryLargeDefinitionsSummary = JSON.parse(
+  textOf(await veryLargeDefinitionsTool.execute("very-large-definitions-before-matches-1", {})),
+) as { matches?: Array<{ repo?: string; file?: string; line?: number; evidence?: string }> };
+assert.ok(veryLargeDefinitionsSummary.matches?.some(match =>
+  match.repo === "fixture-repo" && match.file === "src/large-late-match.ts" && match.line === 123 && match.evidence === "large late evidence",
+), "超大结构化结果也必须保留后置真实命中及顶层 repo");
+
+const separatedLargeEvidence = JSON.stringify({
+  repo: "fixture-repo",
+  file_path: "src/separated.ts",
+  paddingBetweenFields: "y".repeat(5_000),
+  line_start: 321,
+  content: "separated evidence",
+  padding: "x".repeat(256_000),
+});
+assert.ok(separatedLargeEvidence.length > 256_000);
+const [separatedLargeEvidenceTool] = createPiMcpPluginTools([{
+  name: "query",
+  description: "字段间距超限的超大结果",
+  schema: { type: "object", properties: {} },
+  invoke: async () => separatedLargeEvidence,
+}]);
+assert.ok(separatedLargeEvidenceTool);
+const separatedLargeEvidenceSummary = JSON.parse(
+  textOf(await separatedLargeEvidenceTool.execute("separated-large-evidence-1", {})),
+) as { matches?: Array<{ repo?: string; file?: string; line?: number; evidence?: string }> };
+assert.ok(separatedLargeEvidenceSummary.matches?.some(match =>
+  match.repo === "fixture-repo" && match.file === "src/separated.ts" && match.line === 321 && match.evidence === "separated evidence",
+), "超大结果字段间距变大时仍必须保留四元证据");
+
 const veryLargeStructuredQuery = JSON.stringify({
   results: [{
     file_path: "src/very-large.ts",

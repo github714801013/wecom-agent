@@ -34,8 +34,9 @@ import { buildToolResultFileReadTool } from "./tool-result-store.js";
 import { buildOriginalQuestionTool } from "./original-question-tool.js";
 import { stringifyModelContent } from "./model-content.js";
 import { buildUserFacingErrorReply, getErrorMessage } from "./error-response.js";
-import { buildRequestRawTrace, isRequestRawLoggingEnabled } from "./request-raw-trace.js";
+import { buildRequestRawTrace, isRequestRawLoggingEnabled, redactSensitiveValues } from "./request-raw-trace.js";
 import { filterPiAgentTools, type PiAgentEvent } from "./pi-agent-runtime.js";
+import { resetPiCodingAgentSession } from "./pi-coding-agent-runtime.js";
 import {
   createRequestTimingRecord,
   formatRequestTimingLog,
@@ -75,11 +76,8 @@ import {
   hasDirectEvidenceAnchors,
 } from "./direct-evidence.js";
 import {
-  buildFollowupQuestion,
-  buildQuestionWithHistory,
-  classifyHistoryRelevance,
+  buildLatestMessageContext,
   detectActiveMessageIntent,
-  type ConversationContextItem,
 } from "./interaction-control.js";
 import {
   buildSensitiveRequestAuditEvent,
@@ -88,6 +86,14 @@ import {
   judgeSensitiveRequestByModel,
 } from "./sensitive-request-guard.js";
 import type { FinalReplyResolutionResult } from "./runtime-todolist.js";
+interface ActiveTaskHandoff {
+  question: string;
+  partialAnswer: string;
+  toolContextSummary: string;
+  repoHints: string[];
+  updatedAt: number;
+}
+
 interface ActiveTaskState {
   msgid: string;
   cancelled: boolean;
@@ -97,6 +103,7 @@ interface ActiveTaskState {
   cancel?: () => void;
   terminalState?: "open" | "cancelled" | "expired" | "final_sent";
   question: string;
+  handoff?: ActiveTaskHandoff;
 }
 
 interface VisiblePlanStep {
@@ -148,16 +155,30 @@ export function extractPiAgentEndContent(event: PiAgentEvent) {
   return extractAssistantText(lastMessage);
 }
 
-function extractPiAgentEndFailure(event: PiAgentEvent): "error" | "aborted" | null {
+export interface PiAgentEndFailure {
+  reason: "error" | "aborted";
+  rawStopReason?: string;
+  errorMessage?: string;
+}
+
+export function extractPiAgentEndFailure(event: PiAgentEvent): PiAgentEndFailure | null {
   if (event.type !== "agent_end") return null;
   const messages = Array.isArray(event.messages) ? event.messages : [];
   const lastMessage = messages[messages.length - 1];
   if (!lastMessage || typeof lastMessage !== "object") return null;
-  const record = lastMessage as { role?: unknown; stopReason?: unknown };
-  if (record.role !== "assistant") return null;
-  if (record.stopReason === "error") return "error";
-  if (record.stopReason === "aborted") return "aborted";
-  return null;
+  const record = lastMessage as { role?: unknown; stopReason?: unknown; rawStopReason?: unknown; errorMessage?: unknown };
+  if (record.role !== "assistant" || (record.stopReason !== "error" && record.stopReason !== "aborted")) return null;
+  const rawStopReason = typeof record.rawStopReason === "string" ? normalizeLifecycleDetail(record.rawStopReason, 80) : "";
+  const errorMessage = typeof record.errorMessage === "string" ? normalizeLifecycleDetail(record.errorMessage, 500) : "";
+  return {
+    reason: record.stopReason,
+    ...(rawStopReason ? { rawStopReason } : {}),
+    ...(errorMessage ? { errorMessage } : {}),
+  };
+}
+
+function normalizeLifecycleDetail(value: string, maxLength: number) {
+  return redactSensitiveValues(value).replace(/\s+/gu, " ").trim().slice(0, maxLength);
 }
 
 export function buildPrimaryPiAgentTools(
@@ -892,6 +913,7 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
       return preStreamExpiryDeliveryPromise;
     };
     let admissionTask: ActiveTaskState | undefined;
+    let replacedTask: ActiveTaskState | undefined;
     let requestTaskOwner: ActiveTaskState | undefined;
     const ownsRequestTask = () => Boolean(
       requestTaskOwner && activeTasks.get(sessionKey) === requestTaskOwner,
@@ -1005,12 +1027,12 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
       : {
         msgid: body.msgid,
         cancelled: false,
-        question: "",
+        question: extractSensitiveRequestPreflightText(body).trim(),
         abortController: requestAbortController,
         terminalState: "open" as const,
         cancel: () => requestAbortController.abort(),
       };
-    const replacedTask = admissionTask ? activeTasks.get(sessionKey) : undefined;
+    replacedTask = admissionTask ? activeTasks.get(sessionKey) : undefined;
     const requestOwnerCheck = () => ownsRequestTask()
       && !requestAbortController.signal.aborted
       && !preStreamExpired
@@ -1281,11 +1303,12 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
       return;
     }
     if (admissionTask && replacedTask?.question) {
-      followupQuestion = buildFollowupQuestion(replacedTask.question, activeText);
+      followupQuestion = replacedTask.question;
     }
 
     if (mcpHeaderCommand) {
       const projects = extractProjectsFromMcpHeaders(mcpHeaderCommand.headersByServer);
+      resetPiCodingAgentSession(sessionKey);
       sessionManager.setMcpHeaderOverrides(sessionKey, mcpHeaderCommand.headersByServer);
       sessionManager.setActiveMcpHeaderCommand(sessionKey, mcpHeaderCommand.command);
       sessionManager.setRepoHints(sessionKey, projects);
@@ -1345,7 +1368,7 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
         return;
       }
 
-      followupQuestion = buildFollowupQuestion(activeTask.question, activeText);
+      followupQuestion = activeTask.question;
       activeTask.cancel?.();
     }
 
@@ -1368,6 +1391,7 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
     }
 
     if (isHardcodedNew) {
+      resetPiCodingAgentSession(sessionKey);
       sessionManager.clearSession(sessionKey);
       processedMsgs.add(body.msgid);
       await sendCard(
@@ -1438,7 +1462,6 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
     const pendingHumanLoop = sessionManager.getPendingHumanLoop(sessionKey);
     const pendingText = stripBoundaryMentions(commandText);
     const currentTurnText = stripBoundaryMentions(extractTextContent(parsedContent as any));
-    const historyRelevanceText = currentTurnText || pendingText;
     const activePendingHumanLoop = pendingHumanLoop && !isHumanLoopExpired(pendingHumanLoop)
       ? pendingHumanLoop
       : undefined;
@@ -1475,28 +1498,9 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
       effectiveParsedContent = buildHumanLoopResumeContent(activePendingHumanLoop, pendingText || extractTextContent(parsedContent as any));
       sessionManager.incrementPendingHumanLoopResume(sessionKey);
     } else if (followupQuestion) {
-      effectiveParsedContent = followupQuestion;
+      effectiveParsedContent = currentTurnText || pendingText;
     } else if (session.messages.length > 0 && pendingText) {
-      const historyItems: ConversationContextItem[] = session.messages
-        .slice(-6)
-        .map(message => {
-          if (message instanceof HumanMessage) {
-            return { role: "user", content: extractTextContent(message.content as any) };
-          }
-          if (message instanceof AIMessage) {
-            return { role: "assistant", content: stringifyModelContent(message.content) };
-          }
-          return { role: "system", content: stringifyModelContent(message.content) };
-        });
-      const relevance = classifyHistoryRelevance(historyItems, historyRelevanceText);
-      if (relevance.decision === "independent") {
-        console.log(`[Session] Auto clearing unrelated history for ${sessionKey}: ${relevance.reason}`);
-        const retainedProfileRepoHints = extractProjectsFromMcpHeaders(sessionManager.resolveMcpHeaders(sessionKey));
-        sessionManager.clearConversationHistory(sessionKey, retainedProfileRepoHints);
-        session = sessionManager.getOrCreateSession(sessionKey, true);
-      } else {
-        effectiveParsedContent = buildQuestionWithHistory(historyItems, historyRelevanceText);
-      }
+      effectiveParsedContent = currentTurnText || pendingText;
     }
     // --- Session Handling End ---
     let cleanupStreamExpiry = async () => {};
@@ -1643,20 +1647,46 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
 
       let fullContent = "";
       let piAgentEnded = false;
-      let piAgentEndFailure: "error" | "aborted" | null = null;
+      let piAgentEndFailure: PiAgentEndFailure | null = null;
+      let piAgentWasAborted = false;
       // 时间上限降级用：累计模型已经流出的助手文本，避免超时后整轮成果丢失。
       let partialAssistantText = "";
       let flowControl = createDefaultFlowControl();
       let flowControlStreamState = createFlowControlStreamState();
+      const toolContextRecords: ToolContextRecord[] = [];
+      let repoHints: string[] = [];
+      const updateActiveTaskHandoff = () => {
+        if (!ownsCurrentTask()) return;
+        currentTask.handoff = {
+          question: currentQuestion,
+          partialAnswer: collapseProgressUpdates(stripEmptyProtocolContent(partialAssistantText || fullContent)).slice(-8_000),
+          toolContextSummary: buildToolContextSummary(toolContextRecords).slice(-12_000),
+          repoHints: [...repoHints].slice(0, 20),
+          updatedAt: Date.now(),
+        };
+      };
       const applyFlowControlPatch = (patch: FlowControlPatch) => {
         flowControl = mergeFlowControl(flowControl, patch);
       };
-      let finalContentForPrompt: any = effectiveParsedContent;
-      const toolContextRecords: ToolContextRecord[] = [];
       const toolCallMap = new Map<string, { name: string; args: string; notified: boolean; completed: boolean; startedAt: number }>();
       let autoVerificationAgent: any = null;
       let autoVerificationScopedEvidenceTools: any[] = [];
-      let repoHints: string[] = [];
+      const handoff = replacedTask?.handoff ?? (followupQuestion ? {
+        question: followupQuestion,
+        partialAnswer: "",
+        toolContextSummary: "",
+        repoHints: [] as string[],
+        updatedAt: Date.now(),
+      } : undefined);
+      let finalContentForPrompt: any = buildLatestMessageContext(
+        stringifyModelContent(effectiveParsedContent),
+        handoff ? {
+          previousQuestion: handoff.question,
+          partialAnswer: handoff.partialAnswer,
+          toolContextSummary: handoff.toolContextSummary,
+          repoHints: handoff.repoHints,
+        } : undefined,
+      );
       let lastUpdateTime = 0;
       let heartbeatInFlight = false;
       let lastHeartbeatTime = 0;
@@ -2131,7 +2161,7 @@ ${hypotheses}
           }),
           buildToolResultFileReadTool(),
         );
-        autoVerificationAgent = await initializePiAgent(agentTools, plannerResult);
+        autoVerificationAgent = await initializePiAgent(agentTools, plannerResult, sessionKey);
         return {
           agent: autoVerificationAgent,
           scopedEvidenceTools: autoVerificationScopedEvidenceTools,
@@ -2154,28 +2184,47 @@ ${hypotheses}
           flowControlStreamState = createFlowControlStreamState();
         }
 
-        const stream = agent.streamPiEvents(String(userContent), {
+        const handoff = replacedTask?.handoff;
+        const latestMessageContext = buildLatestMessageContext(
+          stringifyModelContent(effectiveParsedContent),
+          handoff ? {
+            previousQuestion: handoff.question,
+            partialAnswer: handoff.partialAnswer,
+            toolContextSummary: handoff.toolContextSummary,
+            repoHints: handoff.repoHints,
+          } : undefined,
+        );
+        const agentUserContent = latestMessageContext;
+        const agentPrompt = stringifyModelContent(userContent).includes("【最新消息处理】")
+          ? userContent
+          : typeof userContent === "string"
+            ? `${userContent}\n\n${agentUserContent}`
+            : userContent;
+        const stream = agent.streamPiEvents(String(agentPrompt), {
           deadlineMs: requestDeadlineMs,
           signal: streamAbortController.signal,
           ...(signal ? { signal } : {}),
         }, buildMessagesForCurrentTurn({
           sessionMessages: session.messages,
-          userContent,
+          userContent: agentPrompt,
           repoHint: repoHints,
         }));
 
         for await (const event of stream) {
+          updateActiveTaskHandoff();
           if (event.type === "turn_start") {
             requestTurnCount += 1;
             requestModelCallCount += 1;
           }
           if (event.type === "agent_end") {
             piAgentEndFailure = extractPiAgentEndFailure(event);
-            if (piAgentEndFailure === "aborted") {
-              throw new Error("Pi Agent 执行已取消");
+            if (piAgentEndFailure?.reason === "aborted") {
+              piAgentWasAborted = true;
+              throw new Error(piAgentEndFailure.errorMessage || "Pi Agent 执行已取消");
             }
-            if (piAgentEndFailure === "error") {
-              throw new Error("Pi Agent 模型执行失败");
+            if (piAgentEndFailure?.reason === "error") {
+              const detail = [piAgentEndFailure.errorMessage, piAgentEndFailure.rawStopReason].filter(Boolean).join("；");
+              throw new Error(detail ? `Pi Agent 模型执行失败：${detail}` : "Pi Agent 模型执行失败");
             }
             const finalMessage = eventToLegacyMessage(event);
             const finalText = finalMessage ? stringifyModelContent(finalMessage.content) : "";
@@ -2231,6 +2280,7 @@ ${hypotheses}
                 : {}),
             };
             toolContextRecords.push(toolRecord);
+            updateActiveTaskHandoff();
             if (isRequestRawLoggingEnabled()) requestToolRecords.push({ ...toolRecord });
             if (toolRecord.name && !requestToolNames.includes(toolRecord.name)) requestToolNames = [...requestToolNames, toolRecord.name];
             console.log(`[Tool Call Result] Name: ${toolRecord.name}, Status: ${toolRecord.status || "unknown"}, ArgLength: ${toolRecord.args.length}, Result Size: ${stringifyModelContent(toolMsg.content).length}`);
@@ -2296,6 +2346,7 @@ ${hypotheses}
               }
               if (extractedDelta.content) {
                 partialAssistantText = `${partialAssistantText}${extractedDelta.content}`.slice(-40_000);
+                updateActiveTaskHandoff();
               }
               // 普通 assistant 文本可能只是“已定位候选/继续核实”等中间状态。
               // 最终正文只接受 agent_end，避免把中间状态当成用户最终回复。
@@ -2394,7 +2445,7 @@ ${hypotheses}
             finishRequestTiming("ttl_expired", "stream_expired");
             return;
           }
-          if (piAgentEndFailure === "aborted") {
+          if (piAgentWasAborted) {
             // SDK 在截止中止后仍可能补发 agent_end(aborted)：此时必须走降级交付，而不是静默结束。
             if (Date.now() - streamStartedAt >= requestDeadlineMs) {
               await deliverDeadlineDegradedReply();

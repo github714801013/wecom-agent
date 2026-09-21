@@ -150,6 +150,30 @@ assert.doesNotMatch(
   "剩余充足时不得要求收尾",
 );
 
+// 收敛压力：预算中后段必须提前出现收敛提示，不能只在收尾档才第一次收紧
+assert.match(
+  formatPiBudgetNote(startedAt, 480_000, startedAt + 300_000),
+  /优先收敛/,
+  "预算中后段必须提示优先收敛，避免模型检索到硬截止",
+);
+assert.doesNotMatch(
+  formatPiBudgetNote(startedAt, 480_000, startedAt + 300_000),
+  /剩余时间不足/,
+  "过半提示不得等同于强制收尾",
+);
+assert.doesNotMatch(
+  formatPiBudgetNote(startedAt, 480_000, startedAt + 240_000),
+  /优先收敛/,
+  "预算前段不得提示收敛，避免抑制正常检索",
+);
+
+// 短预算边界：收敛阈值不得超过总预算，否则首秒即抑制全部检索
+assert.doesNotMatch(
+  formatPiBudgetNote(startedAt, 120_000, startedAt + 15_000),
+  /优先收敛/,
+  "短预算下必须保留正常检索阶段",
+);
+
 const controller = new AbortController();
 controller.abort();
 await assert.rejects(

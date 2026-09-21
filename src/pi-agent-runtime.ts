@@ -142,15 +142,31 @@ export function filterPiAgentTools(tools: any[]) {
 export type PiRunBudgetNote = () => string;
 
 const PI_WRAP_UP_REMAINING_SECONDS = 90;
+const PI_CONVERGE_REMAINING_RATIO = 0.45;
+const PI_CONVERGE_MIN_REMAINING_SECONDS = 180;
+const PI_CONVERGE_MAX_REMAINING_SECONDS = 420;
 
 export function formatPiBudgetNote(startedAt: number, deadlineMs: number, now = Date.now()) {
   const elapsedSeconds = Math.max(0, Math.round((now - startedAt) / 1000));
   const limitSeconds = Math.max(1, Math.round(deadlineMs / 1000));
   const remainingSeconds = Math.max(0, limitSeconds - elapsedSeconds);
   const base = `[时间预算] 已用 ${elapsedSeconds}s / 上限 ${limitSeconds}s，剩余 ${remainingSeconds}s`;
-  return remainingSeconds <= PI_WRAP_UP_REMAINING_SECONDS
-    ? `${base}。剩余时间不足，必须立即用现有证据给出最终结论，不要再发起新的检索。`
-    : `${base}。请据此判断是否继续检索。`;
+  if (remainingSeconds <= PI_WRAP_UP_REMAINING_SECONDS) {
+    return `${base}。剩余时间不足，必须立即用现有证据给出最终结论，不要再发起新的检索。`;
+  }
+  // 收敛档只在预算足够长时启用；else 分支保证短预算下仍保留正常检索阶段
+  const convergeRemainingSeconds = Math.min(
+    PI_CONVERGE_MAX_REMAINING_SECONDS,
+    Math.max(
+      PI_CONVERGE_MIN_REMAINING_SECONDS,
+      limitSeconds * PI_CONVERGE_REMAINING_RATIO,
+    ),
+    limitSeconds - PI_CONVERGE_MIN_REMAINING_SECONDS,
+  );
+  if (remainingSeconds <= convergeRemainingSeconds) {
+    return `${base}。请优先收敛：缺口证据优先补查，其余检索不再展开，尽早用现有证据给出结论。`;
+  }
+  return `${base}。请据此判断是否继续检索。`;
 }
 
 /** 将现有 MCP 工具注册为 Pi AgentTool，保留工具的 invoke 契约。 */

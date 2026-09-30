@@ -93,4 +93,57 @@ assertTrue(visionSource.includes("方法名、类名、文件路径、行号"), 
 assertTrue(visionSource.includes("错误码/状态码含义"), "视觉识别应提取错误码含义");
 assertTrue(visionSource.includes("根本原因/排查方向"), "视觉识别应提取根因和排查方向");
 
+const downloadController = new AbortController();
+let releaseDownload!: () => void;
+let downloadBegan!: () => void;
+const downloading = new Promise<void>(resolve => { downloadBegan = resolve; });
+let cancelledVisionCalls = 0;
+const cancelledParse = parseWeComMessage(quoteBody, {
+  downloadFile: async () => {
+    downloadBegan();
+    await new Promise<void>(resolve => { releaseDownload = resolve; });
+    return { buffer: Buffer.from("cancelled-image") };
+  },
+} as any, async () => {
+  cancelledVisionCalls += 1;
+  return "不应识别被取消的图片";
+}, downloadController.signal);
+await downloading;
+downloadController.abort();
+releaseDownload();
+let cancelledParseRejected = false;
+try {
+  await cancelledParse;
+} catch {
+  cancelledParseRejected = true;
+}
+assertTrue(cancelledParseRejected, "下载期间取消后，解析必须退出而非继续返回旧结果");
+assertTrue(cancelledVisionCalls === 0, "迟到下载结果不得启动旧图片的视觉模型");
+
+const visionController = new AbortController();
+let visionBegan!: () => void;
+const visionStarted = new Promise<void>(resolve => { visionBegan = resolve; });
+let visionSignal: AbortSignal | undefined;
+const interruptedVision = parseWeComMessage(quoteBody, mockBot, async input => {
+  visionSignal = input.signal;
+  visionBegan();
+  await new Promise<void>((_resolve, reject) => {
+    input.signal?.addEventListener("abort", () => reject(new Error("图片识别已取消")), { once: true });
+  });
+  return "不应保留的旧识别结果";
+}, visionController.signal);
+await visionStarted;
+if (visionSignal !== visionController.signal) {
+  visionController.abort();
+  throw new Error("请求取消信号必须传入图片识别模型");
+}
+visionController.abort();
+let interruptedVisionRejected = false;
+try {
+  await interruptedVision;
+} catch {
+  interruptedVisionRejected = true;
+}
+assertTrue(interruptedVisionRejected, "取消识别不得转换为普通的图片识别失败兜底");
+
 console.log("图片视觉上下文解析测试通过");

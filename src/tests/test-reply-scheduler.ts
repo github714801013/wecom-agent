@@ -89,4 +89,20 @@ const afterReject = rejectionScheduler.schedule(async () => "after");
 await assert.rejects(rejected, /send failed/);
 assert.equal(await afterReject, "after");
 
+// 出队检查后、真正调用发送函数前，owner 可能已被下一条消息替换。
+const executionBoundaryScheduler = createReplyScheduler(1);
+let ownsReply = true;
+let staleSendRan = false;
+const boundaryReply = executionBoundaryScheduler.scheduleIf(
+  () => ownsReply,
+  async () => {
+    staleSendRan = true;
+    return "stale";
+  },
+);
+ownsReply = false;
+assert.equal(await boundaryReply, undefined, "实际发送前必须再次确认 owner");
+assert.equal(staleSendRan, false, "被替换消息不得穿过微任务边界发送");
+assert.equal(await executionBoundaryScheduler.schedule(async () => "latest"), "latest");
+
 console.log("回复调度器验证通过");

@@ -22,9 +22,11 @@ import {
 } from "./pi-agent-runtime.js";
 import { stringifyModelContent } from "./model-content.js";
 import { redactSensitiveValues } from "./request-raw-trace.js";
+import { createAgentSlotScheduler, type AgentSlotLease, type AgentSlotScheduler } from "./agent-slot-scheduler.js";
 
 const PI_SESSION_EXPIRATION_MS = 60 * 60 * 1000;
 let piSessions = new Map<string, Promise<CodingSessionState>>();
+const piSessionRuns = new Map<string, AgentSlotScheduler>();
 
 type CodingSessionState = {
   session: AgentSession;
@@ -405,6 +407,9 @@ export function createPiCodingAgentFacade(options: PiCodingAgentRuntimeOptions):
     });
     const toolRegistry = createSessionToolRegistry(runtimeTools);
     const key = options.sessionKey || "__default__";
+    const sessionRuns = piSessionRuns.get(key) || createAgentSlotScheduler(1);
+    piSessionRuns.set(key, sessionRuns);
+    let sessionLease: AgentSlotLease | undefined;
     let state: CodingSessionState | undefined;
     let unsubscribe: (() => void) | undefined;
     let wake: (() => void) | undefined;
@@ -432,6 +437,8 @@ export function createPiCodingAgentFacade(options: PiCodingAgentRuntimeOptions):
     const timer = deadlineMs > 0 ? setTimeout(abort, deadlineMs) : undefined;
 
     try {
+      sessionLease = await sessionRuns.acquire(runAbort.signal);
+      if (cancelRequested || runAbort.signal.aborted) throw new Error("Pi Agent 执行已取消");
       state = await getCodingSession(key, options, runtimeTools, toolRegistry);
       if (cancelRequested || runAbort.signal.aborted) throw new Error("Pi Agent 执行已取消");
       state.toolRegistry.replace(runtimeTools);
@@ -483,6 +490,7 @@ export function createPiCodingAgentFacade(options: PiCodingAgentRuntimeOptions):
         });
       void promptPromise.catch(() => undefined);
       idle = promptPromise.then(() => state?.session.waitForIdle()).then(() => undefined);
+      void idle.catch(() => undefined);
 
       while (!ended || queue.length > 0) {
         if (queue.length === 0) {
@@ -506,6 +514,10 @@ export function createPiCodingAgentFacade(options: PiCodingAgentRuntimeOptions):
       streamOptions.signal?.removeEventListener("abort", abort);
       if (activeAbort === abort) activeAbort = undefined;
       await state?.session.waitForIdle().catch(() => undefined);
+      sessionLease?.release();
+      if (sessionRuns.activeCount === 0 && sessionRuns.queuedCount === 0 && piSessionRuns.get(key) === sessionRuns) {
+        piSessionRuns.delete(key);
+      }
     }
   };
 

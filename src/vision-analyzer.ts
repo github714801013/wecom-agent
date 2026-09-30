@@ -7,6 +7,7 @@ export interface VisionAnalysisInput {
   question: string;
   imageUrl: string;
   contextLabel?: string;
+  signal?: AbortSignal;
 }
 
 export type VisionImageAnalyzer = (input: VisionAnalysisInput) => Promise<string>;
@@ -113,7 +114,7 @@ export async function analyzeImageForQuestion(input: VisionAnalysisInput): Promi
         { type: "image_url", image_url: { url: input.imageUrl } },
       ],
     }),
-  ]);
+  ], input.signal ? { signal: input.signal } : {});
 
   const content = stringifyModelContent(response.content).trim();
   if (!content) {

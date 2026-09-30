@@ -41,7 +41,7 @@ export function createReplyScheduler(maxInFlight = 4): ReplyScheduler {
       }
       activeCount += 1;
       void Promise.resolve()
-        .then(job.run)
+        .then(() => job.shouldRun && !job.shouldRun() ? undefined : job.run())
         .then(job.resolve, job.reject)
         .finally(() => {
           activeCount -= 1;

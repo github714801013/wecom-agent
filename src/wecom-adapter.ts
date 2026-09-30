@@ -94,6 +94,23 @@ interface ActiveTaskHandoff {
   updatedAt: number;
 }
 
+const MAX_ACTIVE_HANDOFF_QUESTION_LENGTH = 8_000;
+
+function buildActiveTaskHandoff(question: string, previous?: ActiveTaskHandoff): ActiveTaskHandoff {
+  const current = question.trim();
+  const earlier = previous?.question.trim() || "";
+  const combined = earlier === current || earlier.endsWith(`\n\n${current}`)
+    ? earlier
+    : [earlier, current].filter(Boolean).join("\n\n");
+  return {
+    question: combined.slice(-MAX_ACTIVE_HANDOFF_QUESTION_LENGTH),
+    partialAnswer: previous?.partialAnswer || "",
+    toolContextSummary: previous?.toolContextSummary || "",
+    repoHints: [...(previous?.repoHints || [])],
+    updatedAt: Date.now(),
+  };
+}
+
 interface ActiveTaskState {
   msgid: string;
   cancelled: boolean;
@@ -354,18 +371,24 @@ async function appendImageWithAnalysis(
   question: string,
   contextLabel: string,
   imageAnalyzer: VisionImageAnalyzer,
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   const imageUrl = await fetchImageAsBase64(bot, image?.url || "", image?.aeskey);
+  signal?.throwIfAborted();
   try {
     const analysis = await imageAnalyzer({
       question,
       imageUrl,
       contextLabel,
+      ...(signal ? { signal } : {}),
     });
+    signal?.throwIfAborted();
     if (analysis.trim()) {
       items.push({ type: "text", text: analysis.trim() });
     }
   } catch (error) {
+    signal?.throwIfAborted();
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Image analysis failed for ${contextLabel}:`, error);
     items.push({ type: "text", text: `【图片识别结果】\n图片识别失败：${message}。已保留原图供主模型参考。` });
@@ -682,7 +705,9 @@ export async function parseWeComMessage(
   body: any,
   bot: WSClient,
   imageAnalyzer: VisionImageAnalyzer = analyzeImageForQuestion,
+  signal?: AbortSignal,
 ): Promise<string | ParsedWeComContentItem[]> {
+  signal?.throwIfAborted();
   const msgType = body.msgtype;
   const fromUser = body.from?.userid || "unknown";
   const imageQuestionContext = buildImageQuestionContext(body);
@@ -696,7 +721,7 @@ export async function parseWeComMessage(
 
     case MessageType.Image:
       mainItems.push({ type: "text", text: `[用户 ${fromUser} 发送了一张图片]` });
-      await appendImageWithAnalysis(mainItems, bot, body.image, imageQuestionContext, "主消息图片", imageAnalyzer);
+      await appendImageWithAnalysis(mainItems, bot, body.image, imageQuestionContext, "主消息图片", imageAnalyzer, signal);
       break;
 
     case MessageType.Voice:
@@ -726,7 +751,7 @@ export async function parseWeComMessage(
         if (item.msgtype === "text") {
           mainItems.push({ type: "text", text: item.text?.content });
         } else if (item.msgtype === "image") {
-          await appendImageWithAnalysis(mainItems, bot, item.image, imageQuestionContext, `主消息图文混排第${index + 1}项`, imageAnalyzer);
+          await appendImageWithAnalysis(mainItems, bot, item.image, imageQuestionContext, `主消息图文混排第${index + 1}项`, imageAnalyzer, signal);
         }
       }
       break;
@@ -743,14 +768,14 @@ export async function parseWeComMessage(
     if (qType === "text") {
       quoteItems.push({ type: "text", text: body.quote.text?.content });
     } else if (qType === "image") {
-      await appendImageWithAnalysis(quoteItems, bot, body.quote.image, imageQuestionContext, "引用图片", imageAnalyzer);
+      await appendImageWithAnalysis(quoteItems, bot, body.quote.image, imageQuestionContext, "引用图片", imageAnalyzer, signal);
     } else if (qType === "mixed") {
       const qMixedItems = body.quote.mixed?.msg_item || [];
       for (const [index, item] of qMixedItems.entries()) {
         if (item.msgtype === "text") {
           quoteItems.push({ type: "text", text: item.text?.content });
         } else if (item.msgtype === "image") {
-          await appendImageWithAnalysis(quoteItems, bot, item.image, imageQuestionContext, `引用图文混排第${index + 1}项`, imageAnalyzer);
+          await appendImageWithAnalysis(quoteItems, bot, item.image, imageQuestionContext, `引用图文混排第${index + 1}项`, imageAnalyzer, signal);
         }
       }
     } else {
@@ -759,6 +784,7 @@ export async function parseWeComMessage(
   }
 
   // 3. 组合与合并
+  signal?.throwIfAborted();
   const hasImage = mainItems.some(i => i.type === "image_url") || quoteItems.some(i => i.type === "image_url");
 
   if (!hasImage) {
@@ -1016,9 +1042,11 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
       console.warn(`[${botConfig.name}] Reply ack timeout for ${body.msgid}; cancelling only this request.`);
     };
     replyErrorHandlers.set(body.msgid, handleRequestReplyError);
-    const incomingText = body.msgtype === MessageType.Text ? body.text?.content || "" : "";
+    const incomingText = collectPayloadText(body).join("\n");
     requestRawInput = incomingText;
-    const incomingIntent = detectActiveMessageIntent(stripBoundaryMentions(incomingText));
+    const incomingIntent = body.msgtype === MessageType.Text && stripBoundaryMentions(incomingText).trim()
+      ? detectActiveMessageIntent(stripBoundaryMentions(incomingText))
+      : "replace_with_followup";
     const controlTargetTask = incomingIntent === "stop" || incomingIntent === "continue_current"
       ? activeTasks.get(sessionKey)
       : undefined;
@@ -1038,9 +1066,13 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
       && !preStreamExpired
       && !requestTimingFinished;
     if (admissionTask) {
+      admissionTask.handoff = buildActiveTaskHandoff(
+        admissionTask.question,
+        replacedTask?.handoff ?? (replacedTask ? buildActiveTaskHandoff(replacedTask.question) : undefined),
+      );
       requestTaskOwner = admissionTask;
-      replacedTask?.cancel?.();
       activeTasks.set(sessionKey, admissionTask);
+      replacedTask?.cancel?.();
       replyOwnerChecks.set(body.msgid, requestOwnerCheck);
     }
     if (incomingIntent === "stop") {
@@ -1248,7 +1280,7 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
     let stopThinkingHeartbeat = () => {};
     try {
       parsedContent = await withRequestAbort(
-        () => parseWeComMessage(body, bot),
+        () => parseWeComMessage(body, bot, analyzeImageForQuestion, requestAbortController.signal),
         requestAbortController.signal,
         "消息解析已取消",
       );
@@ -1282,6 +1314,9 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
     if (admissionTask && activeTasks.get(sessionKey) !== admissionTask) {
       finishRequestTiming("cancelled", "task_replaced");
       return;
+    }
+    if (admissionTask) {
+      admissionTask.handoff = buildActiveTaskHandoff(extractTextContent(parsedContent), admissionTask.handoff);
     }
 
     // --- Session Handling Start ---
@@ -1655,13 +1690,18 @@ export async function startBot(botConfig: BotConfig, client?: WSClient, dependen
       let flowControlStreamState = createFlowControlStreamState();
       const toolContextRecords: ToolContextRecord[] = [];
       let repoHints: string[] = [];
+      const inheritedHandoff = currentTask.handoff;
       const updateActiveTaskHandoff = () => {
         if (!ownsCurrentTask()) return;
         currentTask.handoff = {
-          question: currentQuestion,
-          partialAnswer: collapseProgressUpdates(stripEmptyProtocolContent(partialAssistantText || fullContent)).slice(-8_000),
-          toolContextSummary: buildToolContextSummary(toolContextRecords).slice(-12_000),
-          repoHints: [...repoHints].slice(0, 20),
+          ...buildActiveTaskHandoff(currentQuestion, currentTask.handoff),
+          partialAnswer: [
+            inheritedHandoff?.partialAnswer,
+            collapseProgressUpdates(stripEmptyProtocolContent(partialAssistantText || fullContent)),
+          ].filter(Boolean).join("\n\n").slice(-8_000),
+          toolContextSummary: [inheritedHandoff?.toolContextSummary, buildToolContextSummary(toolContextRecords)]
+            .filter(Boolean).join("\n\n").slice(-12_000),
+          repoHints: [...new Set([...(inheritedHandoff?.repoHints || []), ...repoHints])].slice(0, 20),
           updatedAt: Date.now(),
         };
       };
@@ -2211,6 +2251,10 @@ ${hypotheses}
         }));
 
         for await (const event of stream) {
+          if (signal?.aborted || streamAbortController.signal.aborted || shouldStopCurrentTask()) {
+            fullContent = "";
+            throw new Error(STREAM_EXPIRED_MESSAGE);
+          }
           updateActiveTaskHandoff();
           if (event.type === "turn_start") {
             requestTurnCount += 1;

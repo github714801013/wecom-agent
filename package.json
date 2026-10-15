@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "npx tsc && node dist/tests/test-pi-agent-runtime.js && node dist/tests/test-mcp-sdk-bridge.js && node dist/tests/test-pi-native-session.js && node dist/tests/test-pi-session-replacement.js && node dist/tests/test-pi-compaction-observability.js && node dist/tests/test-pi-primary-path.js && node dist/tests/test-latest-message-owner.js && node dist/tests/test-reply-scheduler.js && node dist/tests/test-image-vision-context.js"
+    "test": "npx tsc && node dist/tests/test-pi-agent-runtime.js && node dist/tests/test-mcp-sdk-bridge.js && node dist/tests/test-list-repos-scope.js && node dist/tests/test-pi-native-session.js && node dist/tests/test-pi-session-replacement.js && node dist/tests/test-pi-compaction-observability.js && node dist/tests/test-pi-primary-path.js && node dist/tests/test-latest-message-owner.js && node dist/tests/test-reply-scheduler.js && node dist/tests/test-image-vision-context.js"
   },
   "keywords": [],
   "author": "",

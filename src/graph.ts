@@ -737,7 +737,7 @@ function getToolSchemaKeys(tool: any) {
 
 function chooseQueryArgName(tool: any) {
   const keys = getToolSchemaKeys(tool);
-  return ["query", "searchText", "pattern"].find(key => keys.includes(key));
+  return ["query", "searchText", "pattern", "search_query"].find(key => keys.includes(key));
 }
 
 function chooseSearchTool(tools: any[]) {
@@ -748,7 +748,7 @@ function chooseSearchTool(tools: any[]) {
 function isGitNexusQueryTool(tool: any) {
   const keys = getToolSchemaKeys(tool);
   return tool?.name === "query"
-    && keys.includes("query")
+    && (keys.includes("search_query") || keys.includes("query"))
     && keys.includes("zoekt")
     && keys.includes("repo")
     && keys.includes("max_symbols");
@@ -1010,7 +1010,7 @@ export function scopeToolsToRepo(tools: any[], repoHint?: string | string[]) {
       }
 
       const results = await Promise.all(repoHints.map(repo => {
-        const queryValue = args.query ?? args.searchText ?? args.pattern;
+        const queryValue = args.search_query ?? args.query ?? args.searchText ?? args.pattern;
         console.log("[GitNexus Scope]", JSON.stringify({
           tool: tool.name || "unknown",
           repo,

@@ -5,7 +5,7 @@ import { HumanMessage, AIMessage, BaseMessage, SystemMessage, ToolMessage } from
 import { sessionManager, type ReplyMode } from "./session-manager.js";
 import { fetchImageAsBase64, downloadMediaFile } from "./media-helper.js";
 import { analyzeImageForQuestion, type VisionImageAnalyzer } from "./vision-analyzer.js";
-import { buildMcpHeaders, filterToolsForKnownProjectScope, getAllMcpTools } from "./mcp-client.js";
+import { buildMcpHeaders, getAllMcpTools } from "./mcp-client.js";
 import {
   buildHumanLoopReply,
   buildHumanLoopResumeContent,
@@ -2184,9 +2184,14 @@ ${hypotheses}
         const defaultRepoHints = extractProjectsFromMcpHeaders(mcpHeaderOverrides);
         const explicitRepoHints = extractExplicitRepoHints(textToPlan, defaultRepoHints);
         repoHints = sessionManager.resolveRepoHints(sessionKey, explicitRepoHints, defaultRepoHints);
+        // 默认 profile 范围只是环境边界，只有用户收窄到具体仓库时才把它作为过滤参数注入查询。
+        const scopedRepoHints = repoHints.length === defaultRepoHints.length
+          && repoHints.every((hint, index) => hint === defaultRepoHints[index])
+          ? []
+          : repoHints;
         autoVerificationScopedEvidenceTools = scopeToolsToRepo(
-          filterToolsForKnownProjectScope(tools, repoHints),
-          repoHints,
+          tools,
+          scopedRepoHints,
         );
         const agentTools = buildPrimaryPiAgentTools(
           autoVerificationScopedEvidenceTools,

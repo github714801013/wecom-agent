@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import type { WSClient } from "@wecom/aibot-node-sdk";
 import type { BotConfig } from "../config.js";
+import { sessionManager } from "../session-manager.js";
+import { wrapGitNexusListReposTool } from "../mcp-client.js";
 import {
   buildPrimaryPiAgentTools,
   extractPiAgentEndContent,
@@ -124,9 +126,28 @@ const integrationBot: BotConfig = {
 const client = new FakeWsClient();
 let registeredTools: Array<{ name?: string }> = [];
 let agentInvocation = 0;
+const primaryQueryCalls: Array<Record<string, unknown>> = [];
+// 注入非空项目范围：范围已知时仍须把 list_repos 交给模型，否则模型只能猜仓库名。
+sessionManager.setMcpHeaders("single:pi-primary-path-user", "gitnexus", { projects: "oa-stock,oa-order" });
+// 夹具必须经真实包装函数，才能覆盖“项目范围已知时的注册过滤”这条路径。
+const listReposTool = wrapGitNexusListReposTool({
+  name: "gitnexus_list_repos",
+  description: "List indexed repositories",
+  invoke: async () => JSON.stringify({ repositories: [{ name: "oa-stock" }, { name: "oa-order" }] }),
+}, "gitnexus", { projects: "oa-stock,oa-order" });
 await startBot(integrationBot, client as unknown as WSClient, {
   judgeSensitiveRequestByModel: async () => ({ blocked: false, category: null, matchedCredentialTypes: [] }),
-  getAllMcpTools: async () => [{ name: "query", invoke: async () => "unused" }],
+  getAllMcpTools: async () => [
+    {
+      name: "query",
+      schema: { shape: { search_query: {}, repo: {}, zoekt: {} } },
+      invoke: async (args: unknown) => {
+        primaryQueryCalls.push(args as Record<string, unknown>);
+        return "unused";
+      },
+    },
+    listReposTool,
+  ],
   initializeAgent: async (tools: any[]) => {
     registeredTools = tools;
     agentInvocation += 1;
@@ -165,6 +186,19 @@ assert.equal(
   registeredTools.some(tool => tool.name === "runtime_todolist_update"),
   false,
   "主请求不得向 Pi 注册 runtime Todo 工具",
+);
+assert.equal(
+  registeredTools.some(tool => tool.name === "gitnexus_list_repos"),
+  true,
+  "项目范围已知时仍必须把 list_repos 交给模型，否则模型无法查到真实仓库名",
+);
+// 默认 profile 范围只是环境边界，不得变成每次查询的 repo 过滤参数。
+const primaryQueryTool = registeredTools.find(tool => tool.name === "query") as any;
+await primaryQueryTool.invoke({ search_query: "运营商配置" });
+assert.deepEqual(
+  primaryQueryCalls,
+  [{ search_query: "运营商配置" }],
+  "未收窄到具体仓库时不得强制注入 repo 过滤参数",
 );
 assert.equal(
   client.replies.some(reply => reply.final && reply.content.includes("Pi 已完成最终结论")),
@@ -213,6 +247,65 @@ assert.equal(
 assert.ok(
   client.replies.filter(reply => reply.final).length > protocolOnlyFinalReplyCount,
   "协议清理后为空必须走明确错误终态",
+);
+
+// 用户明确收窄范围时，当次查询必须携带该 repo（GitNexus 的检索文本参数是 search_query）。
+const narrowedQueryCalls: Array<Record<string, unknown>> = [];
+const narrowedBot: BotConfig = {
+  name: "pi-repo-scope-test",
+  botId: "pi-repo-scope-bot",
+  secret: "test-secret",
+  wsUrl: "ws://test.invalid",
+  mcpHeaders: {},
+};
+const narrowedClient = new FakeWsClient();
+let narrowedTools: any[] = [];
+sessionManager.setMcpHeaders("single:pi-repo-scope-user", "gitnexus", { projects: "oa-stock,oa-order" });
+await startBot(narrowedBot, narrowedClient as unknown as WSClient, {
+  judgeSensitiveRequestByModel: async () => ({ blocked: false, category: null, matchedCredentialTypes: [] }),
+  getAllMcpTools: async () => [
+    {
+      name: "query",
+      schema: { shape: { search_query: {}, repo: {}, zoekt: {} } },
+      invoke: async (args: unknown) => {
+        narrowedQueryCalls.push(args as Record<string, unknown>);
+        return "unused";
+      },
+    },
+  ],
+  initializeAgent: async (tools: any[]) => {
+    narrowedTools = tools;
+    return {
+      async *streamPiEvents() {
+        yield { type: "turn_start" };
+        yield {
+          type: "agent_end",
+          messages: [{
+            role: "assistant",
+            stopReason: "stop",
+            content: [{ type: "text", text: "Pi 已完成范围化结论" }],
+          }],
+        };
+      },
+    } as any;
+  },
+} as any);
+await narrowedClient.emitMessage({
+  headers: { req_id: "pi-repo-scope-request" },
+  body: {
+    msgid: "pi-repo-scope-request",
+    msgtype: "text",
+    text: { content: "只查 oa-order 的业务配置逻辑" },
+    chattype: "single",
+    from: { userid: "pi-repo-scope-user" },
+  },
+});
+const narrowedQueryTool = narrowedTools.find(tool => tool.name === "query");
+await narrowedQueryTool.invoke({ search_query: "运营商配置" });
+assert.deepEqual(
+  narrowedQueryCalls,
+  [{ search_query: "运营商配置", repo: "oa-order" }],
+  "用户明确只查某仓库时，当次查询必须携带该 repo",
 );
 
 // 时间预算耗尽：必须交付已确认要点，而不是只回一张失败卡片

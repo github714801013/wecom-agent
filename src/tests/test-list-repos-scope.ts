@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import {
-  filterToolsForKnownProjectScope,
+  isProjectDiscoveryTool,
   parseQueryableProjects,
   wrapGitNexusListReposTool,
 } from "../mcp-client.js";
@@ -78,14 +78,22 @@ await unscopedTool.invoke({});
 assert.equal(unscopedCalls.length, 1, "未知项目范围省略 scope 时必须发现全部已索引项目");
 
 assert.equal(
-  filterToolsForKnownProjectScope([wrappedTool], ["oa-stock"]).length,
-  0,
-  "项目范围已知时不得把 GitNexus list_repos 注册给 Pi",
+  isProjectDiscoveryTool(wrappedTool),
+  true,
+  "包装后的 GitNexus list_repos 必须标记为项目发现工具",
 );
+assert.equal(
+  isProjectDiscoveryTool(nonTargetTool),
+  false,
+  "非 list_repos 工具不得被标记为项目发现工具",
+);
+
+// 项目范围已知时，模型必须仍能查到自己的可查项目，否则只能猜测仓库名。
+const knownScopeResult = JSON.parse(String(await wrappedTool.invoke({ scope: "queryable" })));
 assert.deepEqual(
-  filterToolsForKnownProjectScope([wrappedTool], []),
-  [wrappedTool],
-  "项目范围未知时必须保留 GitNexus list_repos",
+  knownScopeResult.projects,
+  ["oa-stock", "oa-order"],
+  "项目范围已知时 list_repos 仍须返回可查项目，不得被注册阶段摘除",
 );
 
 console.log("list_repos scope 参数验证通过");

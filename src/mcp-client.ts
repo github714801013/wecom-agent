@@ -155,11 +155,6 @@ export function isProjectDiscoveryTool(mcpTool: any) {
   return mcpTool?.[PROJECT_DISCOVERY_TOOL_MARKER] === true;
 }
 
-export function filterToolsForKnownProjectScope(tools: any[], repoHints: readonly string[] = []) {
-  if (!repoHints.some(hint => hint.trim())) return tools;
-  return tools.filter(tool => !isProjectDiscoveryTool(tool));
-}
-
 export function wrapGitNexusListReposTool(
   mcpTool: any,
   serverName: string,

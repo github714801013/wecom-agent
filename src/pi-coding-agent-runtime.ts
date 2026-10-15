@@ -215,7 +215,7 @@ async function createCodingSession(
     },
     retry: {
       enabled: true,
-      maxRetries: 1,
+      maxRetries: 3,
       baseDelayMs: 1_000,
       provider: { maxRetries: 0, maxRetryDelayMs: 1_000 },
     },
@@ -473,9 +473,6 @@ export function createPiCodingAgentFacade(options: PiCodingAgentRuntimeOptions):
       if (!state.initialized) {
         const history = toPiMessages(removePromptMessage(contextMessages, prompt));
         for (const message of history) state.session.sessionManager.appendMessage(message);
-        if (history.length > 0) {
-          state.session.agent.state.messages = state.session.sessionManager.buildSessionContext().messages;
-        }
         const initializedState = { ...state, initialized: true };
         piSessions = new Map(piSessions).set(key, Promise.resolve(initializedState));
         state = initializedState;

@@ -318,6 +318,14 @@ function toPiMessages(messages: BaseMessage[]): Message[] {
   return converted;
 }
 
+function setAgentMessagesPreservingSystemPrompt(agent: Agent, messages: BaseMessage[], prompt: string) {
+  const systemMessages = agent.state.messages.filter(message => message.role === "system");
+  agent.state.messages = [
+    ...systemMessages,
+    ...toPiMessages(removePromptMessage(messages, prompt)),
+  ];
+}
+
 function extractAssistantText(message: unknown): string {
   if (!message || typeof message !== "object") return "";
   const record = message as { role?: unknown; content?: unknown };
@@ -505,7 +513,7 @@ export function createPiAgentFacade(
       const timer = deadlineMs > 0
         ? setTimeout(abort, deadlineMs)
         : undefined;
-      agent.state.messages = toPiMessages(removePromptMessage(contextMessages, prompt));
+      setAgentMessagesPreservingSystemPrompt(agent, contextMessages, prompt);
       const promptPromise = (streamOptions.signal?.aborted
         ? Promise.reject(new Error("Pi Agent 执行已取消"))
         : Promise.resolve().then(() => {
@@ -603,7 +611,7 @@ export function createPiAgentFacade(
         agent.abort();
       };
       activeAbort = abort;
-      agent.state.messages = toPiMessages(removePromptMessage(input.messages, latestPrompt(input.messages)));
+      setAgentMessagesPreservingSystemPrompt(agent, input.messages, latestPrompt(input.messages));
       const promptPromise = (streamOptions.signal?.aborted
         ? Promise.reject(new Error("Pi Agent 执行已取消"))
         : Promise.resolve().then(() => {

@@ -1,4 +1,4 @@
-# 使用 Node.js 22 官方镜像（Pi Agent Core 0.85 要求 Node >=22.19）
+# 使用 Node.js 22 官方镜像（Pi Agent Core 要求 Node >=22.19）
 FROM node:22.19-alpine AS builder
 
 WORKDIR /app

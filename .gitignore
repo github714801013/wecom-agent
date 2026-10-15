@@ -9,3 +9,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+
+# docs/engineering 仅托管计划与规格
+docs/engineering/*
+!docs/engineering/plans/
+!docs/engineering/plans/**
+!docs/engineering/specs/
+!docs/engineering/specs/**

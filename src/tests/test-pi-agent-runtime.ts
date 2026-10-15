@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import http from "node:http";
+import { once } from "node:events";
 import { HumanMessage } from "@langchain/core/messages";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
@@ -301,5 +303,56 @@ try {
   lifecycleAgentPrototype.waitForIdle = lifecycleOriginalWaitForIdle;
   lifecycleAgentPrototype.subscribe = lifecycleOriginalSubscribe;
 }
+
+const lightweightRequests: Array<{ messages?: Array<{ role?: string; content?: unknown }> }> = [];
+const lightweightServer = http.createServer(async (req, res) => {
+  let body = "";
+  for await (const chunk of req) body += chunk;
+  lightweightRequests.push(JSON.parse(body || "{}"));
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  res.write(`data: ${JSON.stringify({
+    id: "lightweight",
+    model: "fixture",
+    choices: [{ index: 0, delta: { role: "assistant", content: "兼容性检查完成" }, finish_reason: null }],
+  })}\n\n`);
+  res.write(`data: ${JSON.stringify({
+    id: "lightweight",
+    model: "fixture",
+    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+  })}\n\n`);
+  res.end("data: [DONE]\n\n");
+});
+lightweightServer.listen(0, "127.0.0.1");
+await once(lightweightServer, "listening");
+const lightweightAddress = lightweightServer.address();
+assert.ok(lightweightAddress && typeof lightweightAddress === "object");
+const lightweightOptions = {
+  systemPrompt: "LIGHTWEIGHT_SYSTEM_PROMPT",
+  model: "fixture",
+  baseUrl: `http://127.0.0.1:${lightweightAddress.port}/v1`,
+  apiKey: "fixture-key",
+  tools: [],
+};
+const lightweightEventFacade = createPiAgentFacade(lightweightOptions);
+for await (const _event of lightweightEventFacade.streamPiEvents("轻量事件接口问题", { deadlineMs: 10_000 })) {}
+assert.ok(
+  lightweightRequests[0]?.messages?.some(message => message.role === "system" && String(message.content).includes("LIGHTWEIGHT_SYSTEM_PROMPT")),
+  "streamPiEvents 必须保留 Agent 初始化时的系统提示",
+);
+
+const lightweightStreamFacade = createPiAgentFacade(lightweightOptions);
+for await (const _entry of lightweightStreamFacade.stream({
+  messages: [new HumanMessage("轻量历史上下文"), new HumanMessage("轻量 stream 接口问题")],
+}, { deadlineMs: 10_000 })) {}
+assert.ok(
+  lightweightRequests[1]?.messages?.some(message => message.role === "system" && String(message.content).includes("LIGHTWEIGHT_SYSTEM_PROMPT")),
+  "stream 必须保留 Agent 初始化时的系统提示",
+);
+assert.ok(
+  lightweightRequests[1]?.messages?.some(message => message.role === "user" && String(message.content).includes("轻量历史上下文")),
+  "stream 必须同时保留调用方传入的历史上下文",
+);
+lightweightServer.close();
+await once(lightweightServer, "close");
 
 console.log("Pi MCP plugin tests passed");

@@ -48,6 +48,60 @@ assertEqual(prodSql?.reason, "prod_sql_required", "should parse prod sql reason"
 assertEqual(buildHumanLoopReply(prodSql!).includes("我无法直接查询生产库"), true, "prod sql reply should explain boundary");
 assertEqual(buildHumanLoopReply(prodSql!).includes("SELECT id, status FROM order_info"), true, "prod sql reply should include SQL");
 
+const commentHeaderSql = `-- 需要你提供：订单号（@sub_id，当前为 4283392）
+DECLARE @sub_id BIGINT = 4283392;
+
+-- 1. 整单退单主表
+SELECT t.id, t.sub_id, t.tuikuanM
+FROM dbo.shouhou_tuihuan t WITH(NOLOCK)
+WHERE t.sub_id = @sub_id
+ORDER BY t.id;
+
+-- 2. 整单退款金额合计
+SELECT COUNT(1), SUM(t.tuikuanM)
+FROM dbo.shouhou_tuihuan t WITH(NOLOCK)
+WHERE t.sub_id = @sub_id;`;
+const readOnlyBatch = detectHumanLoopRequest(JSON.stringify({
+  human_loop: {
+    reason: "prod_sql_required",
+    sql: commentHeaderSql,
+    resume_instruction: "拿到结果后按顺序核对。",
+    context_snapshot: {
+      user_question: "订单 4283392 做账金额与退款金额有差额",
+      known_facts: ["退单主表字段语义已核实"],
+      missing_facts: ["整单退款金额合计"],
+    },
+  },
+}));
+assertEqual(readOnlyBatch?.reason, "prod_sql_required", "comment header and DECLARE batch should be parsed");
+assertEqual(buildHumanLoopReply(readOnlyBatch!).includes("DECLARE @sub_id BIGINT"), true, "comment header and DECLARE batch reply should include SQL");
+
+for (const safeSql of ["-- 说明\nSELECT 1;", "DECLARE @sub_id BIGINT = 1;\nSELECT 1;", "SET NOCOUNT ON;\nSELECT 1;"]) {
+  const safeRequest = detectHumanLoopRequest(JSON.stringify({
+    human_loop: {
+      reason: "prod_sql_required",
+      sql: safeSql,
+      resume_instruction: "继续",
+      context_snapshot: { user_question: "验证", known_facts: [], missing_facts: [] },
+    },
+  }));
+  assertEqual(safeRequest !== null, true, `read-only sql should be accepted: ${safeSql}`);
+}
+
+const camelCaseContext = detectHumanLoopRequest(JSON.stringify({
+  human_loop: {
+    reason: "clarification_required",
+    question: "请确认是全部订单还是个别订单？",
+    resume_instruction: "用户确认范围后继续排查。",
+    contextSnapshot: {
+      userQuestion: "订单状态不对",
+      knownFacts: [],
+      missingFacts: ["范围"],
+    },
+  },
+}));
+assertEqual(camelCaseContext?.reason, "clarification_required", "camelCase contextSnapshot userQuestion should be parsed");
+
 const unsafeSql = detectHumanLoopRequest(JSON.stringify({
   human_loop: {
     reason: "prod_sql_required",
@@ -62,6 +116,18 @@ const unsafeSql = detectHumanLoopRequest(JSON.stringify({
 }));
 
 assertEqual(unsafeSql, null, "unsafe SQL should be rejected");
+
+for (const unsafeBatchSql of ["SELECT 1;\nDROP TABLE order_info;", "DECLARE @x INT;\nEXEC sp_who;"]) {
+  const unsafeBatch = detectHumanLoopRequest(JSON.stringify({
+    human_loop: {
+      reason: "prod_sql_required",
+      sql: unsafeBatchSql,
+      resume_instruction: "继续处理",
+      context_snapshot: { user_question: "验证", known_facts: [], missing_facts: [] },
+    },
+  }));
+  assertEqual(unsafeBatch, null, `unsafe batch SQL should be rejected: ${unsafeBatchSql}`);
+}
 
 const resume = buildHumanLoopResumeContent(prodSql!, "id,status\n123,已支付");
 assertEqual(resume.includes("【Human Loop 恢复】"), true, "resume should include marker");

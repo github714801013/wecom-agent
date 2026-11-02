@@ -308,6 +308,59 @@ assert.deepEqual(
   "用户明确只查某仓库时，当次查询必须携带该 repo",
 );
 
+// human_loop 协议必须渲染为可读回复，不得把原始 JSON 直接发给用户
+const humanLoopBot: BotConfig = {
+  name: "pi-human-loop-render-test",
+  botId: "pi-human-loop-render-bot",
+  secret: "test-secret",
+  wsUrl: "ws://test.invalid",
+  mcpHeaders: {},
+};
+const humanLoopClient = new FakeWsClient();
+const humanLoopPayload = JSON.stringify({
+  human_loop: {
+    reason: "prod_sql_required",
+    sql: "-- 需要你提供：订单号\nDECLARE @sub_id BIGINT = 4283392;\nSELECT t.id FROM dbo.shouhou_tuihuan t WHERE t.sub_id = @sub_id;",
+    resume_instruction: "拿到结果后按顺序核对。",
+    context_snapshot: { user_question: "排查订单差额", known_facts: [], missing_facts: ["退款明细"] },
+  },
+});
+await startBot(humanLoopBot, humanLoopClient as unknown as WSClient, {
+  judgeSensitiveRequestByModel: async () => ({ blocked: false, category: null, matchedCredentialTypes: [] }),
+  getAllMcpTools: async () => [{ name: "query", invoke: async () => "unused" }],
+  initializeAgent: async () => ({
+    async *streamPiEvents() {
+      yield { type: "turn_start" };
+      yield {
+        type: "agent_end",
+        messages: [{
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: humanLoopPayload }],
+        }],
+      };
+    },
+  } as any),
+} as any);
+await humanLoopClient.emitMessage({
+  headers: { req_id: "pi-human-loop-request" },
+  body: {
+    msgid: "pi-human-loop-request",
+    msgtype: "text",
+    text: { content: "生产数据请给我 SQL 验证" },
+    chattype: "single",
+    from: { userid: "pi-human-loop-user" },
+  },
+});
+const humanLoopAnswer = humanLoopClient.replies.filter(reply => reply.final).map(reply => reply.content).join("\n");
+assert.match(humanLoopAnswer, /我无法直接查询生产库/, "human_loop 协议必须渲染为可读 SQL 回复");
+assert.doesNotMatch(humanLoopAnswer, /"human_loop"/, "不得把 human_loop 原始 JSON 发给用户");
+assert.match(
+  humanLoopAnswer,
+  /SELECT t\.id FROM dbo\.shouhou_tuihuan t WHERE t\.sub_id = @sub_id;/,
+  "human_loop 回复不得被过程话术折叠拆碎 SQL",
+);
+
 // 时间预算耗尽：必须交付已确认要点，而不是只回一张失败卡片
 const timeoutBot: BotConfig = {
   name: "pi-timeout-path-test",

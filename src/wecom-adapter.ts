@@ -2608,12 +2608,14 @@ ${hypotheses}
         fullContent = "";
       }
 
+      let humanLoopReplyBuilt = false;
       if (fullContent) {
         const humanLoopRequest = detectHumanLoopRequest(fullContent);
         if (humanLoopRequest) {
           const storedRequest = toStoredHumanLoopRequest(humanLoopRequest, body.msgid);
           sessionManager.setPendingHumanLoop(sessionKey, storedRequest);
           fullContent = buildHumanLoopReply(storedRequest);
+          humanLoopReplyBuilt = true;
         } else if (activePendingHumanLoop) {
           sessionManager.clearPendingHumanLoop(sessionKey);
         }
@@ -2621,7 +2623,11 @@ ${hypotheses}
       }
 
       // 发送最终结果
-      fullContent = collapseProgressUpdates(stripEmptyProtocolContent(fullContent));
+      fullContent = stripEmptyProtocolContent(fullContent);
+      // human_loop 回复由代码生成，不得再经过过程话术折叠，否则按句号切分会拆碎 SQL。
+      if (!humanLoopReplyBuilt) {
+        fullContent = collapseProgressUpdates(fullContent);
+      }
       if (!fullContent) {
         if (currentTask.cancelled || requestAbortController.signal.aborted || shouldStopCurrentTask()) {
           finishRequestTiming("cancelled", requestReplyAckFailed ? "reply_ack_timeout" : "task_cancelled");

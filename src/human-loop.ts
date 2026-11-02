@@ -27,8 +27,9 @@ export interface StoredHumanLoopRequest extends HumanLoopRequest {
 }
 
 const HUMAN_LOOP_TTL_MS = 30 * 60 * 1000;
-const SAFE_SQL_START = /^(select|show|explain)\b/i;
+const SAFE_SQL_START = /^(select|show|explain|declare|set)\b/i;
 const UNSAFE_SQL_KEYWORDS = /\b(update|delete|insert|truncate|drop|alter|create|replace|grant|revoke|merge|call)\b/i;
+const SQL_LEADING_COMMENT = /^(?:--[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)\s*/;
 
 function normalizeHumanLoop(raw: any): HumanLoopRequest | null {
   const source = raw?.human_loop ?? raw?.humanLoop ?? raw;
@@ -40,7 +41,11 @@ function normalizeHumanLoop(raw: any): HumanLoopRequest | null {
   }
 
   const context = source.context_snapshot ?? source.contextSnapshot;
-  if (!context || typeof context !== "object" || typeof context.user_question !== "string") {
+  if (!context || typeof context !== "object") {
+    return null;
+  }
+  const userQuestion = context.user_question ?? context.userQuestion;
+  if (typeof userQuestion !== "string") {
     return null;
   }
 
@@ -48,7 +53,7 @@ function normalizeHumanLoop(raw: any): HumanLoopRequest | null {
     reason,
     resumeInstruction: String(source.resume_instruction ?? source.resumeInstruction ?? ""),
     contextSnapshot: {
-      userQuestion: context.user_question ?? context.userQuestion,
+      userQuestion,
       knownFacts: Array.isArray(context.known_facts ?? context.knownFacts)
         ? (context.known_facts ?? context.knownFacts).map(String)
         : [],
@@ -107,9 +112,21 @@ export function detectHumanLoopRequest(text: string): HumanLoopRequest | null {
   return jsonObject?.[0] ? parseJsonCandidate(jsonObject[0]) : null;
 }
 
+function stripLeadingSqlComments(statement: string) {
+  let remaining = statement.trim();
+  while (true) {
+    const stripped = remaining.replace(SQL_LEADING_COMMENT, "");
+    if (stripped === remaining) return remaining;
+    remaining = stripped;
+  }
+}
+
 export function isSafeReadOnlySql(sql: string) {
   const normalized = sql.trim().replace(/;+\s*$/g, "");
-  return SAFE_SQL_START.test(normalized) && !UNSAFE_SQL_KEYWORDS.test(normalized);
+  if (!normalized || UNSAFE_SQL_KEYWORDS.test(normalized)) return false;
+  // 按分号朴素切分：字符串或块注释内的分号只会导致误拒，不会放行危险语句。
+  const statements = normalized.split(";").map(stripLeadingSqlComments).filter(Boolean);
+  return statements.length > 0 && statements.every(statement => SAFE_SQL_START.test(statement));
 }
 
 export function toStoredHumanLoopRequest(
